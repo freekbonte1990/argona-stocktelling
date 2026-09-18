@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import type { Location } from "../../domain/types";
 import { computeSessionProgress } from "../../domain/progress";
-import { countSessionService } from "../../application/container";
 import { LocationCard } from "../components/LocationCard";
 import { ProgressBar } from "../components/ProgressBar";
 import { BigButton } from "../components/BigButton";
@@ -11,13 +10,18 @@ import { SESSION_TYPE_LABELS } from "../sessionTypeLabels";
 interface LocationOverviewPageProps {
   sessionId: string;
   onOpenLocation: (locationId: string) => void;
-  onSessionCompleted: () => void;
+  /**
+   * Naar het reviewscherm (spec v0.2 §1): altijd beschikbaar, ook als de
+   * telling nog niet volledig is — het reviewscherm toont dan zelf de
+   * waarschuwing en blokkeert enkel het effectieve afronden (§4).
+   */
+  onOpenReview: () => void;
 }
 
 export function LocationOverviewPage({
   sessionId,
   onOpenLocation,
-  onSessionCompleted,
+  onOpenReview,
 }: LocationOverviewPageProps) {
   const session = useSession(sessionId);
   const office = useOffice(session?.officeId);
@@ -31,10 +35,6 @@ export function LocationOverviewPage({
   if (!session || !office || !progress) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
   }
-
-  const allDone =
-    progress.totalUniqueArticles > 0 &&
-    progress.completedUniqueArticles === progress.totalUniqueArticles;
 
   return (
     <div className="stack">
@@ -59,17 +59,9 @@ export function LocationOverviewPage({
           );
         })}
       </div>
-      {allDone && session.status === "ACTIVE" && (
-        <BigButton
-          variant="secondary"
-          onClick={async () => {
-            await countSessionService.completeSession(session.id);
-            onSessionCompleted();
-          }}
-        >
-          Telling afronden
-        </BigButton>
-      )}
+      <BigButton variant="secondary" onClick={onOpenReview}>
+        Controleren
+      </BigButton>
     </div>
   );
 }

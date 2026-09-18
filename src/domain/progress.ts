@@ -1,6 +1,19 @@
 import type { CountEntry, Location, LocationProgress, SessionProgress } from "./types";
 
 /**
+ * Eén artikel is pas "volledig geteld" als er minstens één CountEntry voor
+ * bestaat binnen de sessie EN al die entries `counted: true` zijn. Een
+ * artikel zonder enige entry (nog nooit ergens geteld) telt NOOIT als
+ * volledig geteld — dit is de kern van de "niet-geteld mag nooit als 0"-
+ * regel (spec v0.2 §3) en wordt hier centraal gehouden zodat
+ * `computeSessionProgress` en `domain/review.ts#computeSessionReview` exact
+ * dezelfde definitie gebruiken.
+ */
+export function isArticleFullyCounted(entries: CountEntry[] | undefined): boolean {
+  return !!entries && entries.length > 0 && entries.every((entry) => entry.counted);
+}
+
+/**
  * Berekent voortgang van een telling.
  *
  * LET OP (zie ook spec §8): een artikel kan op meerdere locaties tegelijk
@@ -40,8 +53,7 @@ export function computeSessionProgress(
 
   let completedUniqueArticles = 0;
   for (const articleId of articleIds) {
-    const articleEntries = entriesByArticle.get(articleId);
-    if (articleEntries && articleEntries.length > 0 && articleEntries.every((e) => e.counted)) {
+    if (isArticleFullyCounted(entriesByArticle.get(articleId))) {
       completedUniqueArticles += 1;
     }
   }

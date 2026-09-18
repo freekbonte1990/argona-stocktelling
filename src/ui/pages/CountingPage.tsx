@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Article } from "../../domain/types";
 import { sortArticlesForLocation } from "../../domain/sorting";
 import { requiresOutOfScopeConfirmation } from "../../domain/sessionScope";
@@ -18,9 +18,17 @@ import {
 interface CountingPageProps {
   sessionId: string;
   locationId: string;
+  /**
+   * Artikel om bij het openen naar toe te scrollen — gebruikt door de
+   * "Hertellen"-navigatie vanuit het reviewscherm (spec v0.2 §3: "gebruiker
+   * moet vanuit review terug naar het artikel kunnen om te hertellen").
+   * Beïnvloedt geen filters: het artikel heeft per definitie al een entry op
+   * deze locatie, en zit dus altijd in de standaardweergave.
+   */
+  focusArticleId?: string;
 }
 
-export function CountingPage({ sessionId, locationId }: CountingPageProps) {
+export function CountingPage({ sessionId, locationId, focusArticleId }: CountingPageProps) {
   const session = useSession(sessionId);
   const office = useOffice(session?.officeId);
   const officeArticles = useArticles(session?.officeId) ?? [];
@@ -108,6 +116,16 @@ export function CountingPage({ sessionId, locationId }: CountingPageProps) {
     () => sortArticlesForLocation(filtered, expectedArticleIds),
     [filtered, expectedArticleIds],
   );
+
+  useEffect(() => {
+    if (!focusArticleId) return;
+    if (!sorted.some((a) => a.id === focusArticleId)) return;
+    requestAnimationFrame(() => {
+      cardRefs.current.get(focusArticleId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    // Enkel bij het openen van dit scherm scrollen, niet bij elke herrender
+    // (bv. na het intikken van een aantal) — bewust enkel op focusArticleId.
+  }, [focusArticleId]);
 
   if (!session || !office || !location) {
     return <p className="screen-subtitle">Bezig met laden...</p>;

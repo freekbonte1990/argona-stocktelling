@@ -1,4 +1,4 @@
-# Architectuur — Argona Stocktelling (v0.1 + v0.1.1 hardening)
+# Architectuur — Argona Stocktelling (v0.1 + v0.1.1 hardening + v0.2)
 
 ## Doel van dit document
 
@@ -18,7 +18,7 @@ Alles hieronder is daarop ingericht.
 src/
   domain/            <- pure business-regels, geen enkele afhankelijkheid
   application/
-    ports/            <- interfaces (StockSource, CountingRepository)
+    ports/            <- interfaces (StockSource, CountingRepository, StockResultExporter)
     services/         <- orkestratie, gebruikt enkel ports + domain
   adapters/
     excel/            <- StockSource-implementatie bovenop een Excelbestand
@@ -77,6 +77,50 @@ rechtstreeks in React-componenten).
 
 Deze services kennen geen React, Excel of Dexie — enkel de ports.
 
+- `ExportService` (v0.2): orkestreert de resultatenexport — haalt sessie,
+  kantoor, alle artikelen en tellingen op via `CountingRepository`, berekent
+  de review met `domain/review.ts#computeSessionReview`, en geeft dat
+  resultaat door aan een `StockResultExporter`. Kent zelf geen Excel.
+
+### application/ports/ (vervolg — v0.2)
+
+- `StockResultExporter`: `exportResults(input) -> ExportedFile`. Alles wat
+  weet "in welk bestandsformaat komt het resultaat terecht" zit achter deze
+  interface, net zoals `StockSource` dat doet voor import. De input
+  (`office`, `session`, `review: SessionReviewSummary`, `allArticles`) is
+  altijd al volledig berekend domeindata — een implementatie hiervan mag dit
+  enkel naar een bestandsformaat wegschrijven, nooit zelf iets berekenen
+  (zie `domain/review.ts` hieronder). Vandaag: `ExcelStockResultExporter`.
+  Een latere `EBuddyStockResultExporter` (in bv. `adapters/ebuddy/`)
+  implementeert dezelfde interface; enkel `application/container.ts`
+  wijzigt.
+
+### domain/review.ts (v0.2)
+
+Alle resultaatberekening voor het reviewscherm en de export: totalen per
+sessie, resultaat per artikel (vorige/nieuwe telling, verschillen in aantal
+en euro), de filters Alles/Verschil/Controle/Niet geteld, of een sessie
+afgerond mag worden, en welke "vorige telling" een artikel bij de volgende
+import moet krijgen (`buildNextPreviousCounts`). Bouwt voort op de bestaande
+kernregel uit `progress.ts#isArticleFullyCounted` (0-versus-null). Twee
+bewust gedocumenteerde aannames, met impact op later werk:
+
+- **"Controle"-filter**: geen exacte definitie meegekregen in de opdracht.
+  Geïmplementeerd als "dit artikel heeft een notitie" — vandaag enkel gezet
+  door de bestaande "buiten sessiescope"-bevestiging (v0.1.1 §3). Zodra er
+  een striktere/andere definitie nodig is (bv. een drempelwaarde op het
+  verschil), is dat één predicate in `buildArticleReviewResult` om aan te
+  passen.
+- **Afronden blijft absoluut**: `CountSessionService.completeSession` gooit
+  `SessionIncompleteError` zolang niet elk scope-artikel volledig geteld is,
+  zonder "force"-parameter. Bewust: als een latere sprint toch een bewuste
+  "afronden met openstaande artikelen"-uitzondering nodig heeft, is dat een
+  nieuwe, expliciete beslissing — geen stille bypass.
+
+Handmatige buiten-scope-toevoegingen (v0.1.1 §3) verschijnen wel in de
+resultatenlijst (ze zijn al geteld) maar tellen nooit mee in de
+scope-totalen en blokkeren nooit het afronden.
+
 ### adapters/excel/
 
 Leest een `.xlsx`-bestand met de vaste sheets TELLING / ARTIKEL / CONFIG.
@@ -90,6 +134,22 @@ was. Een latere `EBuddyStockSource` (in bv. `adapters/ebuddy/`) implementeert
 dezelfde `StockSource`-interface en de rest van de app hoeft niet te
 veranderen — enkel `application/container.ts` (en het importscherm, dat een
 concrete bron aanmaakt) wijzigen.
+
+**`ExcelStockResultExporter` (v0.2)** implementeert `StockResultExporter` en
+is het spiegelbeeld hiervan bij export: het schrijft de reeds berekende
+`SessionReviewSummary` (uit `domain/review.ts`) naar de gestandaardiseerde
+sheets TELLING / ARTIKEL / CONFIG / NIEUWE_ARTIKELEN, met dezelfde
+header-constantes als de parser (`ARTIKEL_REQUIRED_HEADERS`,
+`TELLING_REQUIRED_HEADERS`) zodat een geëxporteerd bestand door de eigen
+importer herkend wordt. TELLING en ARTIKEL bevatten *alle* artikelen van het
+kantoor (niet enkel de sessiescope): een kwartaalartikel dat deze maand niet
+meetelt, mag zijn "vorige telling" niet verliezen bij de volgende import
+(`domain/review.ts#buildNextPreviousCounts`). De bestandsnaam
+(`shared/exportFileName.ts#buildExportFileName`, bv.
+`"2026-09-30 - Stocktelling Lokeren.xlsx"`) is pure formattering, bewust
+buiten `domain/` gehouden. Deze adapter berekent zelf niets — enkel
+layout/schrijfwerk, conform spec v0.2 §5 ("schrijf geen businesslogica
+rechtstreeks in de Excel-adapter").
 
 ### adapters/storage/
 

@@ -5,6 +5,7 @@ import { HomePage } from "./ui/pages/HomePage";
 import { NewSessionPage } from "./ui/pages/NewSessionPage";
 import { LocationOverviewPage } from "./ui/pages/LocationOverviewPage";
 import { CountingPage } from "./ui/pages/CountingPage";
+import { ReviewPage } from "./ui/pages/ReviewPage";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
 import { useAllOffices, useOffice, useSession } from "./ui/hooks/useLiveData";
@@ -15,7 +16,8 @@ type Route =
   | { screen: "home"; officeId: string }
   | { screen: "newSession"; officeId: string }
   | { screen: "locationOverview"; sessionId: string }
-  | { screen: "counting"; sessionId: string; locationId: string }
+  | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
+  | { screen: "review"; sessionId: string }
   | { screen: "articles"; officeId: string }
   | { screen: "settings"; officeId: string };
 
@@ -84,7 +86,9 @@ function RouteHeader({
       : undefined;
   const office = useOffice(directOfficeId);
   const session = useSession(
-    route.screen === "locationOverview" || route.screen === "counting" ? route.sessionId : undefined,
+    route.screen === "locationOverview" || route.screen === "counting" || route.screen === "review"
+      ? route.sessionId
+      : undefined,
   );
   const sessionOffice = useOffice(session?.officeId);
 
@@ -137,6 +141,21 @@ function RouteHeader({
       />
     );
   }
+  if (route.screen === "review") {
+    return (
+      <AppHeader
+        breadcrumb={`${sessionOffice?.name ?? ""} — controle`}
+        onBack={() => {
+          if (!session) return;
+          if (session.status === "ACTIVE") {
+            onNavigate({ screen: "locationOverview", sessionId: route.sessionId });
+          } else {
+            onNavigate({ screen: "home", officeId: session.officeId });
+          }
+        }}
+      />
+    );
+  }
   // counting
   const location = sessionOffice?.locations.find((l) => l.id === route.locationId);
   return (
@@ -182,6 +201,7 @@ function RouteBody({
             onNavigate({ screen: "home", officeId });
           }}
           onImportNewOffice={() => onNavigate({ screen: "import", fromOfficeId: route.officeId })}
+          onOpenReview={(sessionId) => onNavigate({ screen: "review", sessionId })}
         />
       );
     case "newSession":
@@ -198,14 +218,30 @@ function RouteBody({
           onOpenLocation={(locationId) =>
             onNavigate({ screen: "counting", sessionId: route.sessionId, locationId })
           }
-          onSessionCompleted={async () => {
+          onOpenReview={() => onNavigate({ screen: "review", sessionId: route.sessionId })}
+        />
+      );
+    case "counting":
+      return (
+        <CountingPage
+          sessionId={route.sessionId}
+          locationId={route.locationId}
+          focusArticleId={route.focusArticleId}
+        />
+      );
+    case "review":
+      return (
+        <ReviewPage
+          sessionId={route.sessionId}
+          onRecount={(locationId, articleId) =>
+            onNavigate({ screen: "counting", sessionId: route.sessionId, locationId, focusArticleId: articleId })
+          }
+          onCompleted={async () => {
             const session = await countingRepository.getSession(route.sessionId);
             if (session) onNavigate({ screen: "home", officeId: session.officeId });
           }}
         />
       );
-    case "counting":
-      return <CountingPage sessionId={route.sessionId} locationId={route.locationId} />;
     case "articles":
       return <ArticlesPage officeId={route.officeId} />;
     case "settings":

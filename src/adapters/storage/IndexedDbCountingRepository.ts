@@ -67,6 +67,11 @@ export class IndexedDbCountingRepository implements CountingRepository {
       .first();
   }
 
+  async getSessionsForOffice(officeId: string): Promise<CountSession[]> {
+    const sessions = await this.db.sessions.where("officeId").equals(officeId).toArray();
+    return sessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
   async completeSession(sessionId: string): Promise<void> {
     await this.db.sessions.update(sessionId, {
       status: "COMPLETED",

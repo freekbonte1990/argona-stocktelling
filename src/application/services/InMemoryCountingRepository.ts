@@ -55,6 +55,11 @@ export class InMemoryCountingRepository implements CountingRepository {
       (s) => s.officeId === officeId && s.status === "ACTIVE",
     );
   }
+  async getSessionsForOffice(officeId: string): Promise<CountSession[]> {
+    return Array.from(this.sessions.values())
+      .filter((s) => s.officeId === officeId)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
   async completeSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {

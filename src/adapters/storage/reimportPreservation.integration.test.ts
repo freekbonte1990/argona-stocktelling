@@ -196,6 +196,13 @@ describe("Herimport van een kantoor met bestaande locatienamen, assignments en e
       locationId: "antwerpen:loc-3",
       quantity: 12,
     });
+    // A1 moet ook geteld zijn, anders is de sessie niet afrondbaar (spec v0.2 §4).
+    await countingService.recordCount({
+      session,
+      articleId: "antwerpen:A1",
+      locationId: "antwerpen:loc-1",
+      quantity: 4,
+    });
     await sessionService.completeSession(session.id);
 
     // Nieuwe import zonder A3.

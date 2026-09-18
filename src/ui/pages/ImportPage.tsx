@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { importService } from "../../application/container";
 import type { ImportPreview, ImportSummary } from "../../application/services/ImportService";
 import { BigButton } from "../components/BigButton";
+import { SummaryTile } from "../components/SummaryTile";
 
 interface ImportPageProps {
   onImported: (officeId: string) => void;
@@ -157,11 +158,3 @@ export function ImportPage({ onImported, onCancel }: ImportPageProps) {
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="summary-tile">
-      <div className="summary-tile__value">{value}</div>
-      <div className="summary-tile__label">{label}</div>
-    </div>
-  );
-}

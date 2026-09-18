@@ -69,3 +69,19 @@ export function useAssignments(officeId: string | undefined) {
 export function useSelectedOfficeId() {
   return useLiveQuery(async () => (await db.appState.get("singleton"))?.selectedOfficeId, []);
 }
+
+/** Alle sessies van een kantoor (actief + afgerond), nieuwste eerst — voor "vorige tellingen" op HomePage. */
+export function useSessionsForOffice(officeId: string | undefined) {
+  return useLiveQuery(
+    () =>
+      officeId
+        ? db.sessions
+            .where("officeId")
+            .equals(officeId)
+            .toArray()
+            .then((sessions) => sessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt)))
+        : [],
+    [officeId],
+    [],
+  );
+}

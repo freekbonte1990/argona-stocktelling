@@ -36,6 +36,11 @@ export interface CountingRepository {
   createSession(session: CountSession): Promise<void>;
   getSession(sessionId: string): Promise<CountSession | undefined>;
   getActiveSession(officeId: string): Promise<CountSession | undefined>;
+  /**
+   * Alle sessies van een kantoor (actief + afgerond), nieuwste eerst.
+   * Nodig zodat afgeronde sessies raadpleegbaar blijven (spec v0.2 §4).
+   */
+  getSessionsForOffice(officeId: string): Promise<CountSession[]>;
   completeSession(sessionId: string): Promise<void>;
 
   saveCountEntry(entry: CountEntry): Promise<void>;

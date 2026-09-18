@@ -1,21 +1,28 @@
 import { IndexedDbCountingRepository } from "../adapters/storage/IndexedDbCountingRepository";
+import { ExcelStockResultExporter } from "../adapters/excel/ExcelStockResultExporter";
 import { ImportService } from "./services/ImportService";
 import { CountSessionService } from "./services/CountSessionService";
 import { CountingService } from "./services/CountingService";
+import { ExportService } from "./services/ExportService";
 
 /**
- * Eenvoudige, handmatige dependency-"container" voor v0.1: één gedeelde
- * repository-instantie (vandaag IndexedDB), en de services die daarop
- * bouwen. UI-schermen importeren enkel deze services, nooit Dexie of xlsx
- * rechtstreeks (behalve de importpagina, die een StockSource-adapter
+ * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
+ * gedeelde repository-instantie (vandaag IndexedDB), en de services die
+ * daarop bouwen. UI-schermen importeren enkel deze services, nooit Dexie of
+ * xlsx rechtstreeks (behalve de importpagina, die een StockSource-adapter
  * aanmaakt — zie ui/pages/ImportPage.tsx).
  *
  * Wanneer eBuddy-adapters er zijn, verandert enkel deze file (en de
- * importpagina): repository wordt bv. `new EBuddyCountingRepository(...)`.
+ * import-/exportpagina's): repository wordt bv.
+ * `new EBuddyCountingRepository(...)`, en de exporter
+ * `new EBuddyStockResultExporter(...)` — zie StockResultExporter-port en
+ * docs/ARCHITECTURE.md.
  */
 const repository = new IndexedDbCountingRepository();
+const resultExporter = new ExcelStockResultExporter();
 
 export const importService = new ImportService(repository);
 export const countSessionService = new CountSessionService(repository);
 export const countingService = new CountingService(repository);
+export const exportService = new ExportService(repository, resultExporter);
 export const countingRepository = repository;
