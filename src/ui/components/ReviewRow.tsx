@@ -1,21 +1,47 @@
+import { useState } from "react";
 import type { ArticleReviewResult } from "../../domain/review";
 import type { Location } from "../../domain/types";
 import { formatCount, formatEuro, formatSignedCount, formatSignedEuro } from "../../shared/format";
+import { BigButton } from "./BigButton";
 
 interface ReviewRowProps {
   result: ArticleReviewResult;
   locations: Location[];
-  /** Navigeer terug naar het telscherm van deze locatie, gefocust op dit artikel (spec §3). */
+  /** Navigeer naar het telscherm van deze locatie, gefocust op dit artikel (spec §3, en de v0.2.1-fix hieronder). */
   onRecount: (locationId: string, articleId: string) => void;
 }
 
 /**
- * Eén artikelrij op het reviewscherm (spec v0.2 §2): vorige telling, telling
- * per locatie, nieuwe totale telling, verschil, kostprijs, verschil in euro,
- * opmerking — plus "Hertellen"-links per locatie die al een entry heeft.
+ * Eén artikelrij op het reviewscherm (spec v0.2 §2, met een blokkerende
+ * UX-fix voor v0.2.1): vorige telling, telling per locatie, nieuwe totale
+ * telling, verschil, kostprijs, verschil in euro, opmerking.
+ *
+ * FIX (v0.2.1-hotfix): voordien kreeg een artikel enkel een knop wanneer er
+ * al een CountEntry op een locatie bestond ("Hertellen"). Een volledig
+ * ongeteld artikel (nog geen enkele entry, dus ook geen enkele locatie met
+ * `hasEntry`) had daardoor GEEN manier om vanuit Review geteld te worden —
+ * een blokkerende regressie, want Review moet elke ontbrekende telling
+ * direct kunnen oplossen, niet enkel rapporteren. Nu:
+ *   - "Tellen" verschijnt zodra het artikel niet volledig geteld is, en
+ *     opent een locatiekeuze (ook zonder bestaande entry).
+ *   - een locatiechip zonder entry ("—") is zelf ook klikbaar en telt
+ *     meteen op die locatie.
+ *   - is er al minstens één locatie geteld, dan komt er ook "+ Andere
+ *     locatie" bij (naast "Hertellen" per al-geteld locatie).
  */
 export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
+  const [pickingLocation, setPickingLocation] = useState(false);
   const locationById = new Map(locations.map((l) => [l.id, l]));
+  const activeLocations = locations.filter((l) => l.active);
+  const hasAnyCountedLocation = result.perLocation.some((loc) => loc.counted);
+  const showTellenButton = !result.fullyCounted && !result.isManualAddition;
+  const showAndereLocatieButton = hasAnyCountedLocation && !result.isManualAddition;
+
+  function chooseLocation(locationId: string) {
+    setPickingLocation(false);
+    onRecount(locationId, result.articleId);
+  }
+
   const rowClass = [
     "review-row",
     !result.fullyCounted && !result.isManualAddition ? "review-row--not-counted" : "",
@@ -52,10 +78,21 @@ export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
         {result.perLocation.map((loc) => {
           const location = locationById.get(loc.locationId);
           const display = loc.counted ? formatCount(loc.quantity) : loc.hasEntry ? "nog te tellen" : "—";
+          const canCountHere = !loc.hasEntry && (location?.active ?? false);
           return (
             <span key={loc.locationId} className="review-row__location">
               {location?.name ?? `Locatie ${loc.locationNumber}`}:{" "}
-              <span className="review-row__location-value">{display}</span>
+              {canCountHere ? (
+                <button
+                  type="button"
+                  className="review-row__location-value review-row__location-value--clickable"
+                  onClick={() => onRecount(loc.locationId, result.articleId)}
+                >
+                  {display}
+                </button>
+              ) : (
+                <span className="review-row__location-value">{display}</span>
+              )}
               {loc.hasEntry && (
                 <button
                   type="button"
@@ -69,6 +106,42 @@ export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
           );
         })}
       </div>
+
+      {(showTellenButton || showAndereLocatieButton) && (
+        <div className="filter-row">
+          {showTellenButton && (
+            <button type="button" className="chip chip--active" onClick={() => setPickingLocation(true)}>
+              Tellen
+            </button>
+          )}
+          {showAndereLocatieButton && (
+            <button type="button" className="chip" onClick={() => setPickingLocation(true)}>
+              + Andere locatie
+            </button>
+          )}
+        </div>
+      )}
+
+      {pickingLocation && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>Kies een locatie om te tellen</p>
+            <p className="screen-subtitle" style={{ margin: 0 }}>
+              {result.article.description} ({result.article.articleNumber})
+            </p>
+            <div className="stack stack--tight">
+              {activeLocations.map((location) => (
+                <BigButton key={location.id} variant="secondary" onClick={() => chooseLocation(location.id)}>
+                  {location.name}
+                </BigButton>
+              ))}
+            </div>
+            <BigButton variant="ghost" onClick={() => setPickingLocation(false)}>
+              Annuleren
+            </BigButton>
+          </div>
+        </div>
+      )}
 
       <div className="review-row__figures">
         <div>

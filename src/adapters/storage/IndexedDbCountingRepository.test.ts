@@ -11,8 +11,9 @@ const office: Office = {
   locations: [1, 2, 3, 4, 5].map((n) => ({
     id: `office-1:loc-${n}`,
     officeId: "office-1",
-    number: n as 1 | 2 | 3 | 4 | 5,
+    number: n,
     name: `Locatie ${n}`,
+    active: true,
   })),
 };
 
@@ -54,6 +55,7 @@ describe("IndexedDbCountingRepository (via fake-indexeddb)", () => {
       counted: true,
       countedAt: new Date().toISOString(),
       note: null,
+      resolution: "COUNTED",
     });
 
     const active = await repository.getActiveSession("office-1");

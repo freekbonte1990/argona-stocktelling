@@ -4,6 +4,8 @@ import { ImportService } from "./services/ImportService";
 import { CountSessionService } from "./services/CountSessionService";
 import { CountingService } from "./services/CountingService";
 import { ExportService } from "./services/ExportService";
+import { LocationAssignmentService } from "./services/LocationAssignmentService";
+import { NewArticleService } from "./services/NewArticleService";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -25,4 +27,6 @@ export const importService = new ImportService(repository);
 export const countSessionService = new CountSessionService(repository);
 export const countingService = new CountingService(repository);
 export const exportService = new ExportService(repository, resultExporter);
+export const locationAssignmentService = new LocationAssignmentService(repository);
+export const newArticleService = new NewArticleService(repository, locationAssignmentService, countingService);
 export const countingRepository = repository;

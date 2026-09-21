@@ -1,5 +1,5 @@
 import type { SessionReviewSummary } from "../../domain/review";
-import type { Article, CountSession, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, CountSession, Office } from "../../domain/types";
 
 /**
  * Alles wat een exporter nodig heeft om de resultaten van een AFGEWERKTE (of
@@ -14,6 +14,12 @@ export interface StockResultExportInput {
   review: SessionReviewSummary;
   /** Alle artikelen van het kantoor (niet enkel de sessiescope) — nodig om ARTIKEL/CONFIG volledig te reconstrueren. */
   allArticles: Article[];
+  /**
+   * Alle locatiekoppelingen van het kantoor (v0.2.1 correctieronde §3C) —
+   * nodig om in NIEUWE_ARTIKELEN de huidige locatie(s) van een tijdelijk
+   * artikel te tonen.
+   */
+  assignments: ArticleLocationAssignment[];
 }
 
 export interface ExportedFile {

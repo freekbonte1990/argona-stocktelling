@@ -161,6 +161,30 @@ button {
   cursor: not-allowed;
 }
 
+/*
+ * UX-fix (v0.2.1 correctieronde): een subtielere, secundaire actie op het
+ * telscherm ("+ Bestaand artikel opzoeken" / "Terug naar verwachte
+ * artikelen") — bewust GEEN volwaardige big-button, zodat ze niet even
+ * zwaar oogt als "+ Nieuw artikel gevonden" (die wél een echte, duidelijk
+ * zichtbare knop blijft).
+ */
+.text-link-button {
+  background: none;
+  border: none;
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-1);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: underline;
+  text-align: center;
+}
+
+.text-link-button:active {
+  color: var(--color-primary);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -229,6 +253,14 @@ button {
 .location-card__count {
   font-size: 1.1rem;
   color: var(--color-text-muted);
+}
+
+.location-card__status {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .location-card__done {
@@ -496,6 +528,16 @@ button {
   font-weight: 700;
 }
 
+.review-row__location-value--clickable {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  padding: 0;
+  min-height: 32px;
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
+
 .review-row__recount {
   border: none;
   background: transparent;
@@ -552,6 +594,225 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
+}
+
+.line-chart {
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+}
+
+.line-chart__axis {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.line-chart__line {
+  stroke: var(--color-primary);
+  stroke-width: 3;
+}
+
+.line-chart__dot {
+  fill: var(--color-primary);
+}
+
+.line-chart__label {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.line-chart__value {
+  fill: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.95rem;
+}
+
+.history-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.article-detail-field {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-1) 0;
+}
+
+.article-detail-field:last-child {
+  border-bottom: none;
+}
+
+.article-detail-field__label {
+  color: var(--color-text-muted);
+}
+
+.article-detail-field__value {
+  font-weight: 600;
+  text-align: right;
+}
+
+/*
+ * Bulk locatiebeheer op het Artikels-overzicht (v0.2.1): checkbox +
+ * compacte locatiechips per rij, en de bulkbalk die verschijnt zodra er
+ * iets geselecteerd is.
+ */
+.article-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+
+.article-row--selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.article-row__checkbox {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  margin-top: var(--space-1);
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.article-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.article-row__open {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.location-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-1);
+}
+
+.location-chip__remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 var(--space-1);
+  min-height: 28px;
+}
+
+.quick-add-panel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-primary-soft);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.bulk-bar__count {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.bulk-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/*
+ * v0.2.1 correctieronde §1: compacte toolbar boven het Artikels-overzicht
+ * (zoeken/sorteren/filters/nieuw artikel) i.p.v. permanente filterrijen.
+ */
+.articles-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.articles-toolbar__search {
+  flex: 2 1 220px;
+}
+
+.articles-toolbar__sort {
+  flex: 1 1 200px;
+}
+
+.articles-toolbar__filters {
+  flex: 0 0 auto;
+}
+
+.articles-toolbar__new {
+  flex: 0 0 auto;
+}
+
+/*
+ * Sticky bulkbalk (§1: "indien eenvoudig mogelijk"): CSS-only benadering.
+ * `top` is een pragmatische, gedocumenteerde aanname op basis van de vaste
+ * 2-regelige `.app-header` (padding + titel + subtitel) op de schermen waar
+ * deze balk voorkomt — geen exacte meting per schermgrootte, maar in de
+ * praktijk ruim voldoende omdat de balk zelf ook nog wat ruimte inneemt.
+ */
+.bulk-bar--sticky {
+  position: sticky;
+  top: 78px;
+  z-index: 9;
+}
+
+/* "Zonder locatie" (§2): visueel als een locatiekaart, maar met een
+ * gestippelde rand zodat meteen duidelijk is dat dit GEEN fysieke locatie
+ * is — puur een dynamische werklijst. */
+.location-card--without-location {
+  border-style: dashed;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-weight: 600;
 }
 
 @media (min-width: 700px) {

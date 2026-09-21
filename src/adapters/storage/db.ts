@@ -4,6 +4,7 @@ import type {
   ArticleLocationAssignment,
   CountEntry,
   CountSession,
+  LocationSessionStatus,
   Office,
 } from "../../domain/types";
 import type { ImportMeta } from "../../application/ports/CountingRepository";
@@ -26,6 +27,7 @@ export class AppDatabase extends Dexie {
   assignments!: Table<ArticleLocationAssignment, string>;
   importMeta!: Table<ImportMeta, string>;
   appState!: Table<AppStateRow, string>;
+  locationSessionStatuses!: Table<LocationSessionStatus, string>;
 
   constructor(name = "argona-stocktelling") {
     super(name);
@@ -41,6 +43,12 @@ export class AppDatabase extends Dexie {
     // kantoor laatst geselecteerd was, moet een refresh overleven.
     this.version(2).stores({
       appState: "id",
+    });
+    // v3 (v0.2.1): status per (sessie, locatie) — "✓ Locatie afgerond" en de
+    // "nergens aangetroffen"-betrouwbaarheidsgate. Puur additief, zoals
+    // gedocumenteerd in docs/ARCHITECTURE.md: geen bestaande tabel gewijzigd.
+    this.version(3).stores({
+      locationSessionStatuses: "id, sessionId, locationId, [sessionId+locationId]",
     });
   }
 }

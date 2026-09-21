@@ -5,13 +5,14 @@ import {
   filterReviewResults,
   isSessionReadyToComplete,
 } from "./review";
-import type { Article, CountEntry, CountSession, Location } from "./types";
+import type { Article, CountEntry, CountSession, Location, LocationSessionStatus } from "./types";
 
 const locations: Location[] = [1, 2, 3, 4, 5].map((n) => ({
   id: `office-1:loc-${n}`,
   officeId: "office-1",
-  number: n as 1 | 2 | 3 | 4 | 5,
+  number: n,
   name: `Locatie ${n}`,
+  active: true,
 }));
 
 function makeArticle(articleNumber: string, overrides: Partial<Article> = {}): Article {
@@ -38,7 +39,7 @@ function makeArticle(articleNumber: string, overrides: Partial<Article> = {}): A
 
 function makeEntry(
   articleId: string,
-  locationId: string,
+  locationId: string | null,
   overrides: Partial<CountEntry> = {},
 ): CountEntry {
   return {
@@ -50,12 +51,20 @@ function makeEntry(
     counted: false,
     countedAt: null,
     note: null,
+    resolution: "COUNTED",
     ...overrides,
   };
 }
 
 function makeSession(articleIds: string[]): Pick<CountSession, "articleIds"> {
   return { articleIds };
+}
+
+function makeLocationStatus(
+  locationId: string,
+  status: LocationSessionStatus["status"] = "COMPLETED",
+): LocationSessionStatus {
+  return { id: `session-1:${locationId}`, sessionId: "session-1", locationId, status, completedAt: null };
 }
 
 describe("computeSessionReview", () => {
@@ -208,16 +217,30 @@ describe("filterReviewResults", () => {
 });
 
 describe("isSessionReadyToComplete", () => {
-  it("false wanneer er nog niet-getelde artikelen zijn", () => {
+  const allLocationsCompletedStatuses = locations.map((l) => makeLocationStatus(l.id));
+
+  it("false wanneer er nog niet-getelde artikelen zijn (ook al zijn alle locaties afgerond)", () => {
     const article = makeArticle("A1");
-    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, []);
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      [],
+      allLocationsCompletedStatuses,
+    );
     expect(isSessionReadyToComplete(review)).toBe(false);
   });
 
-  it("true wanneer alle scope-artikelen volledig geteld zijn", () => {
+  it("true wanneer alle scope-artikelen volledig geteld zijn EN alle actieve locaties afgerond zijn", () => {
     const article = makeArticle("A1");
     const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
-    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, entries);
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allLocationsCompletedStatuses,
+    );
     expect(isSessionReadyToComplete(review)).toBe(true);
   });
 
@@ -233,8 +256,112 @@ describe("isSessionReadyToComplete", () => {
       [scopeArticle, manualArticle],
       locations,
       entries,
+      allLocationsCompletedStatuses,
     );
     expect(isSessionReadyToComplete(review)).toBe(true);
+  });
+
+  it("alle artikelen opgelost maar 1 locatie nog open -> niet afrondbaar (spec v0.2.1 §6)", () => {
+    const article = makeArticle("A1");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
+    // Locatie 5 blijft OPEN — alle andere locaties zijn afgerond.
+    const statuses = locations.filter((l) => l.id !== "office-1:loc-5").map((l) => makeLocationStatus(l.id));
+    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, entries, statuses);
+    expect(review.allLocationsCompleted).toBe(false);
+    expect(review.incompleteActiveLocations.map((l) => l.id)).toEqual(["office-1:loc-5"]);
+    expect(isSessionReadyToComplete(review)).toBe(false);
+  });
+
+  it("alle locaties afgerond maar 1 artikel onopgelost -> niet afrondbaar", () => {
+    const counted = makeArticle("A1");
+    const notCounted = makeArticle("A2");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2"]),
+      [counted, notCounted],
+      locations,
+      entries,
+      allLocationsCompletedStatuses,
+    );
+    expect(review.allLocationsCompleted).toBe(true);
+    expect(review.notCountedArticles).toBe(1);
+    expect(isSessionReadyToComplete(review)).toBe(false);
+  });
+
+  it("alles afgerond en opgelost -> wel afrondbaar", () => {
+    const article = makeArticle("A1");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allLocationsCompletedStatuses,
+    );
+    expect(isSessionReadyToComplete(review)).toBe(true);
+  });
+
+  it("een inactieve locatie blokkeert afronden niet, ook al is ze nooit afgerond", () => {
+    const inactiveLocations = locations.map((l, i) => (i === 0 ? { ...l, active: false } : l));
+    const article = makeArticle("A1");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
+    // Enkel de actieve locaties (index 1-4) worden afgerond; de inactieve (index 0) blijft OPEN.
+    const statuses = inactiveLocations.filter((l) => l.active).map((l) => makeLocationStatus(l.id));
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      inactiveLocations,
+      entries,
+      statuses,
+    );
+    expect(review.allLocationsCompleted).toBe(true);
+    expect(isSessionReadyToComplete(review)).toBe(true);
+  });
+
+  it("'Zonder locatie' (een expliciete voorraad-0-bevestiging zonder fysieke locatie) blokkeert locatie-afronding niet", () => {
+    const article = makeArticle("A1");
+    // CONFIRMED_ABSENT heeft bewust locationId=null — er is geen fysieke
+    // Location om af te ronden, en dat mag de sessie dus nooit blokkeren
+    // zolang de échte locaties zelf allemaal afgerond zijn.
+    const entries = [makeEntry("office-1:A1", null, { quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" })];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allLocationsCompletedStatuses,
+    );
+    expect(isSessionReadyToComplete(review)).toBe(true);
+  });
+
+  it("een afgeronde locatie die opnieuw geopend wordt, maakt de sessie opnieuw niet afrondbaar", () => {
+    const article = makeArticle("A1");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 0, counted: true })];
+    const readyReview = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allLocationsCompletedStatuses,
+    );
+    expect(isSessionReadyToComplete(readyReview)).toBe(true);
+
+    // Locatie 1 wordt heropend: haar status wordt weer OPEN (bv. via
+    // CountingService.reopenLocation) — computeSessionReview wordt altijd
+    // vers herberekend uit de actuele statussen, nooit gecached.
+    const statusesAfterReopen = [
+      makeLocationStatus("office-1:loc-1", "OPEN"),
+      ...allLocationsCompletedStatuses.slice(1),
+    ];
+    const reopenedReview = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      statusesAfterReopen,
+    );
+    expect(reopenedReview.allLocationsCompleted).toBe(false);
+    expect(isSessionReadyToComplete(reopenedReview)).toBe(false);
   });
 });
 
@@ -263,5 +390,97 @@ describe("buildNextPreviousCounts", () => {
     const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, entries);
     const next = buildNextPreviousCounts([article], review.results);
     expect(next.get("office-1:A1")).toBe(7);
+  });
+});
+
+describe("nergens aangetroffen (v0.2.1 §5)", () => {
+  it("allLocationsCompleted is false zolang niet elke actieve locatie COMPLETED is", () => {
+    const article = makeArticle("A1");
+    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, [], [
+      makeLocationStatus("office-1:loc-1"),
+    ]);
+    expect(review.allLocationsCompleted).toBe(false);
+  });
+
+  it("allLocationsCompleted is true zodra alle actieve locaties COMPLETED zijn", () => {
+    const article = makeArticle("A1");
+    const statuses = locations.map((l) => makeLocationStatus(l.id));
+    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, [], statuses);
+    expect(review.allLocationsCompleted).toBe(true);
+  });
+
+  it("totalActiveLocations/completedActiveLocationsCount/incompleteActiveLocations tonen de juiste voortgang (spec v0.2.1 §6-teller)", () => {
+    const article = makeArticle("A1");
+    const statuses = [locations[0], locations[1], locations[2]].map((l) => makeLocationStatus(l.id));
+    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, [], statuses);
+    expect(review.totalActiveLocations).toBe(5);
+    expect(review.completedActiveLocationsCount).toBe(3);
+    expect(review.incompleteActiveLocations.map((l) => l.name)).toEqual(["Locatie 4", "Locatie 5"]);
+  });
+
+  it("een inactieve locatie telt niet mee voor allLocationsCompleted", () => {
+    const inactiveLocations = locations.map((l, i) => (i === 0 ? { ...l, active: false } : l));
+    const article = makeArticle("A1");
+    const statuses = inactiveLocations.filter((l) => l.active).map((l) => makeLocationStatus(l.id));
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      inactiveLocations,
+      [],
+      statuses,
+    );
+    expect(review.allLocationsCompleted).toBe(true);
+  });
+
+  it("een artikel zonder enige entry staat in notFoundAnywhere", () => {
+    const found = makeArticle("A1");
+    const missing = makeArticle("A2");
+    const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 3, counted: true })];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2"]),
+      [found, missing],
+      locations,
+      entries,
+    );
+    expect(review.notFoundAnywhere.map((r) => r.articleId)).toEqual(["office-1:A2"]);
+  });
+
+  it("expliciet afwezig (CONFIRMED_ABSENT) is een geldige telling van 0, geen 'niet geteld'", () => {
+    const article = makeArticle("A1", { previousCount: 4 });
+    const entries = [
+      makeEntry("office-1:A1", null, { quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, entries);
+    const result = review.results[0];
+    expect(result.fullyCounted).toBe(true);
+    expect(result.confirmedAbsent).toBe(true);
+    expect(result.hasAnyEntry).toBe(true);
+    expect(result.newTotalCount).toBe(0);
+    expect(result.differenceQuantity).toBe(-4);
+    expect(review.notFoundAnywhere).toHaveLength(0);
+    expect(review.notCountedArticles).toBe(0);
+    // Geen van de vijf fysieke locaties kreeg een entry toegewezen — er is
+    // bewust geen fictieve locatie verzonnen voor deze bevestiging.
+    expect(result.perLocation.every((loc) => !loc.hasEntry)).toBe(true);
+  });
+
+  it("niet-geteld en expliciet-afwezig-0 zijn nooit met elkaar te verwarren", () => {
+    const notCounted = makeArticle("A1");
+    const confirmedAbsent = makeArticle("A2");
+    const entries = [
+      makeEntry("office-1:A2", null, { quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2"]),
+      [notCounted, confirmedAbsent],
+      locations,
+      entries,
+    );
+    const r1 = review.results.find((r) => r.articleId === "office-1:A1")!;
+    const r2 = review.results.find((r) => r.articleId === "office-1:A2")!;
+    expect(r1.fullyCounted).toBe(false);
+    expect(r1.newTotalCount).toBeNull();
+    expect(r2.fullyCounted).toBe(true);
+    expect(r2.newTotalCount).toBe(0);
   });
 });

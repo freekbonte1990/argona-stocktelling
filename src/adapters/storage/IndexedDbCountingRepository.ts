@@ -3,6 +3,7 @@ import type {
   ArticleLocationAssignment,
   CountEntry,
   CountSession,
+  LocationSessionStatus,
   Office,
 } from "../../domain/types";
 import type { CountingRepository, ImportMeta } from "../../application/ports/CountingRepository";
@@ -95,8 +96,21 @@ export class IndexedDbCountingRepository implements CountingRepository {
     await this.db.assignments.put(assignment);
   }
 
+  async saveArticleLocationAssignments(assignments: ArticleLocationAssignment[]): Promise<void> {
+    if (assignments.length === 0) return;
+    await this.db.assignments.bulkPut(assignments);
+  }
+
   async getArticleLocationAssignments(officeId: string): Promise<ArticleLocationAssignment[]> {
     return this.db.assignments.where("officeId").equals(officeId).toArray();
+  }
+
+  async getLocationSessionStatuses(sessionId: string): Promise<LocationSessionStatus[]> {
+    return this.db.locationSessionStatuses.where("sessionId").equals(sessionId).toArray();
+  }
+
+  async saveLocationSessionStatus(status: LocationSessionStatus): Promise<void> {
+    await this.db.locationSessionStatuses.put(status);
   }
 
   async getSelectedOfficeId(): Promise<string | undefined> {

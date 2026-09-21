@@ -67,6 +67,15 @@ describe("Excel-exportroundtrip op het echte Lokeren-bestand", () => {
         quantity,
       });
     }
+
+    // Afronden vereist ook dat elke actieve fysieke locatie expliciet
+    // afgerond is (spec v0.2.1 §6) — niet enkel dat alle artikelen geteld zijn.
+    const lokerenOffice = await repository.getOffice("lokeren");
+    if (!lokerenOffice) throw new Error("kantoor 'lokeren' niet gevonden");
+    for (const location of lokerenOffice.locations.filter((l) => l.active)) {
+      await countingService.completeLocation(session.id, location.id);
+    }
+
     await sessionService.completeSession(session.id);
 
     const exported = await exportService.exportSessionResults(session.id);

@@ -55,20 +55,28 @@ export function createExcelStockSourceFromBuffer(
   const artikelRows = sheetToRows(getSheetOrThrow(workbook, ARTIKEL_SHEET_NAME));
   const tellingRows = sheetToRows(getSheetOrThrow(workbook, TELLING_SHEET_NAME));
 
-  // Sheet TELLING wordt gevalideerd (kolommen aanwezig, header op naam gezocht)
-  // maar de rijgegevens worden in v0.1 niet gebruikt — zie parseTelling.ts.
-  validateTellingSheet(tellingRows);
-
   const parsedConfig = parseConfigSheet(configRows);
   const officeId = slugify(parsedConfig.officeName);
 
-  const locations: Location[] = ([1, 2, 3, 4, 5] as const).map((number, index) => {
-    const rawName = parsedConfig.locationNames[index];
+  // v0.2.1 §1: dynamisch aantal locaties, gelezen uit CONFIG — geen vaste 5
+  // meer. Een bestand zonder enige "Locatie N naam/actief"-rij (zou niet
+  // mogen voorkomen bij een geldig sjabloon) valt terug op één locatie, zodat
+  // er nooit een kantoor met nul locaties ontstaat.
+  const parsedLocations = parsedConfig.locations.length > 0 ? parsedConfig.locations : [{ name: null, active: true }];
+
+  // Sheet TELLING wordt gevalideerd (kolommen aanwezig, header op naam
+  // gezocht, incl. exact evenveel LOCATIE-kolommen als CONFIG aangeeft) maar
+  // de rijgegevens worden in v0.1 niet gebruikt — zie parseTelling.ts.
+  validateTellingSheet(tellingRows, parsedLocations.length);
+
+  const locations: Location[] = parsedLocations.map((parsedLocation, index) => {
+    const number = index + 1;
     return {
       id: `${officeId}:loc-${number}`,
       officeId,
       number,
-      name: rawName && rawName.trim() ? rawName.trim() : `Locatie ${number}`,
+      name: parsedLocation.name ?? `Locatie ${number}`,
+      active: parsedLocation.active,
     };
   });
 

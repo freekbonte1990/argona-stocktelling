@@ -5,8 +5,9 @@ import type { CountEntry, Location } from "./types";
 const locations: Location[] = [1, 2, 3, 4, 5].map((n) => ({
   id: `loc-${n}`,
   officeId: "office",
-  number: n as 1 | 2 | 3 | 4 | 5,
+  number: n,
   name: `Locatie ${n}`,
+  active: true,
 }));
 
 function entry(overrides: Partial<CountEntry>): CountEntry {
@@ -19,6 +20,7 @@ function entry(overrides: Partial<CountEntry>): CountEntry {
     counted: false,
     countedAt: null,
     note: null,
+    resolution: "COUNTED",
     ...overrides,
   };
 }

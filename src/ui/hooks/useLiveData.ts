@@ -1,5 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../adapters/storage/db";
+import { buildArticleHistory } from "../../domain/articleHistory";
+import type { CountEntry } from "../../domain/types";
 
 /**
  * Reactieve (live) lees-hooks bovenop IndexedDB, gebruikt door UI-schermen
@@ -82,6 +84,53 @@ export function useSessionsForOffice(officeId: string | undefined) {
             .then((sessions) => sessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt)))
         : [],
     [officeId],
+    [],
+  );
+}
+
+/** Locatiestatussen (OPEN/COMPLETED) van één sessie (spec v0.2.1 §4). */
+export function useLocationStatuses(sessionId: string | undefined) {
+  return useLiveQuery(
+    () => (sessionId ? db.locationSessionStatuses.where("sessionId").equals(sessionId).toArray() : []),
+    [sessionId],
+    [],
+  );
+}
+
+/**
+ * Historiek van één artikel over alle afgeronde sessies van een kantoor
+ * heen (spec v0.2.1 §7-8). Dit is de enige plek buiten de repository die
+ * over meerdere sessies heen leest — bewust hier gehouden (zie de
+ * architectuurnoot bovenaan dit bestand) in plaats van een nieuwe
+ * CountingRepository-methode, om de repository-interface niet te laten
+ * groeien voor iets wat puur een reactieve UI-berekening is.
+ */
+export function useArticleHistory(officeId: string | undefined, articleId: string | undefined) {
+  return useLiveQuery(
+    async () => {
+      if (!officeId || !articleId) return [];
+      const [office, sessions] = await Promise.all([
+        db.offices.get(officeId),
+        db.sessions
+          .where("officeId")
+          .equals(officeId)
+          .and((s) => s.status === "COMPLETED")
+          .toArray(),
+      ]);
+      const entriesBySessionId = new Map<string, CountEntry[]>();
+      await Promise.all(
+        sessions.map(async (session) => {
+          const entries = await db.countEntries
+            .where("sessionId")
+            .equals(session.id)
+            .and((e) => e.articleId === articleId)
+            .toArray();
+          entriesBySessionId.set(session.id, entries);
+        }),
+      );
+      return buildArticleHistory(articleId, sessions, entriesBySessionId, office?.locations ?? []);
+    },
+    [officeId, articleId],
     [],
   );
 }

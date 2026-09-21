@@ -6,10 +6,11 @@ import type {
 } from "../../application/ports/StockResultExporter";
 import { buildNextPreviousCounts, type ArticleReviewResult } from "../../domain/review";
 import { computeFrequencyBreakdown } from "../../domain/frequency";
-import type { Article } from "../../domain/types";
+import { allLocationsInOrder } from "../../domain/locations";
+import type { Article, ArticleLocationAssignment, Location } from "../../domain/types";
 import { buildExportFileName } from "../../shared/exportFileName";
 import { ARTIKEL_REQUIRED_HEADERS } from "./parseArtikel";
-import { TELLING_REQUIRED_HEADERS } from "./parseTelling";
+import { buildTellingRequiredHeaders } from "./parseTelling";
 
 /**
  * Exporteert de resultaten van een telling terug naar de gestandaardiseerde
@@ -28,9 +29,15 @@ import { TELLING_REQUIRED_HEADERS } from "./parseTelling";
  */
 export class ExcelStockResultExporter implements StockResultExporter {
   async exportResults(input: StockResultExportInput): Promise<ExportedFile> {
-    const { office, session, review, allArticles } = input;
+    const { office, session, review, allArticles, assignments } = input;
     const resultByArticleId = new Map(review.results.map((r) => [r.articleId, r]));
     const nextPreviousCounts = buildNextPreviousCounts(allArticles, review.results);
+
+    // ALLE locaties (actief + inactief), in volgorde — een inactief gemaakte
+    // locatie mag haar historische tellingen in de export nooit verliezen
+    // (spec v0.2.1 §1: "historische tellingen mogen nooit breken door
+    // locatiebeheer").
+    const exportLocations = allLocationsInOrder(office);
 
     // Stabiele volgorde voor leesbaarheid: zoals in het bronbestand (Bronrij).
     const sortedArticles = [...allArticles].sort(
@@ -42,7 +49,7 @@ export class ExcelStockResultExporter implements StockResultExporter {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
       workbook,
-      XLSX.utils.aoa_to_sheet(buildTellingSheet(sortedArticles, resultByArticleId)),
+      XLSX.utils.aoa_to_sheet(buildTellingSheet(sortedArticles, resultByArticleId, exportLocations)),
       "TELLING",
     );
     XLSX.utils.book_append_sheet(
@@ -52,12 +59,14 @@ export class ExcelStockResultExporter implements StockResultExporter {
     );
     XLSX.utils.book_append_sheet(
       workbook,
-      XLSX.utils.aoa_to_sheet(buildConfigSheet(office, allArticles, newBaseDate)),
+      XLSX.utils.aoa_to_sheet(buildConfigSheet(office, exportLocations, allArticles, newBaseDate)),
       "CONFIG",
     );
     XLSX.utils.book_append_sheet(
       workbook,
-      XLSX.utils.aoa_to_sheet(buildNieuweArtikelenSheet(office.name)),
+      XLSX.utils.aoa_to_sheet(
+        buildNieuweArtikelenSheet(allArticles, assignments, exportLocations, resultByArticleId),
+      ),
       "NIEUWE_ARTIKELEN",
     );
 
@@ -82,16 +91,21 @@ function completedAtToLocalDate(completedAt: string | null): Date | null {
 function buildTellingSheet(
   articles: Article[],
   resultByArticleId: Map<string, ArticleReviewResult>,
+  locations: Location[],
 ): unknown[][] {
-  const rows: unknown[][] = [[...TELLING_REQUIRED_HEADERS]];
+  const rows: unknown[][] = [buildTellingRequiredHeaders(locations.length)];
   for (const article of articles) {
     const result = resultByArticleId.get(article.id);
-    rows.push(buildTellingRow(article, result));
+    rows.push(buildTellingRow(article, result, locations));
   }
   return rows;
 }
 
-function buildTellingRow(article: Article, result: ArticleReviewResult | undefined): unknown[] {
+function buildTellingRow(
+  article: Article,
+  result: ArticleReviewResult | undefined,
+  locations: Location[],
+): unknown[] {
   if (!result) {
     // Dit artikel maakte geen deel uit van deze sessie (bv. een
     // kwartaalartikel tijdens een maandtelling) — geen verse tellingdata,
@@ -111,11 +125,7 @@ function buildTellingRow(article: Article, result: ArticleReviewResult | undefin
       article.previousCount,
       article.costPrice,
       previousValue,
-      null,
-      null,
-      null,
-      null,
-      null,
+      ...locations.map(() => null),
       null,
       null,
       null,
@@ -126,7 +136,7 @@ function buildTellingRow(article: Article, result: ArticleReviewResult | undefin
   }
 
   const locationsByNumber = new Map(result.perLocation.map((l) => [l.locationNumber, l]));
-  const locationValues = [1, 2, 3, 4, 5].map((n) => locationsByNumber.get(n as 1 | 2 | 3 | 4 | 5)?.quantity ?? null);
+  const locationValues = locations.map((location) => locationsByNumber.get(location.number)?.quantity ?? null);
 
   return [
     article.articleNumber,
@@ -177,6 +187,7 @@ function buildArtikelSheet(
 
 function buildConfigSheet(
   office: StockResultExportInput["office"],
+  locations: Location[],
   allArticles: Article[],
   baseDate: Date,
 ): unknown[][] {
@@ -189,8 +200,12 @@ function buildConfigSheet(
     ["Kantoor", office.name],
     ["Basisdatum", baseDate],
   ];
-  for (const location of office.locations) {
+  // Naam, volgorde (= de N-positie zelf) en actieve status per locatie —
+  // spec v0.2.1 §1. Ook inactieve locaties blijven vermeld, zodat hun
+  // historische kolommen in TELLING altijd herleidbaar blijven.
+  for (const location of locations) {
     rows.push([`Locatie ${location.number} naam`, location.name]);
+    rows.push([`Locatie ${location.number} actief`, location.active ? "Ja" : "Nee"]);
   }
   rows.push(
     ["Aantal artikels", breakdown.total],
@@ -208,7 +223,24 @@ function buildConfigSheet(
   return rows;
 }
 
-function buildNieuweArtikelenSheet(officeName: string): unknown[][] {
+/**
+ * NIEUWE_ARTIKELEN (v0.2.1 correctieronde §3C): alle artikelen die via "+
+ * Nieuw artikel" of "+ Nieuw artikel gevonden" ontstaan zijn (`idType ===
+ * "TIJDELIJK"`), met hun huidige stocklocatie(s) en — indien deze sessie
+ * effectief geteld — de getelde hoeveelheid. Bewust enkel INFORMATIEF: deze
+ * sheet wordt nooit opnieuw ingelezen bij import (zie parseArtikel.ts) — het
+ * tijdelijke artikel zelf staat ook gewoon in ARTIKEL (die sheet bevat ALLE
+ * artikelen), en komt zo, samen met zijn ArticleLocationAssignment (die
+ * import nooit aanraakt), altijd zonder verlies of duplicatie terug via een
+ * herimport (spec: "mag het nieuwe tijdelijke artikel niet verliezen of
+ * dupliceren").
+ */
+function buildNieuweArtikelenSheet(
+  allArticles: Article[],
+  assignments: ArticleLocationAssignment[],
+  locations: Location[],
+  resultByArticleId: Map<string, ArticleReviewResult>,
+): unknown[][] {
   const header = [
     "Tijdelijk ID",
     "Omschrijving",
@@ -222,13 +254,33 @@ function buildNieuweArtikelenSheet(officeName: string): unknown[][] {
     "Opmerking",
     "Officieel artikelnr. na aanmaak",
   ];
-  const code = officeName.trim().slice(0, 3).toUpperCase() || "OFF";
+  const locationById = new Map(locations.map((l) => [l.id, l]));
+  const newArticles = allArticles
+    .filter((article) => article.idType === "TIJDELIJK")
+    .sort((a, b) => a.articleNumber.localeCompare(b.articleNumber, "nl", { numeric: true }));
+
   const rows: unknown[][] = [header];
-  // Enkel de kolomstructuur behouden (spec §5: "behoud ook ... NIEUWE_ARTIKELEN") —
-  // deze sprint bouwt geen nieuw-artikel-wizard, dus er is geen data om hier
-  // in te vullen. Blanco ID-placeholders, zoals in het originele sjabloon.
-  for (let i = 1; i <= 26; i++) {
-    rows.push([`NEW-${code}-${String(i).padStart(4, "0")}`, null, null, null, null, null, null, null, null, null, null]);
+  for (const article of newArticles) {
+    const locationNames = assignments
+      .filter((assignment) => assignment.articleId === article.id && assignment.active)
+      .map((assignment) => locationById.get(assignment.locationId)?.name)
+      .filter((name): name is string => Boolean(name))
+      .join(", ");
+    const result = resultByArticleId.get(article.id);
+    const countedQuantity = result?.fullyCounted ? result.newTotalCount : null;
+    rows.push([
+      article.articleNumber,
+      article.description,
+      article.productGroup,
+      article.supplier,
+      article.unit,
+      article.rawCountPeriod,
+      locationNames || null,
+      countedQuantity,
+      article.costPrice,
+      article.comment ?? null,
+      article.officialArticleNumber,
+    ]);
   }
   return rows;
 }

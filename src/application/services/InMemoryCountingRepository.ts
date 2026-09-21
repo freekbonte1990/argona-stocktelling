@@ -3,6 +3,7 @@ import type {
   ArticleLocationAssignment,
   CountEntry,
   CountSession,
+  LocationSessionStatus,
   Office,
 } from "../../domain/types";
 import type { CountingRepository, ImportMeta } from "../ports/CountingRepository";
@@ -19,6 +20,7 @@ export class InMemoryCountingRepository implements CountingRepository {
   private sessions = new Map<string, CountSession>();
   private entries = new Map<string, CountEntry>();
   private assignments = new Map<string, ArticleLocationAssignment>();
+  private locationSessionStatuses = new Map<string, LocationSessionStatus>();
 
   async saveOffice(office: Office): Promise<void> {
     this.offices.set(office.id, office);
@@ -81,8 +83,20 @@ export class InMemoryCountingRepository implements CountingRepository {
   async saveArticleLocationAssignment(assignment: ArticleLocationAssignment): Promise<void> {
     this.assignments.set(assignment.id, assignment);
   }
+  async saveArticleLocationAssignments(assignments: ArticleLocationAssignment[]): Promise<void> {
+    for (const assignment of assignments) this.assignments.set(assignment.id, assignment);
+  }
   async getArticleLocationAssignments(officeId: string): Promise<ArticleLocationAssignment[]> {
     return Array.from(this.assignments.values()).filter((a) => a.officeId === officeId);
+  }
+
+  async getLocationSessionStatuses(sessionId: string): Promise<LocationSessionStatus[]> {
+    return Array.from(this.locationSessionStatuses.values()).filter(
+      (s) => s.sessionId === sessionId,
+    );
+  }
+  async saveLocationSessionStatus(status: LocationSessionStatus): Promise<void> {
+    this.locationSessionStatuses.set(status.id, status);
   }
 
   private selectedOfficeId: string | undefined;

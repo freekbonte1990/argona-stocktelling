@@ -31,6 +31,22 @@ export function normalizeFrequency(raw: string | null | undefined): ArticleCount
   }
 }
 
+/**
+ * Omgekeerde afbeelding van `normalizeFrequency` (v0.2.1 correctieronde §3):
+ * nodig zodra een MENS zelf een telfrequentie kiest voor een handmatig
+ * aangemaakt artikel (bv. via "+ Nieuw artikel") — dan bestaat er nog geen
+ * ruwe Excel-tekst om in `rawCountPeriod` te bewaren, en moeten we zelf een
+ * consistente ruwe waarde kiezen zodat een latere export/herimport-cyclus
+ * dezelfde `ArticleCountFrequency` teruggeeft (spec: "correcte roundtrip").
+ */
+export const FREQUENCY_TO_RAW: Record<ArticleCountFrequency, string> = {
+  MONTHLY: "MAAND",
+  QUARTERLY: "KWARTAAL",
+  YEARLY: "JAAR",
+  NOT_APPLICABLE: "NVT",
+  TO_BE_DETERMINED: "NOG TE BEPALEN",
+};
+
 const INACTIVE_MARKERS = ["INACTIEF", "GEBLOKKEERD", "BLOK", "UITGEFASEERD", "STOPGEZET"];
 
 /**

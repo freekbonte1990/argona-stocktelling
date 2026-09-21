@@ -15,7 +15,7 @@ export function isArticleInSessionScope(
  * tijdens een maandtelling) EN er nog geen bestaande telling voor dit
  * artikel op deze locatie is (dan werd de waarschuwing al eerder getoond/
  * bevestigd — niet opnieuw lastigvallen bij het corrigeren van een
- * hoeveelheid). Zie spec v0.1.1 §3 ("+ Ander artikel tellen").
+ * hoeveelheid). Zie spec v0.1.1 §3 ("+ Bestaand artikel opzoeken").
  */
 export function requiresOutOfScopeConfirmation(
   session: Pick<CountSession, "articleIds">,

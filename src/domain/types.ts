@@ -5,13 +5,28 @@
  * weet over Excel, IndexedDB, React of eBuddy. Zie docs/ARCHITECTURE.md.
  */
 
-/** De vijf telzones van een kantoor. Nummer is altijd 1..5. */
+/**
+ * Eén stocklocatie van een kantoor (v0.2.1: dynamische lijst, geen vaste 5
+ * meer — zie domain/locations.ts en spec v0.2.1 §1). `number` is de huidige
+ * weergavevolgorde (1-indexed, aanpasbaar via Instellingen), geen vaste
+ * identiteit — `id` is dat wel, en is wat CountEntry/ArticleLocationAssignment
+ * gebruiken, zodat een hernummering historische data nooit kan breken.
+ */
 export interface Location {
   id: string;
   officeId: string;
-  number: 1 | 2 | 3 | 4 | 5;
+  /** Huidige volgorde (1-indexed, aanpasbaar). Puur weergave/exportvolgorde. */
+  number: number;
   /** Door de gebruiker aanpasbare naam. Nooit leeg: valt terug op "Locatie N". */
   name: string;
+  /**
+   * Inactieve locaties zijn "zacht verwijderd": ze verdwijnen uit nieuwe
+   * telacties (locatie-overzicht, "+Ander artikel" locatiekeuze, enz.) maar
+   * blijven bestaan zodat historische CountEntries/assignments die naar hun
+   * `id` verwijzen geldig blijven. Enkel een nooit-gebruikte locatie mag hard
+   * verwijderd worden (domain/locations.ts#canHardDeleteLocation).
+   */
+  active: boolean;
 }
 
 export interface Office {
@@ -67,6 +82,15 @@ export interface Article {
   previousCount: number | null;
   /** Rijnummer in het bronbestand (kolom "Bronrij"), voor foutmeldingen/debug. */
   sourceRow: number | null;
+  /**
+   * Vrije opmerking bij het artikel (v0.2.1 correctieronde §3: optioneel veld
+   * bij "+ Nieuw artikel" / "+ Nieuw artikel gevonden"). BEWUST optioneel
+   * (`?`) i.p.v. `string | null` als vast veld: een gewone Excel-import kent
+   * dit begrip niet en mag dit veld gewoon nooit zetten, zonder dat alle
+   * bestaande code/tests die een `Article` opbouwen dit moeten meegeven.
+   * Ontbrekend/`undefined` en `null` betekenen hetzelfde: geen opmerking.
+   */
+  comment?: string | null;
 }
 
 export interface CountSession {
@@ -83,22 +107,37 @@ export interface CountSession {
 }
 
 /**
- * Eén telling van één artikel op één locatie, binnen één sessie.
+ * Hoe deze CountEntry tot stand kwam (v0.2.1 §5).
+ *   COUNTED           -> effectief op een fysieke locatie geteld.
+ *   CONFIRMED_ABSENT  -> expliciet bevestigd dat het artikel nergens werd
+ *                        aangetroffen (voorraad 0). Geen fysieke locatie
+ *                        (zie CountEntry.locationId) — dit is een uitspraak
+ *                        over het hele kantoor, niet over één rek.
+ */
+export type ArticleCountResolution = "COUNTED" | "CONFIRMED_ABSENT";
+
+/**
+ * Eén telling van één artikel, binnen één sessie.
  *
  * BELANGRIJK (zie ook docs/DATA_MODEL.md):
  *   quantity = 0    & counted = true   -> geldig geteld resultaat van nul stuks
  *   quantity = null & counted = false  -> nog niet geteld
  * Gebruik NOOIT enkel `quantity` om te bepalen of iets geteld is: gebruik altijd `counted`.
+ *
+ * `locationId` is enkel `null` voor `resolution: "CONFIRMED_ABSENT"` — een
+ * bevestigd-afwezig artikel is niet "op" een locatie geteld, en er wordt
+ * bewust geen fictieve locatie voor verzonnen (spec v0.2.1 §5).
  */
 export interface CountEntry {
   id: string;
   sessionId: string;
   articleId: string;
-  locationId: string;
+  locationId: string | null;
   quantity: number | null;
   counted: boolean;
   countedAt: string | null;
   note: string | null;
+  resolution: ArticleCountResolution;
 }
 
 /**
@@ -112,6 +151,24 @@ export interface ArticleLocationAssignment {
   locationId: string;
   active: boolean;
   lastSeenAt: string;
+}
+
+/**
+ * Status van één locatie BINNEN één sessie (v0.2.1 §4) — losstaand van
+ * `Location.active`. Een artikel geteld op Rek 1 is niet automatisch "af",
+ * want het kan ook nog op Rek 4 liggen; pas wanneer een locatie zelf als
+ * afgerond gemarkeerd wordt (expliciete "✓ Locatie afgerond"-actie) telt ze
+ * mee om te weten of "nergens aangetroffen" (§5) al betrouwbaar is. Een
+ * afgeronde locatie kan altijd opnieuw geopend worden.
+ */
+export type LocationSessionState = "OPEN" | "COMPLETED";
+
+export interface LocationSessionStatus {
+  id: string;
+  sessionId: string;
+  locationId: string;
+  status: LocationSessionState;
+  completedAt: string | null;
 }
 
 /** Voortgang van één locatie binnen een sessie (location-entry niveau). */

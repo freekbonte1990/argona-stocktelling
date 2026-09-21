@@ -35,5 +35,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Registreert enkel extra expect-matchers (bv. toBeInTheDocument) — dit
+    // roept geen DOM aan bij het importeren, dus blijft veilig voor de
+    // overige tests die in de "node"-omgeving draaien.
+    setupFiles: ["./src/test-setup.ts"],
   },
 });

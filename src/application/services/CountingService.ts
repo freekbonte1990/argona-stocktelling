@@ -1,5 +1,11 @@
 import { computeSessionProgress } from "../../domain/progress";
-import type { CountEntry, CountSession, Location, SessionProgress } from "../../domain/types";
+import type {
+  CountEntry,
+  CountSession,
+  Location,
+  LocationSessionStatus,
+  SessionProgress,
+} from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
 
 export interface RecordCountInput {
@@ -40,6 +46,7 @@ export class CountingService {
       counted: true,
       countedAt: new Date().toISOString(),
       note: note ?? null,
+      resolution: "COUNTED",
     };
     await this.repository.saveCountEntry(entry);
     await this.repository.saveArticleLocationAssignment({
@@ -53,8 +60,67 @@ export class CountingService {
     return entry;
   }
 
+  /**
+   * Spec v0.2.1 §5: expliciet bevestigen dat een artikel nergens werd
+   * aangetroffen (voorraad 0). Dit is een geldige telling — NOOIT hetzelfde
+   * als "niet geteld" — maar heeft bewust GEEN locatie: er wordt geen
+   * fictieve fysieke locatie verzonnen. Leert dus ook geen
+   * ArticleLocationAssignment.
+   */
+  async confirmAbsent(session: CountSession, articleId: string): Promise<CountEntry> {
+    const entry: CountEntry = {
+      id: `${session.id}:${articleId}:absent`,
+      sessionId: session.id,
+      articleId,
+      locationId: null,
+      quantity: 0,
+      counted: true,
+      countedAt: new Date().toISOString(),
+      note: null,
+      resolution: "CONFIRMED_ABSENT",
+    };
+    await this.repository.saveCountEntry(entry);
+    return entry;
+  }
+
+  /** Bulkversie van confirmAbsent — enkel voor gebruik ná een duidelijke bevestiging in de UI (spec §5). */
+  async confirmAllAbsent(session: CountSession, articleIds: string[]): Promise<CountEntry[]> {
+    const entries: CountEntry[] = [];
+    for (const articleId of articleIds) {
+      entries.push(await this.confirmAbsent(session, articleId));
+    }
+    return entries;
+  }
+
   async getEntries(sessionId: string): Promise<CountEntry[]> {
     return this.repository.getCountEntries(sessionId);
+  }
+
+  /** Status per (sessie, locatie) — spec §4. */
+  async getLocationStatuses(sessionId: string): Promise<LocationSessionStatus[]> {
+    return this.repository.getLocationSessionStatuses(sessionId);
+  }
+
+  /** Markeert een locatie als afgerond binnen deze sessie. Kan later altijd heropend worden. */
+  async completeLocation(sessionId: string, locationId: string): Promise<void> {
+    await this.repository.saveLocationSessionStatus({
+      id: `${sessionId}:${locationId}`,
+      sessionId,
+      locationId,
+      status: "COMPLETED",
+      completedAt: new Date().toISOString(),
+    });
+  }
+
+  /** Heropent een eerder afgeronde locatie binnen deze sessie (spec §4: "moet later opnieuw geopend kunnen worden"). */
+  async reopenLocation(sessionId: string, locationId: string): Promise<void> {
+    await this.repository.saveLocationSessionStatus({
+      id: `${sessionId}:${locationId}`,
+      sessionId,
+      locationId,
+      status: "OPEN",
+      completedAt: null,
+    });
   }
 
   async getProgress(session: CountSession, locations: Location[]): Promise<SessionProgress> {

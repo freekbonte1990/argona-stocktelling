@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 import { ExcelStockResultExporter } from "./ExcelStockResultExporter";
 import { computeSessionReview } from "../../domain/review";
-import type { Article, CountEntry, CountSession, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, CountEntry, CountSession, Office } from "../../domain/types";
 
 const office: Office = {
   id: "damme",
@@ -11,8 +11,9 @@ const office: Office = {
   locations: [1, 2, 3, 4, 5].map((n) => ({
     id: `damme:loc-${n}`,
     officeId: "damme",
-    number: n as 1 | 2 | 3 | 4 | 5,
+    number: n,
     name: `Locatie ${n}`,
+    active: true,
   })),
 };
 
@@ -48,6 +49,7 @@ function makeEntry(articleId: string, locationId: string, overrides: Partial<Cou
     counted: false,
     countedAt: null,
     note: null,
+    resolution: "COUNTED",
     ...overrides,
   };
 }
@@ -85,7 +87,7 @@ describe("ExcelStockResultExporter", () => {
 
     const review = computeSessionReview(session, allArticles, office.locations, entries);
     const exporter = new ExcelStockResultExporter();
-    const exported = await exporter.exportResults({ office, session, review, allArticles });
+    const exported = await exporter.exportResults({ office, session, review, allArticles, assignments: [] });
 
     expect(exported.fileName).toBe("2026-08-28 - Stocktelling Damme.xlsx");
 
@@ -138,7 +140,8 @@ describe("ExcelStockResultExporter", () => {
     expect(configMap.get("locatie 1 naam")).toBe("Locatie 1");
     expect(configMap.get("aantal artikels")).toBe(2);
 
-    // --- NIEUWE_ARTIKELEN: structuur behouden, geen data (geen wizard deze sprint) ---
+    // --- NIEUWE_ARTIKELEN: structuur behouden; geen van deze artikelen is
+    // tijdelijk (allemaal idType "OFFICIEEL"), dus enkel de header, geen rijen.
     const nieuweRows = sheetToRows(workbook.Sheets["NIEUWE_ARTIKELEN"]);
     expect(nieuweRows[0]).toEqual([
       "Tijdelijk ID",
@@ -153,7 +156,68 @@ describe("ExcelStockResultExporter", () => {
       "Opmerking",
       "Officieel artikelnr. na aanmaak",
     ]);
-    expect(nieuweRows[1][0]).toBe("NEW-DAM-0001");
+    expect(nieuweRows).toHaveLength(1);
+  });
+
+  it("NIEUWE_ARTIKELEN toont tijdelijke artikelen met hun locatie(s) en getelde hoeveelheid (v0.2.1 correctieronde §3C)", async () => {
+    const tempArticle = makeArticle("TMP-DAM-0001", {
+      officialArticleNumber: null,
+      idType: "TIJDELIJK",
+      description: "Nieuw gevonden onderdeel",
+      supplier: "ACME",
+      previousCount: null,
+      comment: "Gevonden tijdens telling",
+    });
+    const entries: CountEntry[] = [
+      makeEntry("damme:TMP-DAM-0001", "damme:loc-1", { quantity: 6, counted: true }),
+    ];
+    const assignments: ArticleLocationAssignment[] = [
+      {
+        id: "damme:damme:TMP-DAM-0001:damme:loc-1",
+        officeId: "damme",
+        articleId: "damme:TMP-DAM-0001",
+        locationId: "damme:loc-1",
+        active: true,
+        lastSeenAt: "2026-08-27T10:00:00.000Z",
+      },
+    ];
+    const session: CountSession = {
+      id: "session-1",
+      officeId: "damme",
+      type: "MONTHLY",
+      status: "COMPLETED",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-08-28T15:00:00.000Z",
+      sourceFileName: "test.xlsx",
+      sourceBaseDate: "2026-08-27",
+      articleIds: [],
+    };
+    const review = computeSessionReview(session, [tempArticle], office.locations, entries);
+    const exported = await new ExcelStockResultExporter().exportResults({
+      office,
+      session,
+      review,
+      allArticles: [tempArticle],
+      assignments,
+    });
+
+    const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
+    const rows = sheetToRows(workbook.Sheets["NIEUWE_ARTIKELEN"]);
+    const header = rows[0] as string[];
+    const col = (name: string) => header.indexOf(name);
+    const row = rows.find((r) => r[col("Tijdelijk ID")] === "TMP-DAM-0001")!;
+    expect(row[col("Omschrijving")]).toBe("Nieuw gevonden onderdeel");
+    expect(row[col("Leverancier")]).toBe("ACME");
+    expect(row[col("Locatie")]).toBe("Locatie 1");
+    expect(row[col("Aantal")]).toBe(6);
+    expect(row[col("Opmerking")]).toBe("Gevonden tijdens telling");
+    expect(row[col("Officieel artikelnr. na aanmaak")]).toBeNull();
+
+    // Het tijdelijke artikel moet ook gewoon in ARTIKEL zitten (roundtrip-basis).
+    const artikelRows = sheetToRows(workbook.Sheets["ARTIKEL"]);
+    const artikelHeader = artikelRows[0] as string[];
+    const acol = (name: string) => artikelHeader.indexOf(name);
+    expect(artikelRows.some((r) => r[acol("Artikelnr.")] === "TMP-DAM-0001")).toBe(true);
   });
 
   it("schrijft een expliciete 0-telling als 0, niet als leeg", async () => {
@@ -176,6 +240,7 @@ describe("ExcelStockResultExporter", () => {
       session,
       review,
       allArticles: [article],
+      assignments: [],
     });
 
     const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
@@ -216,6 +281,7 @@ describe("ExcelStockResultExporter", () => {
       session,
       review,
       allArticles: [scopeArticle, manualArticle],
+      assignments: [],
     });
 
     const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });

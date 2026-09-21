@@ -1,38 +1,94 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import {
+  activeLocationsInOrder,
+  addLocation,
+  allLocationsInOrder,
+  canHardDeleteLocation,
+  removeUnusedLocation,
+  renameLocation,
+  reorderLocations,
+  setLocationActive,
+} from "../../domain/locations";
+import type { Location, Office } from "../../domain/types";
+import { generateLocationId } from "../../shared/ids";
 import { countingRepository } from "../../application/container";
 import { BigButton } from "../components/BigButton";
-import { useOffice } from "../hooks/useLiveData";
+import { useAssignments, useOffice } from "../hooks/useLiveData";
 
 interface SettingsPageProps {
   officeId: string;
 }
 
+/**
+ * Locatiebeheer (spec v0.2.1 §1): een kantoor heeft een dynamische lijst
+ * stocklocaties in plaats van vaste 1-5. Elke actie hier werkt rechtstreeks
+ * op het domeinmodel (domain/locations.ts) en slaat het bijgewerkte kantoor
+ * meteen op — geen apart "Opslaan"-moment nodig, dit is bewust geen wizard.
+ */
 export function SettingsPage({ officeId }: SettingsPageProps) {
-  const office = useOffice(officeId);
-  const [names, setNames] = useState<string[]>([]);
-  const [saved, setSaved] = useState(false);
+  const officeOrUndefined = useOffice(officeId);
+  const assignments = useAssignments(officeId) ?? [];
+  const [newLocationName, setNewLocationName] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (office) setNames(office.locations.map((l) => l.name));
-  }, [office]);
-
-  if (!office) {
+  if (!officeOrUndefined) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
   }
+  const office: Office = officeOrUndefined;
 
-  async function handleSave() {
-    if (!office) return;
-    const updatedOffice = {
-      ...office,
-      locations: office.locations.map((location, index) => ({
-        ...location,
-        name: names[index]?.trim() || `Locatie ${location.number}`,
-      })),
-    };
-    await countingRepository.saveOffice(updatedOffice);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
+  const persist = async (next: Office) => {
+    setError(null);
+    try {
+      await countingRepository.saveOffice(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleAdd = async () => {
+    if (!newLocationName.trim()) return;
+    const id = generateLocationId(office.id);
+    const next = addLocation(office, newLocationName, id);
+    setNewLocationName("");
+    await persist(next);
+  };
+
+  const handleRename = async (locationId: string, name: string) => {
+    await persist(renameLocation(office, locationId, name));
+  };
+
+  const handleMove = async (locationId: string, direction: -1 | 1) => {
+    const ordered = allLocationsInOrder(office).map((l) => l.id);
+    const index = ordered.indexOf(locationId);
+    const target = index + direction;
+    if (target < 0 || target >= ordered.length) return;
+    const reordered = [...ordered];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    await persist(reorderLocations(office, reordered));
+  };
+
+  const handleToggleActive = async (location: Location) => {
+    setError(null);
+    try {
+      const next = setLocationActive(office, location.id, !location.active);
+      await persist(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleDelete = async (location: Location) => {
+    setError(null);
+    try {
+      const next = removeUnusedLocation(office, location.id, assignments, []);
+      await persist(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const orderedLocations = allLocationsInOrder(office);
+  const activeCount = activeLocationsInOrder(office).length;
 
   return (
     <div className="stack">
@@ -45,23 +101,83 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           <strong>Basisdatum:</strong> {office.baseDate ?? "—"}
         </div>
       </div>
+
+      {error && <div className="error-banner">{error}</div>}
+
       <div className="card stack">
-        <h2 style={{ margin: 0 }}>Locatienamen</h2>
-        {office.locations.map((location, index) => (
-          <label key={location.id} className="stack stack--tight">
-            <span>Locatie {location.number}</span>
-            <input
-              className="search-input"
-              value={names[index] ?? ""}
-              onChange={(e) =>
-                setNames((prev) => prev.map((n, i) => (i === index ? e.target.value : n)))
-              }
-            />
-          </label>
-        ))}
-        <BigButton variant="secondary" onClick={handleSave}>
-          {saved ? "Opgeslagen ✓" : "Namen opslaan"}
-        </BigButton>
+        <h2 style={{ margin: 0 }}>Stocklocaties</h2>
+        <p className="screen-subtitle" style={{ margin: 0 }}>
+          {activeCount} actieve locatie(s) van {orderedLocations.length} totaal. Een reeds gebruikte
+          locatie kan niet verwijderd worden — enkel inactief gemaakt (historische tellingen blijven
+          zo altijd leesbaar).
+        </p>
+
+        <div className="stack stack--tight">
+          {orderedLocations.map((location, index) => {
+            const used = !canHardDeleteLocation(location.id, assignments, []);
+            return (
+              <div key={location.id} className="card stack stack--tight" style={{ padding: "var(--space-3)" }}>
+                <div className="stack stack--tight" style={{ flexDirection: "row", alignItems: "center" }}>
+                  {/*
+                    Bewust ONGECONTROLEERD (defaultValue, geen value): de
+                    naam komt reactief uit Dexie (useOffice), en die render-
+                    cyclus mag de cursorpositie niet verstoren tijdens het
+                    typen. Opslaan gebeurt pas bij het verlaten van het veld.
+                  */}
+                  <input
+                    key={location.id}
+                    className="search-input"
+                    style={{ flex: 1 }}
+                    defaultValue={location.name}
+                    onBlur={(e) => handleRename(location.id, e.target.value)}
+                  />
+                  {!location.active && (
+                    <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
+                  )}
+                </div>
+                <div className="filter-row">
+                  <button
+                    type="button"
+                    className="chip"
+                    disabled={index === 0}
+                    onClick={() => handleMove(location.id, -1)}
+                  >
+                    ↑ Omhoog
+                  </button>
+                  <button
+                    type="button"
+                    className="chip"
+                    disabled={index === orderedLocations.length - 1}
+                    onClick={() => handleMove(location.id, 1)}
+                  >
+                    ↓ Omlaag
+                  </button>
+                  <button type="button" className="chip" onClick={() => handleToggleActive(location)}>
+                    {location.active ? "Inactief maken" : "Activeren"}
+                  </button>
+                  {!used && (
+                    <button type="button" className="chip" onClick={() => handleDelete(location)}>
+                      Verwijderen
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="stack stack--tight" style={{ flexDirection: "row" }}>
+          <input
+            className="search-input"
+            style={{ flex: 1 }}
+            placeholder="Naam nieuwe locatie..."
+            value={newLocationName}
+            onChange={(e) => setNewLocationName(e.target.value)}
+          />
+          <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAdd}>
+            + Locatie
+          </BigButton>
+        </div>
       </div>
     </div>
   );

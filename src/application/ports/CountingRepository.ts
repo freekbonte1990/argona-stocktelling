@@ -3,6 +3,7 @@ import type {
   ArticleLocationAssignment,
   CountEntry,
   CountSession,
+  LocationSessionStatus,
   Office,
 } from "../../domain/types";
 
@@ -48,7 +49,17 @@ export interface CountingRepository {
   getCountEntries(sessionId: string): Promise<CountEntry[]>;
 
   saveArticleLocationAssignment(assignment: ArticleLocationAssignment): Promise<void>;
+  /** Bulk-variant (v0.2.1 bulk locatiebeheer, Artikels-overzicht) — schrijft meerdere koppelingen in één keer. */
+  saveArticleLocationAssignments(assignments: ArticleLocationAssignment[]): Promise<void>;
   getArticleLocationAssignments(officeId: string): Promise<ArticleLocationAssignment[]>;
+
+  /**
+   * Status per (sessie, locatie) — spec v0.2.1 §4: OPEN/COMPLETED, met
+   * `completedAt`. Losstaand van `Location.active`: dit gaat over "is deze
+   * locatie klaar VOOR DEZE SESSIE", niet over of de locatie zelf nog bestaat.
+   */
+  getLocationSessionStatuses(sessionId: string): Promise<LocationSessionStatus[]>;
+  saveLocationSessionStatus(status: LocationSessionStatus): Promise<void>;
 
   /**
    * Welk kantoor de gebruiker laatst geselecteerd had (multi-kantoor

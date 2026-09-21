@@ -11,22 +11,48 @@ export interface SessionScopePreview {
 }
 
 /**
- * Gegooid door `completeSession` wanneer er nog niet-getelde artikelen in de
- * sessiescope zitten (spec v0.2 §4: "als er nog niet-getelde artikelen
- * bestaan: duidelijke waarschuwing en geen stille afronding"). De UI vangt
- * dit op en toont de waarschuwing — er is bewust geen "force"-optie: geen
- * enkele aanroeper mag een sessie stilletjes met ontbrekende tellingen
- * afronden.
+ * Bouwt de gebruikersgerichte foutmelding voor `SessionIncompleteError`
+ * (spec v0.2.1 §6). Beide blokkerende voorwaarden krijgen een eigen,
+ * duidelijke zin — locaties eerst, dan artikelen — zodat de gebruiker meteen
+ * weet wat er nog moet gebeuren, bv.:
+ *   "De telling kan nog niet worden afgerond. 2 locaties zijn nog niet
+ *   afgerond: Rek 2, 2e magazijn."
+ */
+function buildSessionIncompleteMessage(
+  notCountedArticles: number,
+  incompleteLocationNames: string[],
+): string {
+  const parts: string[] = [];
+  if (incompleteLocationNames.length > 0) {
+    const n = incompleteLocationNames.length;
+    parts.push(
+      `${n} locatie${n === 1 ? "" : "s"} ${n === 1 ? "is" : "zijn"} nog niet afgerond: ${incompleteLocationNames.join(", ")}.`,
+    );
+  }
+  if (notCountedArticles > 0) {
+    parts.push(`${notCountedArticles} artikel(en) in scope zijn nog niet (volledig) geteld.`);
+  }
+  return `De telling kan nog niet worden afgerond. ${parts.join(" ")}`;
+}
+
+/**
+ * Gegooid door `completeSession` wanneer nog niet aan beide afrondvoorwaarden
+ * voldaan is (spec v0.2.1 §6): (1) alle actieve locaties expliciet afgerond,
+ * en (2) alle artikelen in scope opgelost (volledig geteld of expliciet
+ * bevestigd afwezig). De UI vangt dit op en toont de waarschuwing — er is
+ * bewust geen "force"-optie: geen enkele aanroeper mag een sessie stilletjes
+ * met open locaties of ontbrekende tellingen afronden.
  */
 export class SessionIncompleteError extends Error {
   readonly notCountedArticles: number;
+  /** Namen van de actieve locaties die nog niet afgerond zijn (kan leeg zijn). */
+  readonly incompleteLocationNames: string[];
 
-  constructor(notCountedArticles: number) {
-    super(
-      `Sessie kan niet afgerond worden: ${notCountedArticles} artikel(en) in scope zijn nog niet (volledig) geteld.`,
-    );
+  constructor(notCountedArticles: number, incompleteLocationNames: string[] = []) {
+    super(buildSessionIncompleteMessage(notCountedArticles, incompleteLocationNames));
     this.name = "SessionIncompleteError";
     this.notCountedArticles = notCountedArticles;
+    this.incompleteLocationNames = incompleteLocationNames;
   }
 }
 
@@ -97,27 +123,33 @@ export class CountSessionService {
     if (!session) {
       throw new Error(`Sessie ${sessionId} niet gevonden.`);
     }
-    const [articles, entries, office] = await Promise.all([
+    const [articles, entries, office, locationStatuses] = await Promise.all([
       this.repository.getArticles(session.officeId),
       this.repository.getCountEntries(sessionId),
       this.repository.getOffice(session.officeId),
+      this.repository.getLocationSessionStatuses(sessionId),
     ]);
     if (!office) {
       throw new Error(`Kantoor ${session.officeId} niet gevonden.`);
     }
-    return computeSessionReview(session, articles, office.locations, entries);
+    return computeSessionReview(session, articles, office.locations, entries, locationStatuses);
   }
 
   /**
-   * Rondt een sessie af. Standaard enkel toegestaan wanneer alle
-   * scope-artikelen volledig geteld zijn — anders `SessionIncompleteError`
-   * (spec v0.2 §4). Er is bewust geen "force"-parameter: als dat ooit nodig
-   * is, is dat een nieuwe, expliciete beslissing voor een latere sprint.
+   * Rondt een sessie af. Standaard enkel toegestaan wanneer BEIDE
+   * afrondvoorwaarden vervuld zijn (spec v0.2.1 §6): alle actieve locaties
+   * zijn expliciet afgerond, én alle scope-artikelen zijn opgelost (volledig
+   * geteld of expliciet bevestigd afwezig) — anders `SessionIncompleteError`.
+   * Er is bewust geen "force"-parameter: als dat ooit nodig is, is dat een
+   * nieuwe, expliciete beslissing voor een latere sprint.
    */
   async completeSession(sessionId: string): Promise<void> {
     const review = await this.getReview(sessionId);
     if (!isSessionReadyToComplete(review)) {
-      throw new SessionIncompleteError(review.notCountedArticles);
+      throw new SessionIncompleteError(
+        review.notCountedArticles,
+        review.incompleteActiveLocations.map((l) => l.name),
+      );
     }
     await this.repository.completeSession(sessionId);
   }
@@ -138,10 +170,18 @@ export class CountSessionService {
     officeId: string,
     scopeArticles: Article[],
   ): Promise<CountEntry[]> {
-    const assignments = await this.repository.getArticleLocationAssignments(officeId);
+    const [assignments, office] = await Promise.all([
+      this.repository.getArticleLocationAssignments(officeId),
+      this.repository.getOffice(officeId),
+    ]);
+    const activeLocationIds = new Set(
+      (office?.locations ?? []).filter((l) => l.active).map((l) => l.id),
+    );
     const activeAssignmentsByArticle = new Map<string, string[]>();
     for (const assignment of assignments) {
-      if (!assignment.active) continue;
+      // Enkel actieve koppelingen naar nog actieve locaties: een intussen
+      // inactief gemaakte locatie krijgt geen nieuwe stub-tellingen meer.
+      if (!assignment.active || !activeLocationIds.has(assignment.locationId)) continue;
       const list = activeAssignmentsByArticle.get(assignment.articleId);
       if (list) {
         list.push(assignment.locationId);
@@ -163,6 +203,7 @@ export class CountSessionService {
           counted: false,
           countedAt: null,
           note: null,
+          resolution: "COUNTED",
         });
       }
     }

@@ -4,9 +4,11 @@ import { ImportPage } from "./ui/pages/ImportPage";
 import { HomePage } from "./ui/pages/HomePage";
 import { NewSessionPage } from "./ui/pages/NewSessionPage";
 import { LocationOverviewPage } from "./ui/pages/LocationOverviewPage";
+import { WithoutLocationPage } from "./ui/pages/WithoutLocationPage";
 import { CountingPage } from "./ui/pages/CountingPage";
 import { ReviewPage } from "./ui/pages/ReviewPage";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
+import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
 import { useAllOffices, useOffice, useSession } from "./ui/hooks/useLiveData";
 import { countSessionService, countingRepository } from "./application/container";
@@ -16,9 +18,11 @@ type Route =
   | { screen: "home"; officeId: string }
   | { screen: "newSession"; officeId: string }
   | { screen: "locationOverview"; sessionId: string }
+  | { screen: "withoutLocation"; sessionId: string }
   | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
   | { screen: "review"; sessionId: string }
   | { screen: "articles"; officeId: string }
+  | { screen: "articleDetail"; officeId: string; articleId: string }
   | { screen: "settings"; officeId: string };
 
 export default function App() {
@@ -81,12 +85,16 @@ function RouteHeader({
     route.screen === "home" ||
     route.screen === "newSession" ||
     route.screen === "articles" ||
+    route.screen === "articleDetail" ||
     route.screen === "settings"
       ? route.officeId
       : undefined;
   const office = useOffice(directOfficeId);
   const session = useSession(
-    route.screen === "locationOverview" || route.screen === "counting" || route.screen === "review"
+    route.screen === "locationOverview" ||
+      route.screen === "withoutLocation" ||
+      route.screen === "counting" ||
+      route.screen === "review"
       ? route.sessionId
       : undefined,
   );
@@ -122,6 +130,15 @@ function RouteHeader({
       />
     );
   }
+  if (route.screen === "articleDetail") {
+    return (
+      <AppHeader
+        breadcrumb="Artikeldetail"
+        subtitle={office?.name}
+        onBack={() => onNavigate({ screen: "articles", officeId: route.officeId })}
+      />
+    );
+  }
   if (route.screen === "settings") {
     return (
       <AppHeader
@@ -138,6 +155,14 @@ function RouteHeader({
         onBack={() =>
           sessionOffice && onNavigate({ screen: "home", officeId: sessionOffice.id })
         }
+      />
+    );
+  }
+  if (route.screen === "withoutLocation") {
+    return (
+      <AppHeader
+        breadcrumb={`${sessionOffice?.name ?? ""} > Zonder locatie`}
+        onBack={() => onNavigate({ screen: "locationOverview", sessionId: route.sessionId })}
       />
     );
   }
@@ -219,6 +244,14 @@ function RouteBody({
             onNavigate({ screen: "counting", sessionId: route.sessionId, locationId })
           }
           onOpenReview={() => onNavigate({ screen: "review", sessionId: route.sessionId })}
+          onOpenWithoutLocation={() => onNavigate({ screen: "withoutLocation", sessionId: route.sessionId })}
+        />
+      );
+    case "withoutLocation":
+      return (
+        <WithoutLocationPage
+          sessionId={route.sessionId}
+          onOpenArticle={(officeId, articleId) => onNavigate({ screen: "articleDetail", officeId, articleId })}
         />
       );
     case "counting":
@@ -240,10 +273,21 @@ function RouteBody({
             const session = await countingRepository.getSession(route.sessionId);
             if (session) onNavigate({ screen: "home", officeId: session.officeId });
           }}
+          onOpenLocationOverview={() => onNavigate({ screen: "locationOverview", sessionId: route.sessionId })}
+          onOpenLocation={(locationId) =>
+            onNavigate({ screen: "counting", sessionId: route.sessionId, locationId })
+          }
         />
       );
     case "articles":
-      return <ArticlesPage officeId={route.officeId} />;
+      return (
+        <ArticlesPage
+          officeId={route.officeId}
+          onOpenArticle={(articleId) => onNavigate({ screen: "articleDetail", officeId: route.officeId, articleId })}
+        />
+      );
+    case "articleDetail":
+      return <ArticleDetailPage officeId={route.officeId} articleId={route.articleId} />;
     case "settings":
       return <SettingsPage officeId={route.officeId} />;
   }

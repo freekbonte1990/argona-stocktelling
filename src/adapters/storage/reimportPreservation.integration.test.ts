@@ -44,8 +44,9 @@ function makeOffice(locationNames: string[] = []): Office {
     locations: [1, 2, 3, 4, 5].map((n, i) => ({
       id: `antwerpen:loc-${n}`,
       officeId: "antwerpen",
-      number: n as 1 | 2 | 3 | 4 | 5,
+      number: n,
       name: locationNames[i]?.trim() ? locationNames[i] : `Locatie ${n}`,
+      active: true,
     })),
   };
 }
@@ -203,6 +204,13 @@ describe("Herimport van een kantoor met bestaande locatienamen, assignments en e
       locationId: "antwerpen:loc-1",
       quantity: 4,
     });
+    // Afronden vereist ook dat elke actieve fysieke locatie expliciet
+    // afgerond is (spec v0.2.1 §6).
+    const officeForCompletion = await repository.getOffice("antwerpen");
+    if (!officeForCompletion) throw new Error("kantoor niet gevonden");
+    for (const location of officeForCompletion.locations.filter((l) => l.active)) {
+      await countingService.completeLocation(session.id, location.id);
+    }
     await sessionService.completeSession(session.id);
 
     // Nieuwe import zonder A3.

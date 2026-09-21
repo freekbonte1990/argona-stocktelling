@@ -25,17 +25,19 @@ export class ExportService {
     if (!session) {
       throw new Error(`Sessie ${sessionId} niet gevonden.`);
     }
-    const [office, allArticles, entries] = await Promise.all([
+    const [office, allArticles, entries, locationStatuses, assignments] = await Promise.all([
       this.repository.getOffice(session.officeId),
       this.repository.getArticles(session.officeId),
       this.repository.getCountEntries(sessionId),
+      this.repository.getLocationSessionStatuses(sessionId),
+      this.repository.getArticleLocationAssignments(session.officeId),
     ]);
     if (!office) {
       throw new Error(`Kantoor ${session.officeId} niet gevonden.`);
     }
 
-    const review = computeSessionReview(session, allArticles, office.locations, entries);
+    const review = computeSessionReview(session, allArticles, office.locations, entries, locationStatuses);
 
-    return this.exporter.exportResults({ office, session, review, allArticles });
+    return this.exporter.exportResults({ office, session, review, allArticles, assignments });
   }
 }

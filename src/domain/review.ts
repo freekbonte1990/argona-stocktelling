@@ -1,5 +1,11 @@
 import { isArticleFullyCounted } from "./progress";
-import type { Article, CountEntry, CountSession, Location } from "./types";
+import type {
+  Article,
+  CountEntry,
+  CountSession,
+  Location,
+  LocationSessionStatus,
+} from "./types";
 
 /**
  * Resultaatberekening voor het reviewscherm (v0.2 §1-3) en voor de
@@ -12,7 +18,8 @@ import type { Article, CountEntry, CountSession, Location } from "./types";
 /** Waarde van één artikel op één locatie, met hetzelfde onderscheid als CountEntry: */
 export interface LocationCountValue {
   locationId: string;
-  locationNumber: 1 | 2 | 3 | 4 | 5;
+  /** Weergavevolgorde van de locatie (v0.2.1: dynamisch aantal, geen vaste 1-5 meer). */
+  locationNumber: number;
   /** null = geen entry op deze locatie (nooit verwacht/geteld hier). */
   quantity: number | null;
   counted: boolean;
@@ -54,12 +61,16 @@ export interface ArticleReviewResult {
   note: string | null;
   /**
    * True als dit artikel niet in `CountSession.articleIds` zit — d.w.z. het
-   * is via "+ Ander artikel tellen" buiten de sessiescope toegevoegd
+   * is via "+ Bestaand artikel opzoeken" buiten de sessiescope toegevoegd
    * (spec v0.1.1 §3). Zo'n artikel telt niet mee in de scope-totalen, maar
    * verschijnt wel in de resultatenlijst (het is effectief geteld en moet
    * dus ook in de Excel-export terechtkomen).
    */
   isManualAddition: boolean;
+  /** True zolang dit artikel deze sessie nog geen ENKELE entry heeft (nergens geteld, ook niet bevestigd afwezig). */
+  hasAnyEntry: boolean;
+  /** True wanneer dit artikel expliciet bevestigd is als "niet aanwezig — voorraad 0" (spec v0.2.1 §5). */
+  confirmedAbsent: boolean;
   /**
    * AANNAME (gedocumenteerd, want toekomstige impact): het filter
    * "Controle" (spec §1) heeft geen exacte definitie meegekregen. We
@@ -88,6 +99,33 @@ export interface SessionReviewSummary {
    * de volledige lijst die het reviewscherm en de Excel-export gebruiken.
    */
   results: ArticleReviewResult[];
+  /**
+   * Zijn alle ACTIEVE locaties van dit kantoor voor deze sessie op
+   * `COMPLETED` gezet? Pas dan is `notFoundAnywhere` betrouwbaar (spec
+   * v0.2.1 §5: "pas nadat alle relevante locaties afgerond zijn, kunnen we
+   * weten welke artikels nergens gevonden werden"). De UI moet de
+   * bevestigingsacties op `notFoundAnywhere` verbergen/uitschakelen zolang
+   * dit `false` is — de lijst zelf mag altijd informatief getoond worden.
+   */
+  allLocationsCompleted: boolean;
+  /** Aantal actieve locaties van dit kantoor — voor de "X / Y locaties afgerond"-teller (spec v0.2.1 §6). */
+  totalActiveLocations: number;
+  /** Aantal actieve locaties dat voor deze sessie al COMPLETED is. */
+  completedActiveLocationsCount: number;
+  /**
+   * De actieve locaties die nog NIET COMPLETED zijn voor deze sessie, in
+   * weergavevolgorde (spec v0.2.1 §6, afrondvoorwaarde 1). Leeg zodra
+   * `allLocationsCompleted` true is. Gebruikt door de UI om zowel de
+   * duidelijke foutmelding ("2 locaties zijn nog niet afgerond: ...") als
+   * rechtstreekse links naar die locaties op te bouwen.
+   */
+  incompleteActiveLocations: Location[];
+  /**
+   * Scope-artikelen (geen handmatige buiten-scope-toevoegingen — die hebben
+   * per definitie altijd al een entry) zonder enige entry deze sessie: nog
+   * nergens geteld én nog niet bevestigd afwezig.
+   */
+  notFoundAnywhere: ArticleReviewResult[];
 }
 
 export type ReviewFilter = "ALL" | "DIFFERENCE" | "CONTROL" | "NOT_COUNTED";
@@ -118,8 +156,12 @@ function buildArticleReviewResult(
   const fullyCounted = isArticleFullyCounted(entriesForArticle);
   const perLocation = buildLocationValues(locations, entriesForArticle);
 
+  // Som over ALLE entries (niet enkel de locatie-gebonden) — een bevestigd-
+  // afwezig artikel (resolution CONFIRMED_ABSENT, locationId null) draagt
+  // zijn (altijd 0) hoeveelheid zo ook correct bij, zonder een fictieve
+  // locatie te moeten verzinnen.
   const newTotalCount = fullyCounted
-    ? perLocation.reduce((sum, loc) => sum + (loc.quantity ?? 0), 0)
+    ? entriesForArticle.reduce((sum, entry) => sum + (entry.counted ? entry.quantity ?? 0 : 0), 0)
     : null;
   const previousCount = article.previousCount;
   const differenceQuantity =
@@ -145,6 +187,8 @@ function buildArticleReviewResult(
     differenceAmount,
     note,
     isManualAddition,
+    hasAnyEntry: entriesForArticle.length > 0,
+    confirmedAbsent: entriesForArticle.some((e) => e.resolution === "CONFIRMED_ABSENT"),
     flaggedForControl: note !== null,
   };
 }
@@ -159,6 +203,8 @@ export function computeSessionReview(
   articles: Article[],
   locations: Location[],
   entries: CountEntry[],
+  /** Locatiestatussen van deze sessie (spec v0.2.1 §4-5) — leeg toegestaan (bv. oudere aanroepers/tests). */
+  locationStatuses: LocationSessionStatus[] = [],
 ): SessionReviewSummary {
   const articleById = new Map(articles.map((a) => [a.id, a]));
   const entriesByArticle = new Map<string, CountEntry[]>();
@@ -215,6 +261,19 @@ export function computeSessionReview(
     }
   }
 
+  const activeLocations = locations.filter((l) => l.active);
+  const statusByLocationId = new Map(locationStatuses.map((s) => [s.locationId, s.status]));
+  const allLocationsCompleted =
+    activeLocations.length > 0 &&
+    activeLocations.every((l) => statusByLocationId.get(l.id) === "COMPLETED");
+  const incompleteActiveLocations = activeLocations
+    .filter((l) => statusByLocationId.get(l.id) !== "COMPLETED")
+    .sort((a, b) => a.number - b.number);
+
+  const notFoundAnywhere = results.filter(
+    (result) => !result.isManualAddition && !result.hasAnyEntry,
+  );
+
   return {
     totalArticlesInScope: session.articleIds.length,
     countedArticles,
@@ -225,6 +284,11 @@ export function computeSessionReview(
     totalPositiveCorrectionAmount,
     totalNegativeCorrectionAmount,
     results,
+    allLocationsCompleted,
+    totalActiveLocations: activeLocations.length,
+    completedActiveLocationsCount: activeLocations.length - incompleteActiveLocations.length,
+    incompleteActiveLocations,
+    notFoundAnywhere,
   };
 }
 
@@ -245,12 +309,23 @@ export function filterReviewResults(
 }
 
 /**
- * Spec §4: standaard enkel afronden als alle artikelen in scope afgewerkt
- * zijn. Handmatige buiten-scope-toevoegingen blokkeren dit nooit (die zijn
- * per definitie al geteld op het moment dat ze ontstaan — zie CountingService).
+ * Spec v0.2.1 §6: een telling mag pas definitief afgerond worden wanneer
+ * BEIDE voorwaarden vervuld zijn:
+ *   1. Alle actieve fysieke locaties zijn expliciet afgerond
+ *      (`allLocationsCompleted` — "Zonder locatie" en inactieve locaties
+ *      tellen hier per definitie niet mee, zie `computeSessionReview`).
+ *   2. Alle artikelen in de telling zijn opgelost: volledig geteld, of
+ *      expliciet bevestigd als "niet aanwezig / voorraad 0"
+ *      (`notCountedArticles === 0` — handmatige buiten-scope-toevoegingen
+ *      blokkeren dit nooit, die zijn per definitie al geteld op het moment
+ *      dat ze ontstaan, zie CountingService).
+ * Beide voorwaarden worden telkens vers herberekend uit de actuele
+ * locatiestatussen/entries (nooit gecached bij sessiestart), dus het
+ * heropenen van een eerder afgeronde locatie maakt de sessie automatisch
+ * opnieuw niet-afrondbaar totdat die locatie opnieuw afgerond wordt.
  */
 export function isSessionReadyToComplete(summary: SessionReviewSummary): boolean {
-  return summary.notCountedArticles === 0;
+  return summary.notCountedArticles === 0 && summary.allLocationsCompleted;
 }
 
 /**

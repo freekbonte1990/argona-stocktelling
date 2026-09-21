@@ -33,8 +33,9 @@ const office: Office = {
   locations: [1, 2, 3, 4, 5].map((n) => ({
     id: `office-1:loc-${n}`,
     officeId: "office-1",
-    number: n as 1 | 2 | 3 | 4 | 5,
+    number: n,
     name: `Locatie ${n}`,
+    active: true,
   })),
 };
 
@@ -42,6 +43,19 @@ describe("CountSessionService", () => {
   let repository: InMemoryCountingRepository;
   let sessionService: CountSessionService;
   let countingService: CountingService;
+
+  /**
+   * Afrondvoorwaarde 1 (spec v0.2.1 §6): alle actieve locaties moeten
+   * expliciet afgerond zijn. De fixture-office hierboven heeft 5 actieve
+   * locaties — deze helper rondt ze allemaal af zodat tests die enkel het
+   * artikel-aspect willen testen niet ook nog op de locatievoorwaarde
+   * struikelen.
+   */
+  async function completeAllLocations(sessionId: string): Promise<void> {
+    for (const location of office.locations) {
+      await countingService.completeLocation(sessionId, location.id);
+    }
+  }
 
   beforeEach(async () => {
     repository = new InMemoryCountingRepository();
@@ -55,6 +69,16 @@ describe("CountSessionService", () => {
       makeArticle({ articleNumber: "Y1", countPeriod: "YEARLY" }),
       makeArticle({ articleNumber: "N1", countPeriod: "NOT_APPLICABLE" }),
     ]);
+  });
+
+  it("eerste telling (geen enkele ArticleLocationAssignment bestaat) genereert nul initiële entries — pure 'locaties leren'-staat (spec v0.2.1 §2)", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    const entries = await repository.getCountEntries(session.id);
+    expect(entries).toHaveLength(0);
+    // De sessie zelf bevat wel gewoon de volledige scope — het is enkel de
+    // per-locatie stub-generatie die nog niets weet (nog geen enkel artikel
+    // ooit ergens geteld voor dit kantoor).
+    expect(session.articleIds.sort()).toEqual(["office-1:M1", "office-1:M2"].sort());
   });
 
   it("previewScopes toont het juiste aantal artikelen per sessietype", async () => {
@@ -94,6 +118,7 @@ describe("CountSessionService", () => {
       locationId: office.locations[0].id,
       quantity: 1,
     });
+    await completeAllLocations(first.id);
     await sessionService.completeSession(first.id);
 
     const second = await sessionService.startSession("office-1", "MONTHLY");
@@ -125,6 +150,7 @@ describe("CountSessionService", () => {
       locationId: office.locations[0].id,
       quantity: 1,
     });
+    await completeAllLocations(first.id);
     await sessionService.completeSession(first.id);
 
     const second = await sessionService.startSession("office-1", "MONTHLY");
@@ -138,7 +164,7 @@ describe("CountSessionService", () => {
     );
   });
 
-  it("weigert af te ronden zolang niet alle scope-artikelen (volledig) geteld zijn", async () => {
+  it("weigert af te ronden zolang niet alle scope-artikelen (volledig) geteld zijn, ook als alle locaties al afgerond zijn", async () => {
     const session = await sessionService.startSession("office-1", "MONTHLY");
     await countingService.recordCount({
       session,
@@ -147,6 +173,7 @@ describe("CountSessionService", () => {
       quantity: 3,
     });
     // M2 blijft ongeteld.
+    await completeAllLocations(session.id);
     await expect(sessionService.completeSession(session.id)).rejects.toThrow(
       SessionIncompleteError,
     );
@@ -156,7 +183,7 @@ describe("CountSessionService", () => {
     expect(stillActive?.completedAt).toBeNull();
   });
 
-  it("zet status op COMPLETED en vult completedAt zodra alles geteld is", async () => {
+  it("weigert af te ronden zolang niet alle actieve locaties afgerond zijn, ook als alle artikelen al (volledig) geteld zijn", async () => {
     const session = await sessionService.startSession("office-1", "MONTHLY");
     await countingService.recordCount({
       session,
@@ -170,6 +197,56 @@ describe("CountSessionService", () => {
       locationId: office.locations[0].id,
       quantity: 0,
     });
+    // Geen enkele locatie is expliciet afgerond.
+    await expect(sessionService.completeSession(session.id)).rejects.toThrow(
+      SessionIncompleteError,
+    );
+
+    const stillActive = await repository.getSession(session.id);
+    expect(stillActive?.status).toBe("ACTIVE");
+    expect(stillActive?.completedAt).toBeNull();
+  });
+
+  it("de foutmelding noemt de namen van de nog niet afgeronde locaties", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M2",
+      locationId: office.locations[0].id,
+      quantity: 0,
+    });
+    // Rond alle locaties af behalve twee, zodat we de exacte melding kunnen controleren.
+    for (const location of office.locations) {
+      if (location.name === "Locatie 2" || location.name === "Locatie 4") continue;
+      await countingService.completeLocation(session.id, location.id);
+    }
+
+    await expect(sessionService.completeSession(session.id)).rejects.toThrow(
+      "De telling kan nog niet worden afgerond. 2 locaties zijn nog niet afgerond: Locatie 2, Locatie 4.",
+    );
+  });
+
+  it("zet status op COMPLETED en vult completedAt zodra alles geteld en alle locaties afgerond zijn", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M2",
+      locationId: office.locations[0].id,
+      quantity: 0,
+    });
+    await completeAllLocations(session.id);
 
     await sessionService.completeSession(session.id);
 
@@ -193,10 +270,107 @@ describe("CountSessionService", () => {
       locationId: office.locations[0].id,
       quantity: 0,
     });
+    await completeAllLocations(session.id);
     await sessionService.completeSession(session.id);
 
     const sessions = await sessionService.getSessionsForOffice("office-1");
     expect(sessions).toHaveLength(1);
     expect(sessions[0].status).toBe("COMPLETED");
+  });
+
+  it("een expliciete voorraad-0-bevestiging (CONFIRMED_ABSENT) telt als opgelost artikel voor afronding", async () => {
+    // "Zonder locatie" is geen fysieke Location en heeft dus geen eigen
+    // afrondstatus nodig — een artikel dat enkel via een expliciete
+    // "niet aanwezig"-bevestiging opgelost is (geen CountEntry op een
+    // fysieke locatie) mag de sessie nooit blokkeren zolang alle échte
+    // locaties zelf afgerond zijn (spec v0.2.1 §6, voorwaarde 2).
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.confirmAbsent(session, "office-1:M2");
+    await completeAllLocations(session.id);
+
+    await expect(sessionService.completeSession(session.id)).resolves.not.toThrow();
+    const completed = await repository.getSession(session.id);
+    expect(completed?.status).toBe("COMPLETED");
+  });
+
+  it("een locatie die eerst afgerond en daarna opnieuw geopend wordt, maakt de sessie opnieuw niet afrondbaar", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M2",
+      locationId: office.locations[0].id,
+      quantity: 0,
+    });
+    await completeAllLocations(session.id);
+
+    // Op dit punt is de sessie afrondbaar.
+    const readyReview = await sessionService.getReview(session.id);
+    expect(readyReview.allLocationsCompleted).toBe(true);
+
+    // Locatie 1 wordt heropend (bv. om toch nog iets te corrigeren).
+    await countingService.reopenLocation(session.id, office.locations[0].id);
+
+    await expect(sessionService.completeSession(session.id)).rejects.toThrow(
+      SessionIncompleteError,
+    );
+    const stillActive = await repository.getSession(session.id);
+    expect(stillActive?.status).toBe("ACTIVE");
+
+    // En rondt weer normaal af zodra die locatie opnieuw afgerond wordt.
+    await countingService.completeLocation(session.id, office.locations[0].id);
+    await expect(sessionService.completeSession(session.id)).resolves.not.toThrow();
+  });
+
+  it("getReview toont allLocationsCompleted correct op basis van locatiestatus", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    let review = await sessionService.getReview(session.id);
+    expect(review.allLocationsCompleted).toBe(false);
+
+    for (const location of office.locations) {
+      await countingService.completeLocation(session.id, location.id);
+    }
+    review = await sessionService.getReview(session.id);
+    expect(review.allLocationsCompleted).toBe(true);
+  });
+
+  it("een volgende sessie genereert geen stub-entries meer voor een intussen inactief gemaakte locatie", async () => {
+    const first = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session: first,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.recordCount({
+      session: first,
+      articleId: "office-1:M2",
+      locationId: office.locations[0].id,
+      quantity: 1,
+    });
+    await completeAllLocations(first.id);
+    await sessionService.completeSession(first.id);
+
+    // Locatie 1 wordt daarna inactief gemaakt (bv. via Instellingen).
+    const officeNow = await repository.getOffice("office-1");
+    if (!officeNow) throw new Error("kantoor niet gevonden");
+    officeNow.locations[0] = { ...officeNow.locations[0], active: false };
+    await repository.saveOffice(officeNow);
+
+    const second = await sessionService.startSession("office-1", "MONTHLY");
+    const entries = await repository.getCountEntries(second.id);
+    const entryForM1 = entries.find((e) => e.articleId === "office-1:M1");
+    expect(entryForM1).toBeUndefined();
   });
 });

@@ -54,8 +54,9 @@ function makeOffice(): Office {
     locations: [1, 2, 3, 4, 5].map((n) => ({
       id: `antwerpen:loc-${n}`,
       officeId: "antwerpen",
-      number: n as 1 | 2 | 3 | 4 | 5,
+      number: n,
       name: `Locatie ${n}`,
+      active: true,
     })),
   };
 }

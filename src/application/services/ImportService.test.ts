@@ -31,8 +31,9 @@ function makeOffice(id: string, name: string, locationNames: string[]): Office {
     locations: [1, 2, 3, 4, 5].map((n, i) => ({
       id: `${id}:loc-${n}`,
       officeId: id,
-      number: n as 1 | 2 | 3 | 4 | 5,
+      number: n,
       name: locationNames[i] ?? `Locatie ${n}`,
+      active: true,
     })),
   };
 }
