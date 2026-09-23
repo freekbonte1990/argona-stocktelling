@@ -2,12 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Article } from "../../domain/types";
 import { type ArticleSortMode, sortArticlesForLocation } from "../../domain/sorting";
 import { requiresOutOfScopeConfirmation } from "../../domain/sessionScope";
+import { isExtremeDeviation } from "../../domain/deviationWarning";
+import {
+  defaultCountFilter,
+  findNextTodoItem,
+  matchesCountFilter,
+  type CountFilter,
+} from "../../domain/countView";
 import { countingService } from "../../application/container";
 import { ArticleCard } from "../components/ArticleCard";
 import { BigButton } from "../components/BigButton";
-import { FilterBar, type CountFilter } from "../components/FilterBar";
+import { FilterBar } from "../components/FilterBar";
 import { NewArticleFoundModal } from "../components/NewArticleFoundModal";
 import { SESSION_TYPE_NOUN_LOWER } from "../sessionTypeLabels";
+import { formatCount, formatSignedCount, formatSignedEuro } from "../../shared/format";
 import {
   useArticles,
   useAssignments,
@@ -40,7 +48,16 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   const assignments = useAssignments(session?.officeId) ?? [];
   const locationStatuses = useLocationStatuses(sessionId) ?? [];
 
-  const [filter, setFilter] = useState<CountFilter>("ALL");
+  /**
+   * v0.3 §3: standaard "Nog te tellen" bij een normale telling, maar
+   * "Alles" (de bestaande brede browse-flow) tijdens leermodus — zie
+   * `defaultCountFilter`. `null` betekent "gebruiker heeft nog niet zelf een
+   * tab gekozen": de default wordt dan live herberekend uit `isLearningMode`
+   * (hieronder), zodat een leermodus die tijdens het laden overgaat in een
+   * normale telling automatisch de juiste default toont — zodra de
+   * gebruiker zelf een tab aantikt, wint die keuze voorgoed.
+   */
+  const [filterOverride, setFilterOverride] = useState<CountFilter | null>(null);
   const [productGroup, setProductGroup] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<ArticleSortMode>("GROUP_THEN_DESCRIPTION");
   const [search, setSearch] = useState("");
@@ -56,8 +73,24 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   } | null>(null);
   const [locationActionError, setLocationActionError] = useState<string | null>(null);
   const [newArticleFoundOpen, setNewArticleFoundOpen] = useState(false);
+  /**
+   * v0.4 data-integriteit-sprint §7: "Grote afwijking" — een zachte
+   * waarschuwing, geen harde blokkering. `confirmedDeviations` onthoudt per
+   * artikel de LAATST bevestigde extreme hoeveelheid: een hertelling met
+   * exact diezelfde waarde triggert de dialoog niet opnieuw, maar een nieuwe,
+   * ANDERE afwijkende waarde (of een ander artikel) wel weer.
+   */
+  const [confirmedDeviations, setConfirmedDeviations] = useState<Record<string, number>>({});
+  const [deviationConfirm, setDeviationConfirm] = useState<{
+    article: Article;
+    index: number;
+    isManualAddition: boolean;
+    quantity: number;
+  } | null>(null);
 
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  /** v0.3 §1: hoeveelheidvelden per artikel, om een "actieve" kaart programmatisch te kunnen focussen. */
+  const quantityInputRefs = useRef(new Map<string, HTMLInputElement>());
 
   const location = office?.locations.find((l) => l.id === locationId);
 
@@ -114,6 +147,8 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   const defaultPool = isLearningMode ? scopeArticles : knownAtLocation;
   const pool = showOtherSearch ? officeArticles : defaultPool;
 
+  const filter: CountFilter = filterOverride ?? defaultCountFilter(isLearningMode);
+
   const productGroups = useMemo(() => {
     const groups = new Set<string>();
     for (const article of pool) {
@@ -126,8 +161,8 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
     const searchLower = search.trim().toLowerCase();
     return pool.filter((article) => {
       const countedHere = entryByArticleId.get(article.id)?.counted ?? false;
-      if (filter === "COUNTED_HERE" && !countedHere) return false;
-      if (filter === "NOT_COUNTED_ANYWHERE" && hasAnyEntryAnywhere.has(article.id)) return false;
+      const hasAnyEntry = hasAnyEntryAnywhere.has(article.id);
+      if (!matchesCountFilter(filter, countedHere, hasAnyEntry)) return false;
       if (productGroup && article.productGroup !== productGroup) return false;
       if (searchLower) {
         const haystack = `${article.articleNumber} ${article.description}`.toLowerCase();
@@ -166,10 +201,27 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
     if (!inDefaultPool) {
       setShowOtherSearch(true);
     }
-    setFilter("ALL");
+    setFilterOverride("ALL");
     setProductGroup(null);
     setSearch("");
   }, [focusArticleId, session, defaultPool]);
+
+  /**
+   * v0.3 §1: scrollt EN focust (met geselecteerde tekst, klaar om te
+   * overtikken) het hoeveelheidveld van een artikel — de centrale helper
+   * achter "een artikelkaart wordt actief" (initieel laden, na opslaan naar
+   * het volgende, vanuit Review, of bij een eenduidig zoekresultaat).
+   */
+  function activateArticle(articleId: string) {
+    requestAnimationFrame(() => {
+      cardRefs.current.get(articleId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const input = quantityInputRefs.current.get(articleId);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }
 
   const scrolledFocusRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -177,26 +229,85 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
     if (scrolledFocusRef.current === focusArticleId) return;
     if (!sorted.some((a) => a.id === focusArticleId)) return;
     scrolledFocusRef.current = focusArticleId;
-    requestAnimationFrame(() => {
-      cardRefs.current.get(focusArticleId)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+    activateArticle(focusArticleId);
     // Loopt door totdat het artikel effectief in `sorted` zit (bv. nadat de
     // pool-aanpassing hierboven is toegepast) — daarna nooit meer, per
     // focusArticleId, dankzij de ref-guard.
   }, [focusArticleId, sorted]);
 
+  /**
+   * v0.3 §1: bij het openen van een locatie (zonder expliciete
+   * focusArticleId vanuit Review, dat geval regelen de effects hierboven)
+   * krijgt het eerste nog te tellen artikel in de huidige weergave meteen
+   * focus — de gebruiker kan direct typen. Draait maar één keer per bezoek
+   * aan dit scherm (ref-guard): latere filter-/zoekwijzigingen van de
+   * gebruiker mogen nooit ongevraagd de focus wegkapen.
+   */
+  const initialFocusRef = useRef(false);
+  useEffect(() => {
+    if (initialFocusRef.current) return;
+    if (focusArticleId) return;
+    if (!session) return;
+    if (sorted.length === 0) return; // wacht tot de (live-query-)data geladen is.
+    initialFocusRef.current = true;
+    const first = sorted.find((a) => !(entryByArticleId.get(a.id)?.counted ?? false)) ?? sorted[0];
+    activateArticle(first.id);
+  }, [focusArticleId, session, sorted, entryByArticleId]);
+
   if (!session || !office || !location) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
   }
 
+  /**
+   * Aanvulling ("niet 0 als standaardwaarde, maar het vorige getelde
+   * getal — zo kan je gemakkelijk +/- klikken zonder telkens te moeten
+   * typen"): een CountEntry die nog niet geteld is, heeft altijd
+   * `quantity: null` (zie `CountSessionService#buildInitialEntries`) — een
+   * ECHTE telling (counted:true, ook via CountingService) heeft altijd een
+   * concreet getal, nooit null. De `?? null`-terugval hieronder wordt dus
+   * uitsluitend gebruikt zolang er nog niet geteld is, en toont dan
+   * `article.previousCount` als startpunt i.p.v. een leeg veld — bestaat er
+   * geen vorige telling (nieuw artikel), dan blijft het veld leeg zoals
+   * voorheen, want dan is er geen zinvol startpunt.
+   */
   function getQuantity(article: Article): number | null {
     if (article.id in draftQuantities) return draftQuantities[article.id];
-    return entryByArticleId.get(article.id)?.quantity ?? null;
+    return entryByArticleId.get(article.id)?.quantity ?? article.previousCount ?? null;
   }
 
+  /**
+   * v0.4 data-integriteit-sprint §7: laatste gate vóór elke effectieve
+   * telling — ongeacht via welk pad (rechtstreeks, na de
+   * out-of-scope-bevestiging, of na de onverwachte-locatie-bevestiging, die
+   * alle drie uiteindelijk hier samenkomen). Enkel een NIEUWE (nog niet voor
+   * dit artikel bevestigde) extreme afwijking onderbreekt de flow; een reeds
+   * bevestigde waarde (bv. bij het per ongeluk opnieuw indienen van dezelfde
+   * telling) slaat gewoon meteen normaal op.
+   */
   async function performRecord(article: Article, index: number, isManualAddition: boolean) {
     const quantity = getQuantity(article);
     if (quantity === null || !session) return;
+
+    const isExtreme = isExtremeDeviation({
+      previousCount: article.previousCount,
+      newQuantity: quantity,
+      costPrice: article.costPrice,
+    });
+    if (isExtreme && confirmedDeviations[article.id] !== quantity) {
+      setDeviationConfirm({ article, index, isManualAddition, quantity });
+      return;
+    }
+
+    await commitRecord(article, index, isManualAddition, quantity);
+  }
+
+  async function commitRecord(
+    article: Article,
+    index: number,
+    isManualAddition: boolean,
+    quantity: number,
+  ) {
+    if (!session) return;
     await countingService.recordCount({
       session,
       articleId: article.id,
@@ -212,13 +323,36 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
       return next;
     });
 
-    const next = sorted
-      .slice(index + 1)
-      .find((a) => !(entryByArticleId.get(a.id)?.counted ?? false));
+    // Aanvulling ("als alle artikels binnen een locatie zijn geteld mag je
+    // die als afgerond zien"): meteen na een geslaagde telling nagaan of dit
+    // de laatste openstaande telling op DEZE locatie was, en zo ja de
+    // locatie automatisch afronden — geen aparte handmatige klik meer nodig
+    // wanneer alles al geteld is. Bewust een VERSE lezing rechtstreeks uit de
+    // repository (i.p.v. de mogelijk nog niet-bijgewerkte `entriesAtLocation`
+    // uit de live-query hierboven, die na deze `await` nog de oude stand kan
+    // tonen): zo blijft dit exact het juiste, niet-stale moment bepalen.
+    // Enkel actie ondernemen als de locatie nu nog niet COMPLETED is —
+    // anders zou een reeds afgeronde, nadien HEROPENDE locatie zichzelf
+    // meteen weer sluiten zodra je "Locatie heropenen" klikt terwijl alles
+    // toevallig nog steeds volledig geteld staat.
+    if (locationStatus !== "COMPLETED") {
+      const freshEntriesAtLocation = (await countingService.getEntries(sessionId)).filter(
+        (e) => e.locationId === locationId,
+      );
+      if (freshEntriesAtLocation.length > 0 && freshEntriesAtLocation.every((e) => e.counted)) {
+        await countingService.completeLocation(sessionId, locationId);
+      }
+    }
+
+    // v0.3 §2/§5: automatisch door naar het volgende nog niet getelde
+    // artikel binnen de huidige weergave/filter (bv. verdwijnt het zonet
+    // getelde artikel meteen uit "Nog te tellen" — geen terugspringen naar
+    // boven nodig). Is er geen volgende meer, dan toont de lege-lijstmelding
+    // hieronder automatisch "Alle zichtbare artikels zijn geteld." zodra
+    // `sorted` leegloopt.
+    const next = findNextTodoItem(sorted, index, (a) => entryByArticleId.get(a.id)?.counted ?? false);
     if (next) {
-      requestAnimationFrame(() => {
-        cardRefs.current.get(next.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+      activateArticle(next.id);
     }
   }
 
@@ -261,11 +395,34 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
     proceedAfterLocationCheck(article, index);
   }
 
+  // v0.3 §4: voortgang bovenaan de locatie, gebaseerd op dezelfde
+  // per-locatie-entries als LocationCard/LocationOverviewPage (consistente
+  // definitie doorheen de app) — dus NIET op `pool`, die tijdens leermodus
+  // de hele sessiescope kan omvatten. Live, want `entriesAtLocation` volgt
+  // rechtstreeks de live-query op `entries`.
+  const locationEntriesTotal = entriesAtLocation.length;
+  const locationEntriesCounted = entriesAtLocation.filter((e) => e.counted).length;
+  const locationEntriesRemaining = locationEntriesTotal - locationEntriesCounted;
+  const locationProgressPct =
+    locationEntriesTotal > 0 ? Math.round((locationEntriesCounted / locationEntriesTotal) * 100) : 0;
+
   return (
     <div className="stack">
       <h1 className="screen-title">
         {office.name} &gt; {location.name}
       </h1>
+
+      <div>
+        <div className="progress-label">
+          <span>
+            {locationEntriesCounted} / {locationEntriesTotal} geteld
+          </span>
+          <span>{locationEntriesRemaining} nog te tellen</span>
+        </div>
+        <div className="progress-bar">
+          <div className="progress-bar__fill" style={{ width: `${locationProgressPct}%` }} />
+        </div>
+      </div>
 
       {isLearningMode && !showOtherSearch && (
         <div className="warning-banner">
@@ -279,11 +436,21 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
         placeholder="Zoek op artikelnummer of omschrijving..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          // v0.3 §6: bij exact één (logisch) zoekresultaat kan de gebruiker
+          // meteen tellen — Enter springt rechtstreeks naar het hoeveelheidveld,
+          // zonder de kaart eerst te moeten aantikken.
+          if (sorted.length === 1) {
+            e.preventDefault();
+            activateArticle(sorted[0].id);
+          }
+        }}
       />
 
       <FilterBar
         filter={filter}
-        onFilterChange={setFilter}
+        onFilterChange={setFilterOverride}
         productGroups={productGroups}
         selectedProductGroup={productGroup}
         onProductGroupChange={setProductGroup}
@@ -317,13 +484,22 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
       </button>
 
       <div className="stack">
-        {sorted.length === 0 && <p className="empty-state">Geen artikelen gevonden.</p>}
+        {/*
+         * v0.3 §2/§5: zodra de "Nog te tellen"-weergave leegloopt (alles
+         * geteld) toont dit een duidelijke, andere melding dan een echt lege
+         * zoekopdracht ("Geen artikelen gevonden.") in de andere weergaven.
+         */}
+        {sorted.length === 0 && (
+          <p className="empty-state">
+            {filter === "TODO" ? "Alle zichtbare artikels zijn geteld." : "Geen artikelen gevonden."}
+          </p>
+        )}
         {sorted.map((article, index) => {
           const entry = entryByArticleId.get(article.id);
           const counted = entry?.counted ?? false;
-          const hasNextTodo = sorted
-            .slice(index + 1)
-            .some((a) => !(entryByArticleId.get(a.id)?.counted ?? false));
+          const hasNextTodo =
+            findNextTodoItem(sorted, index, (a) => entryByArticleId.get(a.id)?.counted ?? false) !==
+            undefined;
           return (
             <ArticleCard
               key={article.id}
@@ -339,6 +515,10 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
               }
               onConfirm={() => confirm(article, index)}
               confirmLabel={hasNextTodo ? "Geteld & volgende" : "Geteld"}
+              quantityInputRef={(el) => {
+                if (el) quantityInputRefs.current.set(article.id, el);
+                else quantityInputRefs.current.delete(article.id);
+              }}
             />
           );
         })}
@@ -431,6 +611,74 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
               </BigButton>
               <BigButton variant="ghost" onClick={() => setOutOfScopeConfirm(null)}>
                 Annuleren
+              </BigButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/*
+        Data-integriteit-sprint §7: "Grote afwijking" — zachte waarschuwing,
+        geen harde blokkering. Toont expliciet Vorige telling / Nieuwe
+        telling / Verschil / Waardeverschil, zodat de gebruiker in één
+        oogopslag kan zien of dit een tikfout is of een oprechte, grote
+        correctie.
+      */}
+      {deviationConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>Grote afwijking</p>
+            <p className="screen-subtitle" style={{ margin: 0 }}>
+              {deviationConfirm.article.description} ({deviationConfirm.article.articleNumber})
+            </p>
+            <div className="review-row__figures">
+              <div>
+                <div className="review-row__figure-label">Vorige telling</div>
+                <div className="review-row__figure-value">
+                  {formatCount(deviationConfirm.article.previousCount)}
+                </div>
+              </div>
+              <div>
+                <div className="review-row__figure-label">Nieuwe telling</div>
+                <div className="review-row__figure-value">{formatCount(deviationConfirm.quantity)}</div>
+              </div>
+              <div>
+                <div className="review-row__figure-label">Verschil</div>
+                <div className="review-row__figure-value">
+                  {formatSignedCount(
+                    deviationConfirm.article.previousCount !== null
+                      ? deviationConfirm.quantity - deviationConfirm.article.previousCount
+                      : null,
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="review-row__figure-label">Waardeverschil</div>
+                <div className="review-row__figure-value">
+                  {formatSignedEuro(
+                    deviationConfirm.article.previousCount !== null &&
+                      deviationConfirm.article.costPrice !== null
+                      ? (deviationConfirm.quantity - deviationConfirm.article.previousCount) *
+                          deviationConfirm.article.costPrice
+                      : null,
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="stack">
+              <BigButton
+                variant="primary"
+                onClick={() => {
+                  const { article, index, isManualAddition, quantity } = deviationConfirm;
+                  setConfirmedDeviations((prev) => ({ ...prev, [article.id]: quantity }));
+                  setDeviationConfirm(null);
+                  void commitRecord(article, index, isManualAddition, quantity);
+                }}
+              >
+                Ja, bevestigen
+              </BigButton>
+              <BigButton variant="ghost" onClick={() => setDeviationConfirm(null)}>
+                Opnieuw invoeren
               </BigButton>
             </div>
           </div>

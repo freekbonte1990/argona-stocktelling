@@ -1,4 +1,20 @@
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { Article, Office } from "../../domain/types";
+
+/**
+ * Eén nog niet-geïnterpreteerd, historisch tellingtabblad zoals aangetroffen
+ * in een geïmporteerd rollend Excelbestand (spec: "een bestaand historisch
+ * tellingtabblad mag nooit gewijzigd of overschreven worden"). `rows` is de
+ * ruwe rij-representatie (zoals `sheet_to_json({header:1})` teruggeeft) —
+ * bewust ondoorzichtig voor het domein: dit bestaat uitsluitend om zo'n tab
+ * byte-/logisch ongewijzigd te kunnen doorgeven bij een volgende export. Een
+ * latere eBuddy-bron heeft dit concept niet nodig (die bewaart StockSnapshot
+ * al gestructureerd) en implementeert `loadHistoricalSheets` dan ook niet.
+ */
+export interface HistoricalSheetSnapshot {
+  sheetName: string;
+  rows: unknown[][];
+}
 
 /**
  * Bron van stockgegevens (kantoor, locaties, artikelen).
@@ -14,4 +30,22 @@ export interface StockSource {
   loadArticles(office: Office): Promise<Article[]>;
   /** Bestandsnaam / bronaanduiding, puur informatief (getoond in de UI, bewaard op de sessie). */
   readonly sourceLabel: string;
+  /**
+   * Machinevriendelijke telhistoriek uit een eerder geëxporteerd rollend
+   * bestand (sheet HISTORIE) — spec: "een nieuw toestel/browser moet
+   * onmiddellijk historische grafieken kunnen tonen na import, zonder dat de
+   * oude CountSessions lokaal aanwezig zijn". OPTIONEEL: bewust `?` zodat
+   * bestaande/toekomstige StockSource-implementaties (en oudere,
+   * gestandaardiseerde bestanden zonder HISTORIE) dit niet moeten
+   * ondersteunen — ontbreekt de methode of de sheet, dan is er gewoon nog
+   * geen geïmporteerde historiek.
+   */
+  loadHistory?(): Promise<StockHistoryEntry[]>;
+  /**
+   * Alle overige, niet-standaard sheets uit het bronbestand (de benoemde
+   * historische tellingtabs, bv. "2026-08 Maand") — puur ondoorzichtige
+   * passthrough, zie `HistoricalSheetSnapshot`. Optioneel om dezelfde reden
+   * als `loadHistory`.
+   */
+  loadHistoricalSheets?(): Promise<HistoricalSheetSnapshot[]>;
 }

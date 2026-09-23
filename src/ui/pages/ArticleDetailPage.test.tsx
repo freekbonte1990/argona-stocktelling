@@ -1,0 +1,199 @@
+// @vitest-environment jsdom
+import "fake-indexeddb/auto";
+import { beforeEach, describe, expect, it } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ArticleDetailPage } from "./ArticleDetailPage";
+import { db } from "../../adapters/storage/db";
+import { countingRepository } from "../../application/container";
+import type { Article, Office } from "../../domain/types";
+
+/**
+ * Aanvulling ("Bij Artikel moeten er gemakkelijk wijzigingen aangebracht
+ * kunnen worden aan: omschrijving, productgroep, leverancier, en de prijs
+ * moet ook zichtbaar zijn"): dekt de nieuwe inline-bewerkmodus op de
+ * "Algemeen"-kaart met de echte IndexedDB-laag (fake-indexeddb).
+ */
+
+const office: Office = {
+  id: "office-1",
+  name: "Antwerpen",
+  baseDate: null,
+  locations: [],
+};
+
+const article: Article = {
+  id: "office-1:A1",
+  officeId: "office-1",
+  articleNumber: "A1",
+  officialArticleNumber: "A1",
+  idType: "OFFICIEEL",
+  description: "Oude omschrijving",
+  productGroup: "OUDE GROEP",
+  supplier: "Oude leverancier",
+  unit: "stuk",
+  costPrice: 12.5,
+  rawCountPeriod: "MAAND",
+  countPeriod: "MONTHLY",
+  rawStatus: "ACTIEF",
+  status: "ACTIVE",
+  previousCount: 3,
+  sourceRow: 1,
+};
+
+beforeEach(async () => {
+  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState]) {
+    await table.clear();
+  }
+  await countingRepository.saveOffice(office);
+  await countingRepository.saveArticles([article]);
+});
+
+async function waitUntilLoaded() {
+  await waitFor(() => {
+    expect(screen.queryByText("Bezig met laden...")).not.toBeInTheDocument();
+  });
+}
+
+/** Scopet queries tot de "Algemeen"-kaart — de paginatitel (h1) toont ook de omschrijving. */
+function algemeenCard(): HTMLElement {
+  return screen.getByText("Algemeen").closest(".card") as HTMLElement;
+}
+
+describe("ArticleDetailPage — bewerken van Algemeen (aanvulling)", () => {
+  it("toont de kostprijs (voorheen nergens zichtbaar) in de leesweergave", async () => {
+    render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+    await waitUntilLoaded();
+
+    expect(screen.getByText("€ 12,50")).toBeInTheDocument();
+  });
+
+  it("laat omschrijving/productgroep/leverancier/kostprijs bewerken en bewaart dat in de repository", async () => {
+    const user = userEvent.setup();
+    render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+    await waitUntilLoaded();
+
+    await user.click(screen.getByRole("button", { name: "Bewerken" }));
+
+    const descriptionInput = screen.getByDisplayValue("Oude omschrijving");
+    await user.clear(descriptionInput);
+    await user.type(descriptionInput, "Nieuwe omschrijving");
+
+    const productGroupInput = screen.getByDisplayValue("OUDE GROEP");
+    await user.clear(productGroupInput);
+    await user.type(productGroupInput, "NIEUWE GROEP");
+
+    const supplierInput = screen.getByDisplayValue("Oude leverancier");
+    await user.clear(supplierInput);
+    await user.type(supplierInput, "Nieuwe leverancier");
+
+    const costPriceInput = screen.getByDisplayValue("12.5");
+    await user.clear(costPriceInput);
+    await user.type(costPriceInput, "15,75");
+
+    await user.click(screen.getByRole("button", { name: "Opslaan" }));
+
+    await waitFor(() => {
+      expect(within(algemeenCard()).getByText("Nieuwe omschrijving")).toBeInTheDocument();
+    });
+    expect(within(algemeenCard()).getByText("NIEUWE GROEP")).toBeInTheDocument();
+    expect(within(algemeenCard()).getByText("Nieuwe leverancier")).toBeInTheDocument();
+    expect(within(algemeenCard()).getByText("€ 15,75")).toBeInTheDocument();
+
+    const [saved] = await countingRepository.getArticles("office-1");
+    expect(saved.description).toBe("Nieuwe omschrijving");
+    expect(saved.productGroup).toBe("NIEUWE GROEP");
+    expect(saved.supplier).toBe("Nieuwe leverancier");
+    expect(saved.costPrice).toBe(15.75);
+    // Ongemoeide velden blijven exact zoals voorheen.
+    expect(saved.previousCount).toBe(3);
+    expect(saved.articleNumber).toBe("A1");
+  });
+
+  it("annuleren verwerpt de aanpassingen zonder iets op te slaan", async () => {
+    const user = userEvent.setup();
+    render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+    await waitUntilLoaded();
+
+    await user.click(screen.getByRole("button", { name: "Bewerken" }));
+    const descriptionInput = screen.getByDisplayValue("Oude omschrijving");
+    await user.clear(descriptionInput);
+    await user.type(descriptionInput, "Verworpen wijziging");
+    await user.click(screen.getByRole("button", { name: "Annuleren" }));
+
+    expect(within(algemeenCard()).getByText("Oude omschrijving")).toBeInTheDocument();
+    const [saved] = await countingRepository.getArticles("office-1");
+    expect(saved.description).toBe("Oude omschrijving");
+  });
+
+  it("weigert een lege omschrijving op te slaan", async () => {
+    const user = userEvent.setup();
+    render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+    await waitUntilLoaded();
+
+    await user.click(screen.getByRole("button", { name: "Bewerken" }));
+    const descriptionInput = screen.getByDisplayValue("Oude omschrijving");
+    await user.clear(descriptionInput);
+    await user.click(screen.getByRole("button", { name: "Opslaan" }));
+
+    expect(await screen.findByText("Omschrijving mag niet leeg zijn.")).toBeInTheDocument();
+    const [saved] = await countingRepository.getArticles("office-1");
+    expect(saved.description).toBe("Oude omschrijving");
+  });
+});
+
+describe(
+  "ArticleDetailPage — Telperiode en Status bewerken (aanvulling: \"telperiode en status moet je " +
+    "ook kunnen aanpassen\")",
+  () => {
+    it("toont Telperiode en Status in de leesweergave, met de 4 vaste statusopties bewerkbaar", async () => {
+      render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+      await waitUntilLoaded();
+
+      expect(within(algemeenCard()).getByText("Maand")).toBeInTheDocument();
+      expect(within(algemeenCard()).getByText("Actief")).toBeInTheDocument();
+    });
+
+    it("laat Telperiode en Status kiezen uit een vaste lijst en bewaart de juiste ruwe + genormaliseerde waarden", async () => {
+      const user = userEvent.setup();
+      render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+      await waitUntilLoaded();
+
+      await user.click(screen.getByRole("button", { name: "Bewerken" }));
+
+      const countPeriodSelect = screen.getByDisplayValue("Maand") as HTMLSelectElement;
+      await user.selectOptions(countPeriodSelect, "Kwartaal");
+
+      const statusSelect = screen.getByDisplayValue("Actief") as HTMLSelectElement;
+      await user.selectOptions(statusSelect, "Obsolete - paneel");
+
+      await user.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => {
+        expect(within(algemeenCard()).getByText("Kwartaal")).toBeInTheDocument();
+      });
+      expect(within(algemeenCard()).getByText("Obsolete - paneel")).toBeInTheDocument();
+
+      const [saved] = await countingRepository.getArticles("office-1");
+      expect(saved.countPeriod).toBe("QUARTERLY");
+      expect(saved.rawCountPeriod).toBe("KWARTAAL");
+      expect(saved.status).toBe("INACTIVE");
+      expect(saved.rawStatus).toBe("OBSOLETE - PANEEL");
+    });
+
+    it("annuleren laat Telperiode en Status ongemoeid", async () => {
+      const user = userEvent.setup();
+      render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
+      await waitUntilLoaded();
+
+      await user.click(screen.getByRole("button", { name: "Bewerken" }));
+      await user.selectOptions(screen.getByDisplayValue("Actief") as HTMLSelectElement, "Non-actief");
+      await user.click(screen.getByRole("button", { name: "Annuleren" }));
+
+      expect(within(algemeenCard()).getByText("Actief")).toBeInTheDocument();
+      const [saved] = await countingRepository.getArticles("office-1");
+      expect(saved.status).toBe("ACTIVE");
+      expect(saved.rawStatus).toBe("ACTIEF");
+    });
+  },
+);

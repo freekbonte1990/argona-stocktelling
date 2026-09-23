@@ -6,6 +6,7 @@ import {
   removeUnusedLocation,
   renameLocation,
   reorderLocations,
+  sessionLocations,
   setLocationActive,
 } from "./locations";
 import type { ArticleLocationAssignment, CountEntry, Location, Office } from "./types";
@@ -134,5 +135,54 @@ describe("locatiebeheer (domain/locations.ts)", () => {
     const office = buildOffice(3);
     const updated = reorderLocations(office, ["office:loc-1", "office:loc-2"]);
     expect(updated).toEqual(office);
+  });
+
+  describe("sessionLocations (data-integriteit-sprint §5: bevroren session.locationIds)", () => {
+    it("zonder locationIds (oudere sessie): valt terug op de live actieve locaties", () => {
+      const office = buildOffice(3);
+      expect(sessionLocations({}, office).map((l) => l.id)).toEqual([
+        "office:loc-1",
+        "office:loc-2",
+        "office:loc-3",
+      ]);
+    });
+
+    it("met locationIds: enkel de bevroren set, ongeacht latere wijzigingen aan office.locations", () => {
+      const office = buildOffice(3);
+      const frozen = { locationIds: ["office:loc-1", "office:loc-2"] };
+      expect(sessionLocations(frozen, office).map((l) => l.id)).toEqual([
+        "office:loc-1",
+        "office:loc-2",
+      ]);
+    });
+
+    it("een locatie die NA sessiestart inactief gemaakt werd, blijft verplicht voor deze sessie", () => {
+      const office = setLocationActive(buildOffice(3), "office:loc-2", false);
+      const frozen = { locationIds: ["office:loc-1", "office:loc-2", "office:loc-3"] };
+      // Ondanks dat loc-2 nu inactief is, staat ze nog in de bevroren set.
+      expect(sessionLocations(frozen, office).map((l) => l.id)).toEqual([
+        "office:loc-1",
+        "office:loc-2",
+        "office:loc-3",
+      ]);
+    });
+
+    it("een locatie die pas NA sessiestart werd toegevoegd, wordt niet plots verplicht", () => {
+      const office = addLocation(buildOffice(2), "Nieuw rek", "office:loc-3");
+      const frozen = { locationIds: ["office:loc-1", "office:loc-2"] };
+      expect(sessionLocations(frozen, office).map((l) => l.id)).toEqual([
+        "office:loc-1",
+        "office:loc-2",
+      ]);
+    });
+
+    it("respecteert de weergavevolgorde (number), niet de volgorde in locationIds zelf", () => {
+      const office = buildOffice(3);
+      const frozen = { locationIds: ["office:loc-3", "office:loc-1"] };
+      expect(sessionLocations(frozen, office).map((l) => l.id)).toEqual([
+        "office:loc-1",
+        "office:loc-3",
+      ]);
+    });
   });
 });

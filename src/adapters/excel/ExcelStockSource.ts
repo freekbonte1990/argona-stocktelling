@@ -1,11 +1,29 @@
 import * as XLSX from "xlsx";
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { Article, Location, Office } from "../../domain/types";
-import type { StockSource } from "../../application/ports/StockSource";
+import type { HistoricalSheetSnapshot, StockSource } from "../../application/ports/StockSource";
 import { slugify } from "../../shared/ids";
 import { ARTIKEL_SHEET_NAME, parseArtikelSheet } from "./parseArtikel";
 import { CONFIG_SHEET_NAME, parseConfigSheet } from "./parseConfig";
+import { HISTORIE_SHEET_NAME, parseHistorieSheet } from "./parseHistorie";
 import { TELLING_SHEET_NAME, validateTellingSheet } from "./parseTelling";
 import { ExcelValidationError } from "./excelErrors";
+
+/**
+ * De vaste, "bekende" sheetnamen — alles daarbuiten in een geïmporteerd
+ * bestand wordt beschouwd als een historisch, benoemd tellingtabblad (bv.
+ * "2026-08 Maand") en ONGEWIJZIGD als ruwe rijen bewaard (rollend
+ * stockarchief, spec: "behoud historische tellingtabs... exact als
+ * historische snapshots"). `TELLING` blijft hier bewust bij: die sheet is
+ * geen historisch archief-tabblad, enkel backward-compatibele scope-data.
+ */
+const FIXED_SHEET_NAMES = new Set([
+  CONFIG_SHEET_NAME,
+  ARTIKEL_SHEET_NAME,
+  TELLING_SHEET_NAME,
+  HISTORIE_SHEET_NAME,
+  "NIEUWE_ARTIKELEN",
+]);
 
 /**
  * StockSource-adapter die een reeds geparste Argona-stocktelling Excelbestand
@@ -16,12 +34,22 @@ import { ExcelValidationError } from "./excelErrors";
 export class ExcelStockSource implements StockSource {
   private readonly office: Office;
   private readonly articles: Article[];
+  private readonly history: StockHistoryEntry[];
+  private readonly historicalSheets: HistoricalSheetSnapshot[];
   readonly sourceLabel: string;
 
-  constructor(office: Office, articles: Article[], sourceLabel: string) {
+  constructor(
+    office: Office,
+    articles: Article[],
+    sourceLabel: string,
+    history: StockHistoryEntry[] = [],
+    historicalSheets: HistoricalSheetSnapshot[] = [],
+  ) {
     this.office = office;
     this.articles = articles;
     this.sourceLabel = sourceLabel;
+    this.history = history;
+    this.historicalSheets = historicalSheets;
   }
 
   async loadOffice(): Promise<Office> {
@@ -30,6 +58,16 @@ export class ExcelStockSource implements StockSource {
 
   async loadArticles(_office: Office): Promise<Article[]> {
     return this.articles;
+  }
+
+  /** Leeg wanneer het bronbestand geen HISTORIE-sheet had (backward compat, oudere gestandaardiseerde bestanden). */
+  async loadHistory(): Promise<StockHistoryEntry[]> {
+    return this.history;
+  }
+
+  /** Leeg wanneer het bronbestand geen enkel historisch, benoemd tellingtabblad bevatte. */
+  async loadHistoricalSheets(): Promise<HistoricalSheetSnapshot[]> {
+    return this.historicalSheets;
   }
 }
 
@@ -89,7 +127,20 @@ export function createExcelStockSourceFromBuffer(
 
   const articles = parseArtikelSheet(artikelRows, officeId);
 
-  return new ExcelStockSource(office, articles, sourceFileName);
+  // Rollend stockarchief: HISTORIE is OPTIONEEL — oudere, gestandaardiseerde
+  // bestanden (Antwerpen/Lokeren/Damme-fixtures) hebben deze sheet niet, en
+  // moeten probleemloos blijven importeren (spec: "blijf backward compatible").
+  const historieSheet = workbook.Sheets[HISTORIE_SHEET_NAME];
+  const history = historieSheet ? parseHistorieSheet(sheetToRows(historieSheet), officeId) : [];
+
+  // Alle overige sheets (niet in FIXED_SHEET_NAMES) zijn historische, benoemde
+  // tellingtabs (bv. "2026-08 Maand") — ongewijzigd als ruwe rijen bewaard,
+  // zodat een volgende export ze byte-/logisch identiek kan doorgeven.
+  const historicalSheets = workbook.SheetNames.filter((name) => !FIXED_SHEET_NAMES.has(name)).map(
+    (sheetName) => ({ sheetName, rows: sheetToRows(workbook.Sheets[sheetName]) }),
+  );
+
+  return new ExcelStockSource(office, articles, sourceFileName, history, historicalSheets);
 }
 
 function getSheetOrThrow(workbook: XLSX.WorkBook, sheetName: string): XLSX.WorkSheet {

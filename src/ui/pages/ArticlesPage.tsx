@@ -170,102 +170,100 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
         onOpenArticle={onOpenArticle}
       />
 
+      {/*
+       * Aanvulling ("filters ziet er niet goed uit... dropdown per
+       * categorie?"): de vroegere chip-grid (elke productgroep/locatie als
+       * eigen los knopje) werd onoverzichtelijk zodra er veel opties waren.
+       * Eén `<select>` per categorie is compacter, en is exact hetzelfde
+       * patroon als elders in de app (bv. de sorteer-dropdown in de
+       * toolbar hierboven, of Telperiode/Status op de artikeldetailpagina).
+       */}
       {filtersOpen && (
         <div className="modal-overlay">
           <div className="modal-card stack">
             <p style={{ margin: 0, fontWeight: 700 }}>Filters</p>
 
-            <div className="stack stack--tight">
+            <div className="stack">
               {productGroups.length > 0 && (
-                <div className="filter-row">
-                  <button
-                    type="button"
-                    className={`chip ${filters.productGroup === null ? "chip--active" : ""}`}
-                    onClick={() => setFilters((prev) => ({ ...prev, productGroup: null }))}
-                  >
-                    Alle productgroepen
-                  </button>
-                  {productGroups.map((group) => (
-                    <button
-                      key={group}
-                      type="button"
-                      className={`chip ${filters.productGroup === group ? "chip--active" : ""}`}
-                      onClick={() => setFilters((prev) => ({ ...prev, productGroup: group }))}
-                    >
-                      {group}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="filter-row">
-                <button
-                  type="button"
-                  className={`chip ${filters.countPeriod === null ? "chip--active" : ""}`}
-                  onClick={() => setFilters((prev) => ({ ...prev, countPeriod: null }))}
-                >
-                  Alle telfrequenties
-                </button>
-                {(Object.keys(FREQUENCY_FILTER_LABELS) as ArticleCountFrequency[]).map((period) => (
-                  <button
-                    key={period}
-                    type="button"
-                    className={`chip ${filters.countPeriod === period ? "chip--active" : ""}`}
-                    onClick={() => setFilters((prev) => ({ ...prev, countPeriod: period }))}
-                  >
-                    {FREQUENCY_FILTER_LABELS[period]}
-                  </button>
-                ))}
-              </div>
-
-              <div className="filter-row">
-                <button
-                  type="button"
-                  className={`chip ${filters.location === "ALL" ? "chip--active" : ""}`}
-                  onClick={() => setFilters((prev) => ({ ...prev, location: "ALL" }))}
-                >
-                  Alle locaties
-                </button>
-                <button
-                  type="button"
-                  className={`chip ${filters.location === "NONE" ? "chip--active" : ""}`}
-                  onClick={() => setFilters((prev) => ({ ...prev, location: "NONE" }))}
-                >
-                  Geen locatie
-                </button>
-                {activeLocations.map((location) => (
-                  <button
-                    key={location.id}
-                    type="button"
-                    className={`chip ${filters.location === location.id ? "chip--active" : ""}`}
-                    onClick={() =>
-                      setFilters((prev) => ({ ...prev, location: location.id as ArticleLocationFilterValue }))
+                <label className="filter-field">
+                  <span className="filter-field__label">Productgroep</span>
+                  <select
+                    className="search-input"
+                    value={filters.productGroup ?? ""}
+                    onChange={(e) =>
+                      setFilters((prev) => ({ ...prev, productGroup: e.target.value || null }))
                     }
                   >
-                    {location.name}
-                  </button>
-                ))}
-              </div>
+                    <option value="">Alle productgroepen</option>
+                    {productGroups.map((group) => (
+                      <option key={group} value={group}>
+                        {group}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
-              <div className="filter-row">
-                <button
-                  type="button"
-                  className={`chip ${filters.status === null ? "chip--active" : ""}`}
-                  onClick={() => setFilters((prev) => ({ ...prev, status: null }))}
+              <label className="filter-field">
+                <span className="filter-field__label">Telfrequentie</span>
+                <select
+                  className="search-input"
+                  value={filters.countPeriod ?? ""}
+                  onChange={(e) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      countPeriod: (e.target.value || null) as ArticleCountFrequency | null,
+                    }))
+                  }
                 >
-                  Alle statussen
-                </button>
-                {(Object.keys(ARTICLE_STATUS_FILTER_LABELS) as ArticleActiveStatus[]).map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    className={`chip ${filters.status === status ? "chip--active" : ""}`}
-                    onClick={() => setFilters((prev) => ({ ...prev, status }))}
-                  >
-                    {ARTICLE_STATUS_FILTER_LABELS[status]}
-                  </button>
-                ))}
-              </div>
+                  <option value="">Alle telfrequenties</option>
+                  {(Object.keys(FREQUENCY_FILTER_LABELS) as ArticleCountFrequency[]).map((period) => (
+                    <option key={period} value={period}>
+                      {FREQUENCY_FILTER_LABELS[period]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="filter-field">
+                <span className="filter-field__label">Locatie</span>
+                <select
+                  className="search-input"
+                  value={filters.location}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, location: e.target.value as ArticleLocationFilterValue }))
+                  }
+                >
+                  <option value="ALL">Alle locaties</option>
+                  <option value="NONE">Geen locatie</option>
+                  {activeLocations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="filter-field">
+                <span className="filter-field__label">Status</span>
+                <select
+                  className="search-input"
+                  value={filters.status ?? ""}
+                  onChange={(e) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      status: (e.target.value || null) as ArticleActiveStatus | null,
+                    }))
+                  }
+                >
+                  <option value="">Alle statussen</option>
+                  {(Object.keys(ARTICLE_STATUS_FILTER_LABELS) as ArticleActiveStatus[]).map((status) => (
+                    <option key={status} value={status}>
+                      {ARTICLE_STATUS_FILTER_LABELS[status]}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <BigButton variant="primary" onClick={() => setFiltersOpen(false)}>

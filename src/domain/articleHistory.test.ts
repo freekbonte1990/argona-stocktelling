@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildArticleHistory } from "./articleHistory";
+import { buildArticleHistory, mergeArticleHistory } from "./articleHistory";
+import type { StockHistoryEntry } from "./stockSnapshot";
 import type { CountEntry, CountSession, Location } from "./types";
 
 const locations: Location[] = [1, 2].map((n) => ({
@@ -100,5 +101,71 @@ describe("buildArticleHistory (spec v0.2.1 §7-8)", () => {
     const entries = new Map([["s1", [makeEntry({ sessionId: "s1", quantity: 5 })]]]);
     const history = buildArticleHistory("office-1:M1", [activeSession], entries, locations);
     expect(history).toHaveLength(0);
+  });
+
+  it("negeert een geannuleerde sessie (sessielogica-fix: enkel COMPLETED telt als officiële telling)", () => {
+    const cancelledSession = makeSession({
+      id: "s1",
+      status: "CANCELLED",
+      completedAt: null,
+      cancelledAt: "2026-08-01T10:00:00.000Z",
+    });
+    // Ook al bestaan er CountEntries voor deze (geannuleerde) sessie, ze
+    // mogen nooit in de officiële artikelgeschiedenis/grafiek verschijnen.
+    const entries = new Map([["s1", [makeEntry({ sessionId: "s1", quantity: 12 })]]]);
+    const history = buildArticleHistory("office-1:M1", [cancelledSession], entries, locations);
+    expect(history).toHaveLength(0);
+  });
+});
+
+function makeHistoryEntry(overrides: Partial<StockHistoryEntry> = {}): StockHistoryEntry {
+  return {
+    countDate: "2026-09-30",
+    sessionType: "MONTHLY",
+    sessionName: "2026-09 Maand",
+    articleId: "office-1:M1",
+    articleNumber: "M1",
+    description: "Artikel M1",
+    totalCount: 8,
+    previousCount: 10,
+    differenceQuantity: -2,
+    costPrice: 2,
+    differenceAmount: -4,
+    status: "GETELD",
+    locationNames: ["Rek 1"],
+    ...overrides,
+  };
+}
+
+describe("mergeArticleHistory — rollend stockarchief: artikelgrafiek uit geïmporteerde HISTORIE", () => {
+  it("bouwt een grafiek/tabel op uit UITSLUITEND geïmporteerde HISTORIE (nieuw toestel, geen lokale sessies)", () => {
+    const imported: StockHistoryEntry[] = [
+      makeHistoryEntry({ sessionName: "2026-07 Maand", countDate: "2026-07-31", totalCount: 12, status: "OVERGENOMEN" }),
+      makeHistoryEntry({ sessionName: "2026-08 Maand", countDate: "2026-08-31", totalCount: 12, status: "OVERGENOMEN" }),
+      makeHistoryEntry({ sessionName: "2026-Q3 Kwartaal", countDate: "2026-09-30", totalCount: 9, status: "GETELD" }),
+    ];
+    const merged = mergeArticleHistory("office-1:M1", [], new Map(), imported);
+
+    expect(merged.map((p) => p.sessionName)).toEqual(["2026-07 Maand", "2026-08 Maand", "2026-Q3 Kwartaal"]);
+    expect(merged[0].difference).toBeNull();
+    expect(merged[1].difference).toBe(0); // OVERGENOMEN 12 -> 12
+    expect(merged[2].totalCount).toBe(9);
+    expect(merged[2].difference).toBe(-3); // 9 - 12, exact het spec-voorbeeld
+    expect(merged[2].status).toBe("GETELD");
+  });
+
+  it("dedupliceert op tellingnaam en geeft het LOKALE punt voorrang", () => {
+    const local = [
+      { sessionId: "s1", date: "2026-09-30T10:00:00.000Z", totalCount: 9, difference: null, locationNames: ["Rek 1"] },
+    ];
+    const imported = [makeHistoryEntry({ sessionName: "2026-09 Maand", totalCount: 999 })];
+    const merged = mergeArticleHistory(
+      "office-1:M1",
+      local,
+      new Map([["s1", "2026-09 Maand"]]),
+      imported,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].totalCount).toBe(9); // lokaal wint, niet de geïmporteerde 999
   });
 });

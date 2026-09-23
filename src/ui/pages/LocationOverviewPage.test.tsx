@@ -159,6 +159,52 @@ describe("LocationOverviewPage — 'Zonder locatie' (v0.2.1 correctieronde §2)"
     expect(officeAfter?.locations).toHaveLength(2); // ongewijzigd — geen fake Location aangemaakt.
   });
 
+  it("toont voor een nog nooit getelde locatie (leermodus) de sessiebrede totaaltelling als richtgetal i.p.v. '0 / 0'", async () => {
+    const session = await countSessionService.startSession("office-1", "MONTHLY");
+    render(
+      <LocationOverviewPage
+        sessionId={session.id}
+        onOpenLocation={() => {}}
+        onOpenReview={() => {}}
+        onOpenWithoutLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    // Rek 1 en Rek 2 zijn allebei nog nooit aangeraakt (geen assignments,
+    // geen entries) -> geen van beide toont de misleidende "0 / 0 geteld".
+    // In plaats daarvan het sessiebrede totaal (hier: 2 artikelen).
+    expect(screen.queryByText("0 / 0 geteld")).not.toBeInTheDocument();
+    expect(screen.getAllByText("0 / 2 geteld")).toHaveLength(2);
+  });
+
+  it("laat een echte, locatie-specifieke teller verschijnen zodra er op die locatie geteld is", async () => {
+    await countingRepository.saveArticleLocationAssignment({
+      id: "office-1:office-1:A1:office-1:loc-1",
+      officeId: "office-1",
+      articleId: "office-1:A1",
+      locationId: "office-1:loc-1",
+      active: true,
+      lastSeenAt: new Date().toISOString(),
+    });
+    const session = await countSessionService.startSession("office-1", "MONTHLY");
+    render(
+      <LocationOverviewPage
+        sessionId={session.id}
+        onOpenLocation={() => {}}
+        onOpenReview={() => {}}
+        onOpenWithoutLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    // Rek 1 heeft nu wél een gekend artikel (1 stub-entry bij sessiestart)
+    // -> een echte teller, geen richtgetal.
+    expect(await screen.findByText("0 / 1 geteld")).toBeInTheDocument();
+    // Rek 2 is nog steeds onaangeraakt -> blijft het sessiebrede richtgetal tonen.
+    expect(screen.getByText("0 / 2 geteld")).toBeInTheDocument();
+  });
+
   it("werkt voor kwartaaltelling net zoals voor maandtelling", async () => {
     const session = await countSessionService.startSession("office-1", "QUARTERLY");
     render(

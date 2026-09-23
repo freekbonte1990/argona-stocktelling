@@ -1,4 +1,10 @@
-import type { ArticleLocationAssignment, CountEntry, Location, Office } from "./types";
+import type {
+  ArticleLocationAssignment,
+  CountEntry,
+  CountSession,
+  Location,
+  Office,
+} from "./types";
 
 /**
  * Pure regels voor locatiebeheer (spec v0.2.1 §1): toevoegen, hernoemen,
@@ -124,4 +130,32 @@ export function activeLocationsInOrder(office: Office): Location[] {
 /** Alle locaties in weergavevolgorde (actief + inactief — bv. voor de Excel-export, die historiek nooit mag verliezen). */
 export function allLocationsInOrder(office: Office): Location[] {
   return [...office.locations].sort((a, b) => a.number - b.number);
+}
+
+/**
+ * Locaties die voor DEZE sessie moeten afgerond worden (data-integriteit-
+ * sprint §5) — respecteert de bij sessiestart bevroren `session.locationIds`
+ * in plaats van de live `office.locations`:
+ *   - Een locatie die na sessiestart inactief werd gemaakt blijft in deze
+ *     lijst (ze staat nog in `locationIds`), dus blijft verplicht af te
+ *     ronden voor deze sessie.
+ *   - Een locatie die pas ná sessiestart werd toegevoegd staat niet in
+ *     `locationIds` en verschijnt dus terecht niet in deze lijst.
+ *
+ * Backward-compatible fallback: sessies gestart vóór deze sprint hebben geen
+ * `locationIds` (`undefined`) — voor die sessies valt dit terug op het oude
+ * gedrag (`activeLocationsInOrder`), zodat historische sessies zonder
+ * dataverlies of crash bruikbaar blijven.
+ */
+export function sessionLocations(
+  session: Pick<CountSession, "locationIds">,
+  office: Office,
+): Location[] {
+  if (!session.locationIds) {
+    return activeLocationsInOrder(office);
+  }
+  const frozen = new Set(session.locationIds);
+  return [...office.locations]
+    .filter((l) => frozen.has(l.id))
+    .sort((a, b) => a.number - b.number);
 }

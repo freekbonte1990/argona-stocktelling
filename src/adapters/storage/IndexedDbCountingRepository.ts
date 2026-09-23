@@ -6,7 +6,14 @@ import type {
   LocationSessionStatus,
   Office,
 } from "../../domain/types";
-import type { CountingRepository, ImportMeta } from "../../application/ports/CountingRepository";
+import type {
+  CountingRepository,
+  FinalizedSessionResult,
+  FinalizeSessionInput,
+  HistoricalSheetRecord,
+  ImportMeta,
+} from "../../application/ports/CountingRepository";
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { AppDatabase } from "./db";
 import { db as defaultDb } from "./db";
 
@@ -80,6 +87,49 @@ export class IndexedDbCountingRepository implements CountingRepository {
     });
   }
 
+  /**
+   * Data-integriteit-sprint §3: alles in ÉÉN Dexie-transactie — faalt één
+   * van de vier schrijfacties (bv. door een IndexedDB-quotafout), dan wordt
+   * de volledige transactie teruggedraaid en blijft de sessie gewoon ACTIVE
+   * (nooit een half afgeronde sessie).
+   */
+  async finalizeSession(input: FinalizeSessionInput): Promise<void> {
+    await this.db.transaction(
+      "rw",
+      [this.db.sessions, this.db.articles, this.db.stockHistoryEntries, this.db.finalizedSessionResults],
+      async () => {
+        await this.db.sessions.put(input.session);
+        await this.db.articles.bulkPut(input.updatedArticles);
+        if (input.historyEntries.length > 0) {
+          await this.db.stockHistoryEntries.bulkPut(
+            input.historyEntries.map((entry) => ({
+              ...entry,
+              officeId: input.session.officeId,
+              id: `${input.session.officeId}:${entry.sessionName}:${entry.articleId}`,
+            })),
+          );
+        }
+        await this.db.finalizedSessionResults.put({
+          sessionId: input.session.id,
+          review: input.review,
+          snapshot: input.snapshot,
+        });
+      },
+    );
+  }
+
+  async getFinalizedSessionResult(sessionId: string): Promise<FinalizedSessionResult | undefined> {
+    return this.db.finalizedSessionResults.get(sessionId);
+  }
+
+  async cancelSession(sessionId: string, reason: string | null = null): Promise<void> {
+    await this.db.sessions.update(sessionId, {
+      status: "CANCELLED",
+      cancelledAt: new Date().toISOString(),
+      cancelReason: reason,
+    });
+  }
+
   async saveCountEntry(entry: CountEntry): Promise<void> {
     await this.db.countEntries.put(entry);
   }
@@ -120,5 +170,30 @@ export class IndexedDbCountingRepository implements CountingRepository {
 
   async setSelectedOfficeId(officeId: string): Promise<void> {
     await this.db.appState.put({ id: "singleton", selectedOfficeId: officeId });
+  }
+
+  async saveHistoricalSheetSnapshot(record: HistoricalSheetRecord): Promise<void> {
+    await this.db.historicalSheets.put({ ...record, id: `${record.officeId}:${record.sheetName}` });
+  }
+
+  async getHistoricalSheetSnapshots(officeId: string): Promise<HistoricalSheetRecord[]> {
+    const rows = await this.db.historicalSheets.where("officeId").equals(officeId).toArray();
+    return rows.map(({ id: _id, ...record }) => record);
+  }
+
+  async saveStockHistoryEntries(officeId: string, entries: StockHistoryEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    await this.db.stockHistoryEntries.bulkPut(
+      entries.map((entry) => ({
+        ...entry,
+        officeId,
+        id: `${officeId}:${entry.sessionName}:${entry.articleId}`,
+      })),
+    );
+  }
+
+  async getStockHistoryEntries(officeId: string): Promise<StockHistoryEntry[]> {
+    const rows = await this.db.stockHistoryEntries.where("officeId").equals(officeId).toArray();
+    return rows.map(({ id: _id, officeId: _officeId, ...entry }) => entry);
   }
 }

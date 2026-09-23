@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
+import { isValidQuantity } from "../../domain/quantityValidation";
 
 interface QuantityStepperProps {
   value: number | null;
   onChange: (value: number | null) => void;
   step?: number;
+  /**
+   * v0.3 §1: Enter in het hoeveelheidveld slaat de huidige waarde op als
+   * geteld en springt naar het volgende artikel — zelfde actie als de
+   * "✓ Geteld & volgende"-knop. Wordt enkel aangeroepen wanneer er al een
+   * geldige waarde is (0 telt als geldig, null niet) — zelfde voorwaarde als
+   * de knop zelf (`disabled={quantity === null}` in ArticleCard).
+   */
+  onEnter?: () => void;
+  /** v0.3 §1: laat de ouder dit invoerveld programmatisch focussen (bv. zodra deze kaart "actief" wordt). */
+  inputRef?: (el: HTMLInputElement | null) => void;
 }
 
 /**
@@ -11,7 +22,7 @@ interface QuantityStepperProps {
  * ondersteunt (direct "25" intikken) als de +/- knoppen. Decimalen zijn
  * toegestaan omdat sommige eenheden (bv. meter) geen gehele getallen zijn.
  */
-export function QuantityStepper({ value, onChange, step = 1 }: QuantityStepperProps) {
+export function QuantityStepper({ value, onChange, step = 1, onEnter, inputRef }: QuantityStepperProps) {
   const [text, setText] = useState(value === null ? "" : String(value));
 
   useEffect(() => {
@@ -26,7 +37,11 @@ export function QuantityStepper({ value, onChange, step = 1 }: QuantityStepperPr
       return;
     }
     const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) {
+    // Data-integriteit-sprint §6: harde validatie ook hier, aan het
+    // inputcomponent zelf — negatieve getallen, NaN en Infinity worden
+    // simpelweg niet doorgegeven (het tekstveld toont dan gewoon de
+    // ingetikte, nog niet aanvaarde tekst verder, zonder `onChange` te vuren).
+    if (isValidQuantity(parsed)) {
       onChange(parsed);
     }
   }
@@ -48,12 +63,19 @@ export function QuantityStepper({ value, onChange, step = 1 }: QuantityStepperPr
         −
       </button>
       <input
+        ref={inputRef}
         className="quantity-stepper__input"
         type="text"
         inputMode="decimal"
         placeholder="0"
         value={text}
         onChange={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          if (value === null) return; // zelfde voorwaarde als de knop: geen geldige waarde, geen actie.
+          onEnter?.();
+        }}
       />
       <button
         type="button"

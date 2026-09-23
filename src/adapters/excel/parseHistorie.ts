@@ -1,0 +1,91 @@
+import type { ArticleSnapshotStatus, StockHistoryEntry } from "../../domain/stockSnapshot";
+import type { CountSessionType } from "../../domain/types";
+import { extractDataRows, findHeaderRow } from "./excelHeaderUtils";
+import { toIsoDateString, toNumberOrNull, toStringOrNull } from "./excelValues";
+
+export const HISTORIE_SHEET_NAME = "HISTORIE";
+
+/**
+ * Kolomvolgorde exact zoals gespecificeerd: "Teldatum, Tellingtype,
+ * Tellingnaam, Artikelnr., Omschrijving, Totale voorraad, Vorige voorraad,
+ * Verschil, Kostprijs, Verschil €, Status telling, Locaties".
+ */
+export const HISTORIE_REQUIRED_HEADERS = [
+  "Teldatum",
+  "Tellingtype",
+  "Tellingnaam",
+  "Artikelnr.",
+  "Omschrijving",
+  "Totale voorraad",
+  "Vorige voorraad",
+  "Verschil",
+  "Kostprijs",
+  "Verschil €",
+  "Status telling",
+  "Locaties",
+] as const;
+
+const VALID_SESSION_TYPES: CountSessionType[] = ["MONTHLY", "QUARTERLY", "YEARLY", "FULL"];
+const VALID_STATUSES: ArticleSnapshotStatus[] = [
+  "GETELD",
+  "0 BEVESTIGD",
+  "OVERGENOMEN",
+  "OVERGENOMEN - NIET GETELD",
+];
+
+function normalizeSessionType(raw: string | null): CountSessionType {
+  const value = (raw ?? "").trim().toUpperCase();
+  const match = VALID_SESSION_TYPES.find((t) => t === value);
+  return match ?? "FULL";
+}
+
+function normalizeStatus(raw: string | null): ArticleSnapshotStatus {
+  const value = (raw ?? "").trim().toUpperCase();
+  const match = VALID_STATUSES.find((s) => s === value);
+  return match ?? "OVERGENOMEN";
+}
+
+function parseLocationNames(raw: unknown): string[] {
+  const text = toStringOrNull(raw);
+  if (!text) return [];
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Leest sheet HISTORIE in — puur SERIALISATIE (geen businesslogica): zet elke
+ * rij één-op-één om naar een `StockHistoryEntry`. Ontbreekt de sheet in het
+ * bestand (oudere, gestandaardiseerde bestanden zonder rollend archief), dan
+ * geeft de aanroeper (ExcelStockSource) gewoon een lege lijst terug — deze
+ * functie wordt dan niet aangeroepen.
+ */
+export function parseHistorieSheet(rows: unknown[][], officeId: string): StockHistoryEntry[] {
+  const { headerRowIndex, columnIndexByName } = findHeaderRow(
+    rows,
+    [...HISTORIE_REQUIRED_HEADERS],
+    HISTORIE_SHEET_NAME,
+  );
+  const dataRows = extractDataRows(rows, headerRowIndex, columnIndexByName);
+
+  return dataRows.map((row) => ({
+    countDate: toIsoDateString(row["Teldatum"]) ?? "",
+    sessionType: normalizeSessionType(toStringOrNull(row["Tellingtype"])),
+    sessionName: toStringOrNull(row["Tellingnaam"]) ?? "",
+    // De HISTORIE-sheet bewaart enkel het menselijke "Artikelnr.", niet het
+    // interne, van officeId afgeleide Article.id — hier reconstrueren we dat
+    // exact zoals parseArtikelSheet/buildArticle dat doet, zodat een
+    // geïmporteerde HISTORIE-regel correct koppelt aan het bijhorende artikel.
+    articleId: `${officeId}:${toStringOrNull(row["Artikelnr."]) ?? ""}`,
+    articleNumber: toStringOrNull(row["Artikelnr."]) ?? "",
+    description: toStringOrNull(row["Omschrijving"]) ?? "",
+    totalCount: toNumberOrNull(row["Totale voorraad"]),
+    previousCount: toNumberOrNull(row["Vorige voorraad"]),
+    differenceQuantity: toNumberOrNull(row["Verschil"]),
+    costPrice: toNumberOrNull(row["Kostprijs"]),
+    differenceAmount: toNumberOrNull(row["Verschil €"]),
+    status: normalizeStatus(toStringOrNull(row["Status telling"])),
+    locationNames: parseLocationNames(row["Locaties"]),
+  }));
+}

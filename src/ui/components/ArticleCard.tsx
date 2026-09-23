@@ -9,6 +9,8 @@ interface ArticleCardProps {
   onQuantityChange: (value: number | null) => void;
   onConfirm: () => void;
   confirmLabel: string;
+  /** v0.3 §1: laat het hoeveelheidveld van deze kaart programmatisch focussen (bv. zodra ze "actief" wordt). */
+  quantityInputRef?: (el: HTMLInputElement | null) => void;
 }
 
 /**
@@ -16,7 +18,7 @@ interface ArticleCardProps {
  * Omschrijving staat prominent bovenaan, artikelnummer is secundair.
  */
 export const ArticleCard = forwardRef<HTMLDivElement, ArticleCardProps>(function ArticleCard(
-  { article, counted, quantity, onQuantityChange, onConfirm, confirmLabel },
+  { article, counted, quantity, onQuantityChange, onConfirm, confirmLabel, quantityInputRef },
   ref,
 ) {
   return (
@@ -28,7 +30,17 @@ export const ArticleCard = forwardRef<HTMLDivElement, ArticleCardProps>(function
         <span>Vorige telling: {article.previousCount ?? "—"}</span>
         {article.unit && <span>Eenheid: {article.unit}</span>}
       </div>
-      <QuantityStepper value={quantity} onChange={onQuantityChange} />
+      {/*
+       * v0.3 §1: Enter in het hoeveelheidveld = zelfde actie als de
+       * "✓ Geteld & volgende"-knop hieronder (opslaan + naar het volgende
+       * artikel) — geen aparte businesslogica, gewoon dezelfde `onConfirm`.
+       */}
+      <QuantityStepper
+        value={quantity}
+        onChange={onQuantityChange}
+        onEnter={onConfirm}
+        inputRef={quantityInputRef}
+      />
       <button
         type="button"
         className="big-button big-button--primary"

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARTICLE_STATUS_OPTIONS,
   articlesNeedingReview,
   computeFrequencyBreakdown,
   normalizeArticleStatus,
@@ -59,6 +60,26 @@ describe("normalizeArticleStatus", () => {
     expect(normalizeArticleStatus("GEBLOKKEERD")).toBe("INACTIVE");
     expect(normalizeArticleStatus("Inactief")).toBe("INACTIVE");
     expect(normalizeArticleStatus("uitgefaseerd")).toBe("INACTIVE");
+  });
+
+  it(
+    "herkent de nieuwe statuscatalogus (aanvulling: \"actief, obsolete - paneel, obsolete - rood, " +
+      "non-actief\") als niet-actief, behalve 'actief' zelf",
+    () => {
+      expect(normalizeArticleStatus("OBSOLETE - PANEEL")).toBe("INACTIVE");
+      expect(normalizeArticleStatus("OBSOLETE - ROOD")).toBe("INACTIVE");
+      expect(normalizeArticleStatus("NON-ACTIEF")).toBe("INACTIVE");
+      expect(normalizeArticleStatus("non actief")).toBe("INACTIVE");
+      expect(normalizeArticleStatus("Actief")).toBe("ACTIVE");
+    },
+  );
+});
+
+describe("ARTICLE_STATUS_OPTIONS", () => {
+  it("elke optie is intern consistent met normalizeArticleStatus", () => {
+    for (const option of ARTICLE_STATUS_OPTIONS) {
+      expect(normalizeArticleStatus(option.raw)).toBe(option.status);
+    }
   });
 });
 

@@ -51,7 +51,16 @@ export type ArticleCountFrequency =
 /** Type nieuwe telling die gestart kan worden. */
 export type CountSessionType = "MONTHLY" | "QUARTERLY" | "YEARLY" | "FULL";
 
-export type CountSessionStatus = "ACTIVE" | "COMPLETED";
+/**
+ * CANCELLED (sessielogica-fix): een bewust geannuleerde sessie — nooit een
+ * officiële telling. Blokkeert geen nieuwe sessie meer (enkel ACTIVE doet
+ * dat, zie CountingRepository#getActiveSession) en telt nergens mee als
+ * afgeronde stocktelling: geen rollend-archief-snapshot, geen HISTORIE-regels,
+ * geen invloed op Article.previousCount, en verschijnt niet in de officiële
+ * artikelgeschiedenis (zie domain/articleHistory.ts, die expliciet enkel
+ * status === "COMPLETED" meetelt).
+ */
+export type CountSessionStatus = "ACTIVE" | "COMPLETED" | "CANCELLED";
 
 /**
  * Al dan niet actief/geblokkeerd artikelstatus, genormaliseerd uit de vrije
@@ -104,6 +113,42 @@ export interface CountSession {
   sourceBaseDate: string | null;
   /** Artikel-IDs die bij het starten van deze sessie in scope zijn genomen. */
   articleIds: string[];
+  /**
+   * Locatie-IDs die bij het starten van deze sessie actief waren (data-
+   * integriteit-sprint §5) — bevriest welke fysieke locaties voor DEZE sessie
+   * "afgerond moeten worden", los van latere wijzigingen aan
+   * `office.locations`. Een locatie die halverwege de sessie inactief wordt
+   * gemaakt blijft verplicht voor deze sessie; een locatie die pas ná de
+   * start wordt toegevoegd, wordt NIET plots verplicht.
+   *
+   * "Zonder locatie" (domain/withoutLocation.ts) is hier bewust niet aan
+   * gekoppeld: dat blijft een dynamische worklijst puur op basis van
+   * `articleIds`, nooit op `locationIds`.
+   *
+   * BEWUST optioneel (`?`), net als `cancelledAt`/`cancelReason` hieronder:
+   * een sessie gestart vóór deze sprint kent dit veld niet. Ontbrekend
+   * betekent "geen bevroren locatieset bekend" — zie
+   * `domain/locations.ts#sessionLocations` voor de backward-compatible
+   * fallback (dan wordt teruggevallen op de huidige actieve locaties, exact
+   * het oude gedrag, dus geen dataverlies en geen crash op oude sessies).
+   * Geen Dexie-schemawijziging nodig: niet-geïndexeerd veld.
+   */
+  locationIds?: string[];
+  /**
+   * Wanneer deze sessie geannuleerd werd (enkel gezet bij status CANCELLED).
+   * BEWUST optioneel (`?`), net als `Article.comment` hierboven: een sessie
+   * gemaakt vóór deze sessielogica-fix, of een gewone `startSession()`-
+   * aanroep, kent dit veld gewoon nooit — ontbrekend/`undefined` betekent
+   * altijd "nooit geannuleerd". Geen Dexie-schemawijziging nodig (zie
+   * adapters/storage/db.ts): dit is een niet-geïndexeerd veld.
+   */
+  cancelledAt?: string | null;
+  /**
+   * Vrije, optionele reden bij annuleren (architecturaal voorbereid, spec:
+   * "geen verplicht formulier bouwen") — vandaag door geen enkel scherm
+   * ingevuld, maar al beschikbaar voor een latere UI-uitbreiding.
+   */
+  cancelReason?: string | null;
 }
 
 /**

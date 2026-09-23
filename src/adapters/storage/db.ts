@@ -7,12 +7,28 @@ import type {
   LocationSessionStatus,
   Office,
 } from "../../domain/types";
-import type { ImportMeta } from "../../application/ports/CountingRepository";
+import type {
+  FinalizedSessionResult,
+  HistoricalSheetRecord,
+  ImportMeta,
+} from "../../application/ports/CountingRepository";
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 
 /** Eén rij "app-brede" UI-voorkeur (welk kantoor laatst actief was). Geen businessdata. */
 export interface AppStateRow {
   id: "singleton";
   selectedOfficeId: string;
+}
+
+/** Opslagrij voor `HistoricalSheetRecord` — `id` = `${officeId}:${sheetName}` (uniek, dus een upsert). */
+export interface HistoricalSheetRow extends HistoricalSheetRecord {
+  id: string;
+}
+
+/** Opslagrij voor `StockHistoryEntry` — `id` = `${officeId}:${sessionName}:${articleId}` (uniek per (kantoor, telling, artikel)). */
+export interface StockHistoryEntryRow extends StockHistoryEntry {
+  id: string;
+  officeId: string;
 }
 
 /**
@@ -28,6 +44,9 @@ export class AppDatabase extends Dexie {
   importMeta!: Table<ImportMeta, string>;
   appState!: Table<AppStateRow, string>;
   locationSessionStatuses!: Table<LocationSessionStatus, string>;
+  historicalSheets!: Table<HistoricalSheetRow, string>;
+  stockHistoryEntries!: Table<StockHistoryEntryRow, string>;
+  finalizedSessionResults!: Table<FinalizedSessionResult, string>;
 
   constructor(name = "argona-stocktelling") {
     super(name);
@@ -49,6 +68,24 @@ export class AppDatabase extends Dexie {
     // gedocumenteerd in docs/ARCHITECTURE.md: geen bestaande tabel gewijzigd.
     this.version(3).stores({
       locationSessionStatuses: "id, sessionId, locationId, [sessionId+locationId]",
+    });
+    // v4 (rollend stockarchief): bevroren historische tellingtabs (ruwe
+    // passthrough-rijen, geïmporteerd en/of zelf gegenereerd) en de
+    // machinevriendelijke HISTORIE-log. Puur additief — geen bestaande
+    // tabel/index gewijzigd, dus oudere lokale databases blijven werken.
+    this.version(4).stores({
+      historicalSheets: "id, officeId, sessionId",
+      stockHistoryEntries: "id, officeId, articleId, sessionName",
+    });
+    // v5 (data-integriteit-sprint §3): het bevroren `FinalizedSessionResult`
+    // (review + snapshot) per afgeronde sessie — puur additief, een volledig
+    // NIEUWE tabel, dus een bestaande v0.2.1/v0.3-database (versies 1-4)
+    // upgradet hier zonder dataverlies of crash. Sessies die vóór deze
+    // upgrade al COMPLETED waren, krijgen gewoonweg nooit een rij in deze
+    // tabel (`getFinalizedSessionResult` geeft dan `undefined` terug) — zie
+    // `ExportService`s backward-compatibele terugvalpad.
+    this.version(5).stores({
+      finalizedSessionResults: "sessionId",
     });
   }
 }

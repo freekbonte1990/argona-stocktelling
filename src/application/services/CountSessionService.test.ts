@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CountSessionService, SessionIncompleteError } from "./CountSessionService";
+import {
+  ActiveSessionExistsError,
+  CountSessionService,
+  SessionIncompleteError,
+  SessionNotActiveError,
+} from "./CountSessionService";
 import { CountingService } from "./CountingService";
 import { InMemoryCountingRepository } from "./InMemoryCountingRepository";
 import type { Article, Office } from "../../domain/types";
@@ -96,11 +101,189 @@ describe("CountSessionService", () => {
     expect(session.articleIds.sort()).toEqual(["office-1:M1", "office-1:M2"].sort());
   });
 
-  it("hergebruikt een actieve sessie in plaats van er een tweede te starten", async () => {
+  /**
+   * Sessielogica-fix: per kantoor mag maximaal één ACTIVE sessie bestaan.
+   * `startSession` mag een bestaande actieve sessie NOOIT meer stilzwijgend
+   * teruggeven (het oude gedrag hier) — dat liet "Nieuwe telling" een sessie
+   * van een ANDER type hervatten zonder dat de gebruiker dat doorhad.
+   */
+  it("startSession zonder actieve sessie start gewoon een nieuwe ACTIVE sessie", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    expect(session.status).toBe("ACTIVE");
+    expect(session.type).toBe("MONTHLY");
+  });
+
+  it("startSession met een reeds actieve sessie gooit ActiveSessionExistsError i.p.v. stilzwijgend te hervatten", async () => {
     const first = await sessionService.startSession("office-1", "MONTHLY");
-    const second = await sessionService.startSession("office-1", "YEARLY");
-    expect(second.id).toBe(first.id);
-    expect(second.type).toBe("MONTHLY");
+
+    await expect(sessionService.startSession("office-1", "YEARLY")).rejects.toThrow(
+      ActiveSessionExistsError,
+    );
+    try {
+      await sessionService.startSession("office-1", "YEARLY");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ActiveSessionExistsError);
+      const typed = err as ActiveSessionExistsError;
+      expect(typed.officeId).toBe("office-1");
+      expect(typed.activeSessionId).toBe(first.id);
+      expect(typed.activeSessionType).toBe("MONTHLY");
+      expect(typed.startedAt).toBe(first.startedAt);
+    }
+  });
+
+  it("de actieve sessie blijft volledig ongewijzigd na een mislukte startpoging", async () => {
+    const first = await sessionService.startSession("office-1", "MONTHLY");
+    await expect(sessionService.startSession("office-1", "QUARTERLY")).rejects.toThrow(
+      ActiveSessionExistsError,
+    );
+
+    const stillActive = await repository.getSession(first.id);
+    expect(stillActive).toEqual(first);
+    // Er mag ook geen tweede sessie stiekem aangemaakt zijn.
+    expect(await sessionService.getSessionsForOffice("office-1")).toHaveLength(1);
+  });
+
+  it("cancelSession zet status op CANCELLED en vult cancelledAt", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await sessionService.cancelSession(session.id);
+
+    const cancelled = await repository.getSession(session.id);
+    expect(cancelled?.status).toBe("CANCELLED");
+    expect(cancelled?.cancelledAt).not.toBeNull();
+    expect(new Date(cancelled!.cancelledAt as string).toString()).not.toBe("Invalid Date");
+  });
+
+  it("een geannuleerde sessie blokkeert geen nieuwe telling meer", async () => {
+    const first = await sessionService.startSession("office-1", "MONTHLY");
+    await sessionService.cancelSession(first.id);
+
+    const second = await sessionService.startSession("office-1", "MONTHLY");
+    expect(second.id).not.toBe(first.id);
+    expect(second.status).toBe("ACTIVE");
+  });
+
+  it("een nieuwe sessie na annuleren heeft een ander UUID en bevat geen CountEntries van de geannuleerde sessie", async () => {
+    const first = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session: first,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await sessionService.cancelSession(first.id);
+
+    const second = await sessionService.startSession("office-1", "MONTHLY");
+    expect(second.id).not.toBe(first.id);
+
+    const secondEntries = await repository.getCountEntries(second.id);
+    // De sessie start met een lege staat: geen enkele entry van de
+    // geannuleerde sessie lekt door (ook niet als "reeds geteld").
+    expect(secondEntries.every((e) => e.counted === false)).toBe(true);
+    expect(secondEntries.some((e) => e.id.startsWith(first.id))).toBe(false);
+
+    // De CountEntries van de geannuleerde sessie zelf blijven wel gewoon
+    // bestaan (audit/debug — spec punt 4), enkel gekoppeld aan hun eigen sessieId.
+    const firstEntries = await repository.getCountEntries(first.id);
+    expect(firstEntries).toHaveLength(1);
+    expect(firstEntries[0].sessionId).toBe(first.id);
+  });
+
+  it("cancelSession op een niet-actieve sessie gooit SessionNotActiveError", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await sessionService.cancelSession(session.id);
+
+    await expect(sessionService.cancelSession(session.id)).rejects.toThrow(SessionNotActiveError);
+  });
+
+  it("completeSession op een geannuleerde sessie gooit SessionNotActiveError i.p.v. ze te heropenen als officiële telling", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await sessionService.cancelSession(session.id);
+
+    await expect(sessionService.completeSession(session.id)).rejects.toThrow(SessionNotActiveError);
+    const stillCancelled = await repository.getSession(session.id);
+    expect(stillCancelled?.status).toBe("CANCELLED");
+  });
+
+  /**
+   * Aanvulling: "Afronden met openstaande artikels" — de uitzonderingsflow.
+   */
+  describe("completeSessionWithOutstandingArticles (aanvulling)", () => {
+    it("strikte completeSession blijft blokkeren bij een onvolledige telling", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+      // M2 blijft ongeteld, geen enkele locatie afgerond.
+      await expect(sessionService.completeSession(session.id)).rejects.toThrow(SessionIncompleteError);
+      const stillActive = await repository.getSession(session.id);
+      expect(stillActive?.status).toBe("ACTIVE");
+    });
+
+    it("werkt na expliciete aanroep, ook met openstaande artikels EN openstaande locaties", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+      // M2 blijft ongeteld; geen enkele locatie afgerond ("open locatie mag
+      // de uitzonderlijke afronding niet blokkeren").
+      await sessionService.completeSessionWithOutstandingArticles(session.id);
+
+      const completed = await repository.getSession(session.id);
+      expect(completed?.status).toBe("COMPLETED");
+      expect(completed?.completedAt).not.toBeNull();
+    });
+
+    it("maakt geen fictieve CountEntry of ArticleLocationAssignment voor het niet-getelde artikel", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+      const entriesBefore = await repository.getCountEntries(session.id);
+      const assignmentsBefore = await repository.getArticleLocationAssignments("office-1");
+
+      await sessionService.completeSessionWithOutstandingArticles(session.id);
+
+      const entriesAfter = await repository.getCountEntries(session.id);
+      const assignmentsAfter = await repository.getArticleLocationAssignments("office-1");
+      // Geen enkele nieuwe entry/koppeling ontstaan voor M2 (het niet-getelde artikel).
+      expect(entriesAfter).toEqual(entriesBefore);
+      expect(assignmentsAfter).toEqual(assignmentsBefore);
+      expect(entriesAfter.some((e) => e.articleId === "office-1:M2")).toBe(false);
+    });
+
+    it("wijzigt Article.previousCount niet voor het niet-getelde artikel", async () => {
+      const before = (await repository.getArticles("office-1")).find((a) => a.articleNumber === "M2");
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+      await sessionService.completeSessionWithOutstandingArticles(session.id);
+
+      const after = (await repository.getArticles("office-1")).find((a) => a.articleNumber === "M2");
+      expect(after?.previousCount).toBe(before?.previousCount);
+    });
+
+    it("completeSessionWithOutstandingArticles vereist een ACTIVE sessie", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await sessionService.cancelSession(session.id);
+
+      await expect(sessionService.completeSessionWithOutstandingArticles(session.id)).rejects.toThrow(
+        SessionNotActiveError,
+      );
+    });
   });
 
   it("genereert bij een volgende sessie meteen entries voor gekende locaties (geleerd via CountingService)", async () => {

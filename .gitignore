@@ -25,3 +25,5 @@ test-fixtures
 *.njsproj
 *.sln
 *.sw?
+
+.vercel

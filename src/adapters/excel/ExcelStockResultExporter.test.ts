@@ -1,8 +1,16 @@
 import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 import { ExcelStockResultExporter } from "./ExcelStockResultExporter";
-import { computeSessionReview } from "../../domain/review";
+import { computeSessionReview, type SessionReviewSummary } from "../../domain/review";
+import { buildHistoryEntriesFromSnapshot, buildSessionSnapshot } from "../../domain/stockSnapshot";
 import type { Article, ArticleLocationAssignment, CountEntry, CountSession, Office } from "../../domain/types";
+
+/** Test-helper: bouwt de nieuwe, verplichte snapshot/historie-input vanuit een reeds berekende review. */
+function buildSnapshotInputs(session: CountSession, allArticles: Article[], review: SessionReviewSummary) {
+  const snapshot = buildSessionSnapshot(session, allArticles, review);
+  const historyEntries = buildHistoryEntriesFromSnapshot(snapshot, office.locations);
+  return { snapshot, historicalSheets: [], historyEntries };
+}
 
 const office: Office = {
   id: "damme",
@@ -58,6 +66,21 @@ function sheetToRows(sheet: XLSX.WorkSheet): unknown[][] {
   return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null }) as unknown[][];
 }
 
+/**
+ * Aanvulling ("exacte layout"): TELLING toont sinds de opmaakupdate een
+ * metadatablok (Kantoor/Bronbestand/Basisdatum/Opmerking) en een titelrij
+ * BOVEN de headerrij (spiegelt het bronsjabloon, waar de header op rij 14
+ * staat, niet rij 1) — precies zoals de echte import ook nooit aanneemt dat
+ * de header op een vaste rij staat (zie `excelHeaderUtils.ts#findHeaderRow`).
+ * Deze testhelper doet hetzelfde: de header is de eerste rij die "Artikelnr."
+ * bevat, ongeacht op welke rij-index dat is.
+ */
+function findHeaderRowAndData(rows: unknown[][]): { header: unknown[]; dataRows: unknown[][] } {
+  const headerIndex = rows.findIndex((row) => row.includes("Artikelnr."));
+  if (headerIndex === -1) throw new Error("Geen headerrij met 'Artikelnr.' gevonden.");
+  return { header: rows[headerIndex], dataRows: rows.slice(headerIndex + 1) };
+}
+
 describe("ExcelStockResultExporter", () => {
   it("schrijft TELLING/ARTIKEL/CONFIG/NIEUWE_ARTIKELEN met de juiste berekende waarden", async () => {
     const countedArticle = makeArticle("A1", { previousCount: 10, costPrice: 2 }); // -> 7, verschil -3
@@ -87,7 +110,14 @@ describe("ExcelStockResultExporter", () => {
 
     const review = computeSessionReview(session, allArticles, office.locations, entries);
     const exporter = new ExcelStockResultExporter();
-    const exported = await exporter.exportResults({ office, session, review, allArticles, assignments: [] });
+    const exported = await exporter.exportResults({
+      office,
+      session,
+      review,
+      allArticles,
+      assignments: [],
+      ...buildSnapshotInputs(session, allArticles, review),
+    });
 
     expect(exported.fileName).toBe("2026-08-28 - Stocktelling Damme.xlsx");
 
@@ -97,10 +127,12 @@ describe("ExcelStockResultExporter", () => {
     );
 
     // --- TELLING ---
-    const tellingRows = sheetToRows(workbook.Sheets["TELLING"]);
-    const tellingHeader = tellingRows[0] as string[];
+    const { header: tellingHeaderRow, dataRows: tellingDataRows } = findHeaderRowAndData(
+      sheetToRows(workbook.Sheets["TELLING"]),
+    );
+    const tellingHeader = tellingHeaderRow as string[];
     const col = (name: string) => tellingHeader.indexOf(name);
-    const a1Row = tellingRows.find((r) => r[col("Artikelnr.")] === "A1")!;
+    const a1Row = tellingDataRows.find((r) => r[col("Artikelnr.")] === "A1")!;
     expect(a1Row[col("LOCATIE 1")]).toBe(3);
     expect(a1Row[col("LOCATIE 3")]).toBe(4);
     expect(a1Row[col("LOCATIE 2")]).toBeNull();
@@ -113,7 +145,7 @@ describe("ExcelStockResultExporter", () => {
     expect(a1Row[col("Waarde vorige telling")]).toBe(20);
 
     // Artikel dat niet in scope zat: geen verse tellingdata, geen "NEE" (niet relevant deze cyclus).
-    const q1Row = tellingRows.find((r) => r[col("Artikelnr.")] === "Q1")!;
+    const q1Row = tellingDataRows.find((r) => r[col("Artikelnr.")] === "Q1")!;
     expect(q1Row[col("LOCATIE 1")]).toBeNull();
     expect(q1Row[col("AANTAL TOTAAL")]).toBeNull();
     expect(q1Row[col("GETELD?")]).toBeNull();
@@ -199,6 +231,7 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [tempArticle],
       assignments,
+      ...buildSnapshotInputs(session, [tempArticle], review),
     });
 
     const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
@@ -241,13 +274,14 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [article],
       assignments: [],
+      ...buildSnapshotInputs(session, [article], review),
     });
 
     const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
-    const rows = sheetToRows(workbook.Sheets["TELLING"]);
-    const header = rows[0] as string[];
+    const { header: headerRow, dataRows } = findHeaderRowAndData(sheetToRows(workbook.Sheets["TELLING"]));
+    const header = headerRow as string[];
     const col = (name: string) => header.indexOf(name);
-    const row = rows[1];
+    const row = dataRows[0];
     expect(row[col("LOCATIE 1")]).toBe(0);
     expect(row[col("AANTAL TOTAAL")]).toBe(0);
     expect(row[col("GETELD?")]).toBe("JA");
@@ -282,16 +316,166 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [scopeArticle, manualArticle],
       assignments: [],
+      ...buildSnapshotInputs(session, [scopeArticle, manualArticle], review),
     });
 
     const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
-    const rows = sheetToRows(workbook.Sheets["TELLING"]);
-    const header = rows[0] as string[];
+    const { header: headerRow, dataRows } = findHeaderRowAndData(sheetToRows(workbook.Sheets["TELLING"]));
+    const header = headerRow as string[];
     const col = (name: string) => header.indexOf(name);
-    const q1Row = rows.find((r) => r[col("Artikelnr.")] === "Q1")!;
+    const q1Row = dataRows.find((r) => r[col("Artikelnr.")] === "Q1")!;
     expect(q1Row[col("LOCATIE 2")]).toBe(1);
     expect(q1Row[col("AANTAL TOTAAL")]).toBe(1);
     expect(q1Row[col("GETELD?")]).toBe("JA");
     expect(q1Row[col("Opmerking")]).toBe("Buiten sessiescope: handmatig toegevoegd tijdens maandtelling.");
+  });
+});
+
+describe("ExcelStockResultExporter — rollend stockarchief", () => {
+  it("voegt exact één nieuw, benoemd tellingtabblad toe met een volledige snapshot (incl. OVERGENOMEN)", async () => {
+    const monthlyArticle = makeArticle("A1", { previousCount: 10, costPrice: 2 });
+    const quarterlyArticle = makeArticle("Q1", {
+      countPeriod: "QUARTERLY",
+      rawCountPeriod: "KWARTAAL",
+      previousCount: 12,
+    });
+    const allArticles = [monthlyArticle, quarterlyArticle];
+    const entries: CountEntry[] = [makeEntry("damme:A1", "damme:loc-1", { quantity: 7, counted: true })];
+    const session: CountSession = {
+      id: "session-1",
+      officeId: "damme",
+      type: "MONTHLY",
+      status: "COMPLETED",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-09-30T15:00:00.000Z",
+      sourceFileName: "test.xlsx",
+      sourceBaseDate: "2026-08-27",
+      articleIds: ["damme:A1"],
+    };
+    const review = computeSessionReview(session, allArticles, office.locations, entries);
+    const exported = await new ExcelStockResultExporter().exportResults({
+      office,
+      session,
+      review,
+      allArticles,
+      assignments: [],
+      ...buildSnapshotInputs(session, allArticles, review),
+    });
+
+    expect(exported.newHistoricalSheet?.sheetName).toBe("2026-09 Maand");
+
+    const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
+    expect(workbook.SheetNames).toContain("2026-09 Maand");
+    const rows = sheetToRows(workbook.Sheets["2026-09 Maand"]);
+    const header = rows[0] as string[];
+    const col = (name: string) => header.indexOf(name);
+
+    const a1Row = rows.find((r) => r[col("Artikelnr.")] === "A1")!;
+    expect(a1Row[col("Status telling")]).toBe("GETELD");
+    expect(a1Row[col("Nieuwe telling")]).toBe(7);
+
+    const q1Row = rows.find((r) => r[col("Artikelnr.")] === "Q1")!;
+    expect(q1Row[col("Status telling")]).toBe("OVERGENOMEN");
+    expect(q1Row[col("Nieuwe telling")]).toBe(12); // NOOIT 0
+  });
+
+  it("schrijft HISTORIE met de reeds samengevoegde regels", async () => {
+    const article = makeArticle("A1", { previousCount: 10, costPrice: 2 });
+    const entries: CountEntry[] = [makeEntry("damme:A1", "damme:loc-1", { quantity: 7, counted: true })];
+    const session: CountSession = {
+      id: "session-1",
+      officeId: "damme",
+      type: "MONTHLY",
+      status: "COMPLETED",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-09-30T15:00:00.000Z",
+      sourceFileName: "test.xlsx",
+      sourceBaseDate: "2026-08-27",
+      articleIds: ["damme:A1"],
+    };
+    const review = computeSessionReview(session, [article], office.locations, entries);
+    const exported = await new ExcelStockResultExporter().exportResults({
+      office,
+      session,
+      review,
+      allArticles: [article],
+      assignments: [],
+      ...buildSnapshotInputs(session, [article], review),
+    });
+
+    const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
+    const rows = sheetToRows(workbook.Sheets["HISTORIE"]);
+    const header = rows[0] as string[];
+    const col = (name: string) => header.indexOf(name);
+    const a1Row = rows.find((r) => r[col("Artikelnr.")] === "A1")!;
+    expect(a1Row[col("Tellingnaam")]).toBe("2026-09 Maand");
+    expect(a1Row[col("Status telling")]).toBe("GETELD");
+    expect(a1Row[col("Totale voorraad")]).toBe(7);
+  });
+
+  it("geeft bestaande historische tellingtabs ongewijzigd door", async () => {
+    const article = makeArticle("A1", { previousCount: 10, costPrice: 2 });
+    const entries: CountEntry[] = [makeEntry("damme:A1", "damme:loc-1", { quantity: 7, counted: true })];
+    const session: CountSession = {
+      id: "session-1",
+      officeId: "damme",
+      type: "MONTHLY",
+      status: "COMPLETED",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-09-30T15:00:00.000Z",
+      sourceFileName: "test.xlsx",
+      sourceBaseDate: "2026-08-27",
+      articleIds: ["damme:A1"],
+    };
+    const review = computeSessionReview(session, [article], office.locations, entries);
+    const historicalRows = [["Iets", null], ["Onaangeroerd", 42]];
+    const exported = await new ExcelStockResultExporter().exportResults({
+      office,
+      session,
+      review,
+      allArticles: [article],
+      assignments: [],
+      snapshot: buildSessionSnapshot(session, [article], review),
+      historicalSheets: [{ sheetName: "2026-08 Maand", rows: historicalRows }],
+      historyEntries: [],
+    });
+
+    const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
+    expect(workbook.SheetNames).toContain("2026-08 Maand");
+    const rows = sheetToRows(workbook.Sheets["2026-08 Maand"]);
+    expect(rows).toEqual(historicalRows);
+  });
+
+  it("hergebruikt frozenSnapshotRows in plaats van het tabblad te herberekenen", async () => {
+    const article = makeArticle("A1", { previousCount: 999, costPrice: 2 });
+    const session: CountSession = {
+      id: "session-1",
+      officeId: "damme",
+      type: "MONTHLY",
+      status: "COMPLETED",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-09-30T15:00:00.000Z",
+      sourceFileName: "test.xlsx",
+      sourceBaseDate: "2026-08-27",
+      articleIds: [],
+    };
+    const review = computeSessionReview(session, [article], office.locations, []);
+    const frozenRows = [["Bevroren", null], ["Rij", 1]];
+    const exported = await new ExcelStockResultExporter().exportResults({
+      office,
+      session,
+      review,
+      allArticles: [article],
+      assignments: [],
+      snapshot: buildSessionSnapshot(session, [article], review),
+      historicalSheets: [],
+      historyEntries: [],
+      frozenSnapshotRows: frozenRows,
+    });
+
+    expect(exported.newHistoricalSheet).toBeUndefined(); // niets nieuws te bewaren
+    const workbook = XLSX.read(exported.data, { type: "array", cellDates: true });
+    const rows = sheetToRows(workbook.Sheets["2026-09 Maand"]);
+    expect(rows).toEqual(frozenRows);
   });
 });

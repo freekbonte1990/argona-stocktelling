@@ -1,16 +1,17 @@
 import { ARTICLE_SORT_MODE_LABELS, type ArticleSortMode } from "../../domain/sorting";
+import { COUNT_FILTER_LABELS, type CountFilter } from "../../domain/countView";
+
+export type { CountFilter };
 
 /**
- * Filters op het telscherm (spec v0.2.1 §2):
- *   ALL               -> Alles
- *   NOT_COUNTED_ANYWHERE -> nog nergens in deze sessie geteld (geen enkele
- *     locatie-entry én niet bevestigd afwezig) — dus ook niet op een ándere
- *     locatie al afgehandeld.
- *   COUNTED_HERE      -> al geteld OP DEZE locatie specifiek.
- * "Productgroep" is een apart selectievak (zie onder), geen chip hier.
+ * Primaire tabs op het telscherm (spec v0.3 §3, uitgebreid uit v0.2.1 §2):
+ * "Nog te tellen" / "Alles" / "Geteld" zijn de snelle, primaire tabs voor de
+ * dagelijkse telflow; "Nog nergens geteld" is het bestaande v0.2.1-filter
+ * (sessiebreed, niet locatiegebonden) en blijft gewoon beschikbaar als
+ * vierde optie — spec: "bestaande filters mogen blijven". De labels/volgorde
+ * komen uit domain/countView.ts zodat CountingPage en tests dezelfde bron
+ * gebruiken.
  */
-export type CountFilter = "ALL" | "NOT_COUNTED_ANYWHERE" | "COUNTED_HERE";
-
 interface FilterBarProps {
   filter: CountFilter;
   onFilterChange: (filter: CountFilter) => void;
@@ -21,12 +22,6 @@ interface FilterBarProps {
   sortMode?: ArticleSortMode;
   onSortModeChange?: (mode: ArticleSortMode) => void;
 }
-
-const FILTER_LABELS: Record<CountFilter, string> = {
-  ALL: "Alles",
-  NOT_COUNTED_ANYWHERE: "Nog nergens geteld",
-  COUNTED_HERE: "Op deze locatie geteld",
-};
 
 export function FilterBar({
   filter,
@@ -40,13 +35,13 @@ export function FilterBar({
   return (
     <div className="stack stack--tight">
       <div className="filter-row">
-        {(Object.keys(FILTER_LABELS) as CountFilter[]).map((key) => (
+        {(Object.keys(COUNT_FILTER_LABELS) as CountFilter[]).map((key) => (
           <button
             key={key}
-            className={`chip ${filter === key ? "chip--active" : ""}`}
+            className={`chip chip--primary ${filter === key ? "chip--active" : ""}`}
             onClick={() => onFilterChange(key)}
           >
-            {FILTER_LABELS[key]}
+            {COUNT_FILTER_LABELS[key]}
           </button>
         ))}
       </div>

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Location } from "../../domain/types";
 import { computeSessionProgress } from "../../domain/progress";
-import { activeLocationsInOrder } from "../../domain/locations";
+import { sessionLocations } from "../../domain/locations";
 import { articlesWithoutLocation } from "../../domain/withoutLocation";
 import { LocationCard } from "../components/LocationCard";
 import { ProgressBar } from "../components/ProgressBar";
@@ -53,10 +53,16 @@ export function LocationOverviewPage({
     return computeSessionProgress(session.articleIds, office.locations, entries ?? []);
   }, [session, office, entries]);
 
-  // Enkel actieve locaties tonen (spec v0.2.1 §1): een inactief gemaakte
-  // locatie verdwijnt uit nieuwe telacties, maar blijft wel bestaan voor
-  // historische data (zie domain/locations.ts).
-  const visibleLocations = useMemo(() => (office ? activeLocationsInOrder(office) : []), [office]);
+  // Data-integriteit-sprint §5: welke locaties hier verschijnen (en dus
+  // afgerond moeten worden) volgt de bij sessiestart BEVROREN `session.
+  // locationIds` (backward-compatible fallback naar de live actieve locaties
+  // voor oudere sessies zonder die bevroren set — zie domain/locations.ts).
+  // Een locatie die halverwege deze sessie inactief werd blijft dus zichtbaar
+  // en verplicht; een pas nadien toegevoegde locatie verschijnt hier niet.
+  const visibleLocations = useMemo(
+    () => (session && office ? sessionLocations(session, office) : []),
+    [session, office],
+  );
 
   /**
    * "Zonder locatie" (v0.2.1 correctieronde §2), voor ELKE telling
@@ -89,7 +95,19 @@ export function LocationOverviewPage({
         {visibleLocations.map((location: Location) => {
           const locationProgress = progress.perLocation.find((p) => p.locationId === location.id);
           const counted = locationProgress?.countedEntries ?? 0;
-          const total = locationProgress?.totalEntries ?? 0;
+          const rawTotal = locationProgress?.totalEntries ?? 0;
+          /**
+           * v0.3-hotfix: een locatie die nog nooit geteld is ("leermodus",
+           * spec v0.2.1 §1/§8) heeft nog geen enkele CountEntry, dus
+           * `rawTotal` is dan altijd 0 — dat oogt als "hier valt niets te
+           * tellen", terwijl het openen van zo'n locatie wél de volledige
+           * sessiescope laat browsen (CountingPage.tsx: isLearningMode ->
+           * defaultPool = scopeArticles). Toon voor dat geval daarom de
+           * sessiebrede totaaltelling als richtgetal i.p.v. een kale 0 —
+           * zodra er één keer geteld is, wordt `rawTotal` vanzelf een
+           * echte, locatie-specifieke teller en verdwijnt dit richtgetal.
+           */
+          const total = rawTotal > 0 ? rawTotal : progress.totalUniqueArticles;
           const explicitStatus = statusByLocationId.get(location.id);
           const statusKey =
             explicitStatus === "COMPLETED" ? "COMPLETED" : counted > 0 ? "IN_PROGRESS" : "NOT_STARTED";

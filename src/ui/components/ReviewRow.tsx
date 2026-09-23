@@ -9,6 +9,24 @@ interface ReviewRowProps {
   locations: Location[];
   /** Navigeer naar het telscherm van deze locatie, gefocust op dit artikel (spec §3, en de v0.2.1-fix hieronder). */
   onRecount: (locationId: string, articleId: string) => void;
+  /**
+   * Label voor `result.previousCount` (aanvulling: "vergelijken met een
+   * willekeurig gekozen telling"): standaard "Vorige telling", maar wanneer
+   * de gebruiker op het reviewscherm een andere afgeronde sessie als
+   * vergelijkingsbasis koos, toont deze rij die tellingnaam i.p.v. de
+   * standaardtekst — zodat altijd duidelijk is waarmee vergeleken wordt.
+   */
+  comparisonLabel?: string;
+  /**
+   * Data-integriteit-sprint §1: een COMPLETED (of CANCELLED) sessie is een
+   * onveranderlijke, historische snapshot — "Historische telling =
+   * read-only snapshot". Verbergt hier alle acties die naar het telscherm
+   * zouden navigeren om iets te (her)tellen (Tellen/Hertellen/+Andere
+   * locatie, en de klikbare locatiewaarden): de rij zelf blijft volledig
+   * zichtbaar/leesbaar, enkel de mutatie-acties verdwijnen. Standaard
+   * `false` (ongewijzigd gedrag voor een lopende sessie).
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -29,13 +47,19 @@ interface ReviewRowProps {
  *   - is er al minstens één locatie geteld, dan komt er ook "+ Andere
  *     locatie" bij (naast "Hertellen" per al-geteld locatie).
  */
-export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
+export function ReviewRow({
+  result,
+  locations,
+  onRecount,
+  comparisonLabel = "Vorige telling",
+  readOnly = false,
+}: ReviewRowProps) {
   const [pickingLocation, setPickingLocation] = useState(false);
   const locationById = new Map(locations.map((l) => [l.id, l]));
   const activeLocations = locations.filter((l) => l.active);
   const hasAnyCountedLocation = result.perLocation.some((loc) => loc.counted);
-  const showTellenButton = !result.fullyCounted && !result.isManualAddition;
-  const showAndereLocatieButton = hasAnyCountedLocation && !result.isManualAddition;
+  const showTellenButton = !readOnly && !result.fullyCounted && !result.isManualAddition;
+  const showAndereLocatieButton = !readOnly && hasAnyCountedLocation && !result.isManualAddition;
 
   function chooseLocation(locationId: string) {
     setPickingLocation(false);
@@ -78,7 +102,7 @@ export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
         {result.perLocation.map((loc) => {
           const location = locationById.get(loc.locationId);
           const display = loc.counted ? formatCount(loc.quantity) : loc.hasEntry ? "nog te tellen" : "—";
-          const canCountHere = !loc.hasEntry && (location?.active ?? false);
+          const canCountHere = !readOnly && !loc.hasEntry && (location?.active ?? false);
           return (
             <span key={loc.locationId} className="review-row__location">
               {location?.name ?? `Locatie ${loc.locationNumber}`}:{" "}
@@ -93,7 +117,7 @@ export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
               ) : (
                 <span className="review-row__location-value">{display}</span>
               )}
-              {loc.hasEntry && (
+              {loc.hasEntry && !readOnly && (
                 <button
                   type="button"
                   className="review-row__recount"
@@ -145,7 +169,7 @@ export function ReviewRow({ result, locations, onRecount }: ReviewRowProps) {
 
       <div className="review-row__figures">
         <div>
-          <div className="review-row__figure-label">Vorige telling</div>
+          <div className="review-row__figure-label">{comparisonLabel}</div>
           <div className="review-row__figure-value">{formatCount(result.previousCount)}</div>
         </div>
         <div>

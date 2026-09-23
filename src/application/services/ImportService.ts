@@ -1,7 +1,9 @@
 import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain/frequency";
+import { mergeHistoryEntries } from "../../domain/stockSnapshot";
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { Article, Office } from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
-import type { StockSource } from "../ports/StockSource";
+import type { HistoricalSheetSnapshot, StockSource } from "../ports/StockSource";
 
 export interface ExistingOfficeInfo {
   office: Office;
@@ -23,6 +25,15 @@ export interface ImportPreview {
   breakdown: FrequencyBreakdown;
   /** Ingevuld wanneer er al een kantoor met hetzelfde ID (naam) bestond. */
   existing: ExistingOfficeInfo | null;
+  /**
+   * Rollend stockarchief (spec): telhistoriek (sheet HISTORIE) en historische,
+   * benoemde tellingtabs uit het bronbestand — leeg wanneer de bron dit niet
+   * ondersteunt (`StockSource.loadHistory`/`loadHistoricalSheets` zijn
+   * optioneel) of het bestand deze sheets niet had (backward compat, oudere
+   * gestandaardiseerde bestanden zonder rollend archief).
+   */
+  historyEntries: StockHistoryEntry[];
+  historicalSheets: HistoricalSheetSnapshot[];
 }
 
 export interface ImportSummary {
@@ -53,6 +64,12 @@ export class ImportService {
   async prepareImport(source: StockSource): Promise<ImportPreview> {
     const office = await source.loadOffice();
     const articles = await source.loadArticles(office);
+    // Beide optioneel (zie StockSource) — een bron/bestand zonder rollend
+    // archief geeft hier gewoon niets terug, nooit een fout.
+    const [historyEntries, historicalSheets] = await Promise.all([
+      source.loadHistory?.() ?? Promise.resolve([]),
+      source.loadHistoricalSheets?.() ?? Promise.resolve([]),
+    ]);
 
     const existingOffice = await this.repository.getOffice(office.id);
     let existing: ExistingOfficeInfo | null = null;
@@ -77,6 +94,8 @@ export class ImportService {
       totalArticles: articles.length,
       breakdown: computeFrequencyBreakdown(articles),
       existing,
+      historyEntries,
+      historicalSheets,
     };
   }
 
@@ -98,6 +117,36 @@ export class ImportService {
       importedAt: new Date().toISOString(),
     });
     await this.repository.setSelectedOfficeId(office.id);
+
+    // Rollend stockarchief (spec): herkent bestaande historische
+    // tellingtabs uit het bronbestand en maakt de historiek beschikbaar voor
+    // ArticleDetail/history — ook op een nieuw toestel zonder lokale
+    // CountSessions. Puur additief: leeg bij een ouder, gestandaardiseerd
+    // bestand zonder rollend archief (backward compat).
+    if (preview.historicalSheets.length > 0) {
+      // Een reeds LOKAAL gekende sheetnaam (bv. zelf eerder bevroren via een
+      // export in DEZE repository, met een gekende sessionId) wordt nooit
+      // overschreven/gedowngraded door een import — dat zou de koppeling met
+      // die sessie verliezen (nodig voor ExportService's hergebruik- i.p.v.
+      // conflictlogica bij een latere, herhaalde export van diezelfde
+      // sessie). Enkel écht nieuwe sheetnamen worden toegevoegd.
+      const existingSheets = await this.repository.getHistoricalSheetSnapshots(office.id);
+      const existingSheetNames = new Set(existingSheets.map((s) => s.sheetName));
+      for (const sheet of preview.historicalSheets) {
+        if (existingSheetNames.has(sheet.sheetName)) continue;
+        await this.repository.saveHistoricalSheetSnapshot({
+          officeId: office.id,
+          sessionId: null,
+          sheetName: sheet.sheetName,
+          rows: sheet.rows,
+        });
+      }
+    }
+    if (preview.historyEntries.length > 0) {
+      const existingHistory = await this.repository.getStockHistoryEntries(office.id);
+      const merged = mergeHistoryEntries(existingHistory, preview.historyEntries);
+      await this.repository.saveStockHistoryEntries(office.id, merged);
+    }
 
     return {
       office,

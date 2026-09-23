@@ -1,4 +1,5 @@
 import { computeSessionProgress } from "../../domain/progress";
+import { assertValidQuantity } from "../../domain/quantityValidation";
 import type {
   CountEntry,
   CountSession,
@@ -6,6 +7,7 @@ import type {
   LocationSessionStatus,
   SessionProgress,
 } from "../../domain/types";
+import { assertSessionEditable } from "../errors";
 import type { CountingRepository } from "../ports/CountingRepository";
 
 export interface RecordCountInput {
@@ -37,6 +39,11 @@ export class CountingService {
    */
   async recordCount(input: RecordCountInput): Promise<CountEntry> {
     const { session, articleId, locationId, quantity, note } = input;
+    // Data-integriteit-sprint §1/§6: BEIDE controles gebeuren hier, aan de
+    // service-laag, vóór er iets geschreven wordt — nooit enkel op de UI
+    // vertrouwen (zie `SessionNotEditableError`/`InvalidQuantityError`).
+    assertSessionEditable(session);
+    assertValidQuantity(quantity);
     const entry: CountEntry = {
       id: `${session.id}:${articleId}:${locationId}`,
       sessionId: session.id,
@@ -68,6 +75,7 @@ export class CountingService {
    * ArticleLocationAssignment.
    */
   async confirmAbsent(session: CountSession, articleId: string): Promise<CountEntry> {
+    assertSessionEditable(session);
     const entry: CountEntry = {
       id: `${session.id}:${articleId}:absent`,
       sessionId: session.id,
@@ -103,6 +111,7 @@ export class CountingService {
 
   /** Markeert een locatie als afgerond binnen deze sessie. Kan later altijd heropend worden. */
   async completeLocation(sessionId: string, locationId: string): Promise<void> {
+    await this.assertEditableSession(sessionId);
     await this.repository.saveLocationSessionStatus({
       id: `${sessionId}:${locationId}`,
       sessionId,
@@ -114,6 +123,7 @@ export class CountingService {
 
   /** Heropent een eerder afgeronde locatie binnen deze sessie (spec §4: "moet later opnieuw geopend kunnen worden"). */
   async reopenLocation(sessionId: string, locationId: string): Promise<void> {
+    await this.assertEditableSession(sessionId);
     await this.repository.saveLocationSessionStatus({
       id: `${sessionId}:${locationId}`,
       sessionId,
@@ -136,5 +146,19 @@ export class CountingService {
         .filter((assignment) => assignment.active && assignment.locationId === locationId)
         .map((assignment) => assignment.articleId),
     );
+  }
+
+  /**
+   * `completeLocation`/`reopenLocation` krijgen enkel een `sessionId` mee
+   * (niet de volledige sessie zoals `recordCount`/`confirmAbsent`) — dit
+   * haalt de sessie vers op en gooit `SessionNotEditableError` zodra ze niet
+   * (meer) ACTIVE is, exact dezelfde regel als de rest van deze klasse.
+   */
+  private async assertEditableSession(sessionId: string): Promise<void> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessie ${sessionId} niet gevonden.`);
+    }
+    assertSessionEditable(session);
   }
 }

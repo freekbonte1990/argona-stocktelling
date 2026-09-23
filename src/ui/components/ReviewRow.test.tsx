@@ -166,6 +166,31 @@ describe("ReviewRow — al geteld op één locatie", () => {
   });
 });
 
+describe(
+  "ReviewRow — comparisonLabel (aanvulling: \"vergelijken met een willekeurig gekozen telling\")",
+  () => {
+    it("toont 'Vorige telling' wanneer comparisonLabel niet is meegegeven (standaardgedrag, ongewijzigd)", () => {
+      const result = makeResult();
+      render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} />);
+      expect(screen.getByText("Vorige telling")).toBeInTheDocument();
+    });
+
+    it("toont de meegegeven vergelijk-tellingnaam i.p.v. 'Vorige telling'", () => {
+      const result = makeResult();
+      render(
+        <ReviewRow
+          result={result}
+          locations={locations}
+          onRecount={vi.fn()}
+          comparisonLabel="2026-06 Maand"
+        />,
+      );
+      expect(screen.queryByText("Vorige telling")).not.toBeInTheDocument();
+      expect(screen.getByText("2026-06 Maand")).toBeInTheDocument();
+    });
+  },
+);
+
 describe("ReviewRow — handmatige buiten-scope-toevoeging", () => {
   it("toont geen 'Tellen'/'+ Andere locatie' voor een handmatige toevoeging (die is per definitie al geteld)", () => {
     const result = makeResult({
@@ -180,5 +205,57 @@ describe("ReviewRow — handmatige buiten-scope-toevoeging", () => {
     render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "Tellen" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ Andere locatie" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewRow — readOnly (data-integriteit-sprint §1: Historische telling = read-only snapshot)", () => {
+  it("verbergt 'Tellen' voor een niet-volledig geteld artikel wanneer readOnly", () => {
+    const result = makeResult(); // fullyCounted: false, geen enkele entry — zou anders "Tellen" tonen.
+    render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} readOnly />);
+    expect(screen.queryByRole("button", { name: "Tellen" })).not.toBeInTheDocument();
+  });
+
+  it("verbergt de klikbare locatiechips ('—') wanneer readOnly — de waarde blijft wel zichtbaar als tekst", () => {
+    const result = makeResult();
+    render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} readOnly />);
+    expect(screen.queryByRole("button", { name: "—" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("—", { selector: ".review-row__location-value" })).toHaveLength(3);
+  });
+
+  it("verbergt 'Hertellen' en '+ Andere locatie' voor een deels geteld artikel wanneer readOnly, maar toont de tellingen nog gewoon", () => {
+    const result = makeResult({
+      fullyCounted: true,
+      hasAnyEntry: true,
+      newTotalCount: 4,
+      differenceQuantity: -1,
+      perLocation: [
+        { locationId: locations[0].id, locationNumber: 1, quantity: 4, counted: true, hasEntry: true },
+        { locationId: locations[1].id, locationNumber: 2, quantity: null, counted: false, hasEntry: false },
+        { locationId: locations[2].id, locationNumber: 3, quantity: null, counted: false, hasEntry: false },
+      ],
+    });
+    render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} readOnly />);
+
+    expect(screen.queryByRole("button", { name: "Hertellen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Andere locatie" })).not.toBeInTheDocument();
+    // De rij zelf blijft volledig leesbaar: de geteld waarde en de figuren blijven zichtbaar.
+    expect(screen.getByText("4", { selector: ".review-row__location-value" })).toBeInTheDocument();
+    expect(screen.getByText(result.article.description)).toBeInTheDocument();
+  });
+
+  it("readOnly heeft geen effect op een handmatige toevoeging (toonde toch al geen mutatie-knoppen)", () => {
+    const result = makeResult({
+      isManualAddition: true,
+      fullyCounted: true,
+      hasAnyEntry: true,
+      newTotalCount: 2,
+      perLocation: [
+        { locationId: locations[0].id, locationNumber: 1, quantity: 2, counted: true, hasEntry: true },
+      ],
+    });
+    render(<ReviewRow result={result} locations={locations} onRecount={vi.fn()} readOnly />);
+    expect(screen.queryByRole("button", { name: "Tellen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Andere locatie" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hertellen" })).not.toBeInTheDocument();
   });
 });

@@ -76,6 +76,14 @@ describe("Export/herimport-roundtrip van een nieuw (tijdelijk) artikel", () => {
       comment: "Gevonden tijdens telling",
     });
 
+    // Data-integriteit-sprint §2: een officiële export mag enkel voor een
+    // AFGERONDE sessie — rond dus eerst beide locaties en de sessie zelf af
+    // (dit test-scenario ging voorheen, vóór die regel bestond, ervan uit dat
+    // je ook tussentijds/ACTIEF kon exporteren).
+    await countingService.completeLocation(session.id, "damme:loc-1");
+    await countingService.completeLocation(session.id, "damme:loc-2");
+    await sessionService.completeSession(session.id);
+
     // --- Cyclus 1: exporteren en opnieuw inlezen ---
     let exported = await exportService.exportSessionResults(session.id);
     let source = createExcelStockSourceFromBuffer(exported.data, exported.fileName);

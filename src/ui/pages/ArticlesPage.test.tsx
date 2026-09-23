@@ -117,39 +117,43 @@ describe("ArticlesPage — compacte toolbar (v0.2.1 correctieronde §1)", () => 
     ]);
   });
 
-  it("de Filters-knop toont het aantal actieve filters, en filters blijven volledig functioneel achter de modal", async () => {
-    const user = userEvent.setup();
-    render(<ArticlesPage officeId="office-1" onOpenArticle={() => {}} />);
-    await waitUntilLoaded();
+  it(
+    "de Filters-knop toont het aantal actieve filters, en filters (nu dropdowns per categorie, " +
+      "aanvulling) blijven volledig functioneel achter de modal",
+    async () => {
+      const user = userEvent.setup();
+      render(<ArticlesPage officeId="office-1" onOpenArticle={() => {}} />);
+      await waitUntilLoaded();
 
-    let modal = await openFilters(user);
-    await user.click(within(modal).getByRole("button", { name: "ANDERE" }));
-    // Modal blijft open (geen auto-close per klik) — expliciet sluiten via "Toepassen".
-    await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
+      let modal = await openFilters(user);
+      await user.selectOptions(within(modal).getByLabelText("Productgroep"), "ANDERE");
+      // Modal blijft open (geen auto-close per keuze) — expliciet sluiten via "Toepassen".
+      await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
 
-    expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
-    expect(screen.getByText("Gamma artikel")).toBeInTheDocument();
-    expect(screen.queryByText("Alfa artikel")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+      expect(screen.getByText("Gamma artikel")).toBeInTheDocument();
+      expect(screen.queryByText("Alfa artikel")).not.toBeInTheDocument();
 
-    // Actieve filter is ook zichtbaar/snel wisbaar als chip buiten de modal.
-    const removableChip = screen.getByText("Productgroep: ANDERE").closest(".location-chip") as HTMLElement;
-    await user.click(within(removableChip).getByRole("button"));
-    expect(screen.getByText("Alfa artikel")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+      // Actieve filter is ook zichtbaar/snel wisbaar als chip buiten de modal.
+      const removableChip = screen.getByText("Productgroep: ANDERE").closest(".location-chip") as HTMLElement;
+      await user.click(within(removableChip).getByRole("button"));
+      expect(screen.getByText("Alfa artikel")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
 
-    // Meerdere filters combineren: productgroep + "Geen locatie".
-    modal = await openFilters(user);
-    await user.click(within(modal).getByRole("button", { name: "GROEP" }));
-    await user.click(within(modal).getByRole("button", { name: "Geen locatie" }));
-    await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
+      // Meerdere filters combineren: productgroep + "Geen locatie".
+      modal = await openFilters(user);
+      await user.selectOptions(within(modal).getByLabelText("Productgroep"), "GROEP");
+      await user.selectOptions(within(modal).getByLabelText("Locatie"), "Geen locatie");
+      await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
 
-    expect(screen.getByRole("button", { name: "Filters (2)" })).toBeInTheDocument();
-    expect(screen.getByText("Alfa artikel")).toBeInTheDocument();
-    expect(screen.getByText("Beta artikel")).toBeInTheDocument();
-    expect(screen.queryByText("Gamma artikel")).not.toBeInTheDocument(); // andere productgroep
-  });
+      expect(screen.getByRole("button", { name: "Filters (2)" })).toBeInTheDocument();
+      expect(screen.getByText("Alfa artikel")).toBeInTheDocument();
+      expect(screen.getByText("Beta artikel")).toBeInTheDocument();
+      expect(screen.queryByText("Gamma artikel")).not.toBeInTheDocument(); // andere productgroep
+    },
+  );
 
-  it("'Geen locatie' filter (in de modal) toont enkel artikelen zonder actieve locatiekoppeling", async () => {
+  it("'Geen locatie' filter (in de modal, nu een dropdown) toont enkel artikelen zonder actieve locatiekoppeling", async () => {
     const user = userEvent.setup();
     await countingRepository.saveArticleLocationAssignments([
       {
@@ -165,7 +169,7 @@ describe("ArticlesPage — compacte toolbar (v0.2.1 correctieronde §1)", () => 
     await waitUntilLoaded();
 
     const modal = await openFilters(user);
-    await user.click(within(modal).getByRole("button", { name: "Geen locatie" }));
+    await user.selectOptions(within(modal).getByLabelText("Locatie"), "Geen locatie");
     await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
 
     expect(screen.queryByText("Alfa artikel")).not.toBeInTheDocument();

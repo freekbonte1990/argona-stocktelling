@@ -6,7 +6,14 @@ import type {
   LocationSessionStatus,
   Office,
 } from "../../domain/types";
-import type { CountingRepository, ImportMeta } from "../ports/CountingRepository";
+import type {
+  CountingRepository,
+  FinalizedSessionResult,
+  FinalizeSessionInput,
+  HistoricalSheetRecord,
+  ImportMeta,
+} from "../ports/CountingRepository";
+import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 
 /**
  * In-memory testdouble voor CountingRepository. Gebruikt in unit tests voor
@@ -69,6 +76,35 @@ export class InMemoryCountingRepository implements CountingRepository {
       session.completedAt = new Date().toISOString();
     }
   }
+  async cancelSession(sessionId: string, reason: string | null = null): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.status = "CANCELLED";
+      session.cancelledAt = new Date().toISOString();
+      session.cancelReason = reason;
+    }
+  }
+
+  private finalizedSessionResults = new Map<string, FinalizedSessionResult>();
+  /**
+   * Geen echte transactie nodig in deze in-memory testdouble (alles is
+   * synchroon/in het geheugen, er kan hier geen gedeeltelijke schrijving
+   * optreden) — schrijft gewoon alle vier onderdelen na elkaar weg, exact
+   * zoals de echte Dexie-transactie dat atomisch zou doen.
+   */
+  async finalizeSession(input: FinalizeSessionInput): Promise<void> {
+    this.sessions.set(input.session.id, input.session);
+    for (const article of input.updatedArticles) this.articles.set(article.id, article);
+    await this.saveStockHistoryEntries(input.session.officeId, input.historyEntries);
+    this.finalizedSessionResults.set(input.session.id, {
+      sessionId: input.session.id,
+      review: input.review,
+      snapshot: input.snapshot,
+    });
+  }
+  async getFinalizedSessionResult(sessionId: string): Promise<FinalizedSessionResult | undefined> {
+    return this.finalizedSessionResults.get(sessionId);
+  }
 
   async saveCountEntry(entry: CountEntry): Promise<void> {
     this.entries.set(entry.id, entry);
@@ -105,5 +141,28 @@ export class InMemoryCountingRepository implements CountingRepository {
   }
   async setSelectedOfficeId(officeId: string): Promise<void> {
     this.selectedOfficeId = officeId;
+  }
+
+  private historicalSheets = new Map<string, HistoricalSheetRecord>();
+  async saveHistoricalSheetSnapshot(record: HistoricalSheetRecord): Promise<void> {
+    this.historicalSheets.set(`${record.officeId}:${record.sheetName}`, record);
+  }
+  async getHistoricalSheetSnapshots(officeId: string): Promise<HistoricalSheetRecord[]> {
+    return Array.from(this.historicalSheets.values()).filter((r) => r.officeId === officeId);
+  }
+
+  private stockHistoryEntries = new Map<string, StockHistoryEntry & { officeId: string }>();
+  async saveStockHistoryEntries(officeId: string, entries: StockHistoryEntry[]): Promise<void> {
+    for (const entry of entries) {
+      this.stockHistoryEntries.set(`${officeId}:${entry.sessionName}:${entry.articleId}`, {
+        ...entry,
+        officeId,
+      });
+    }
+  }
+  async getStockHistoryEntries(officeId: string): Promise<StockHistoryEntry[]> {
+    return Array.from(this.stockHistoryEntries.values())
+      .filter((e) => e.officeId === officeId)
+      .map(({ officeId: _officeId, ...entry }) => entry);
   }
 }

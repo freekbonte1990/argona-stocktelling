@@ -1,4 +1,5 @@
 import { isArticleFullyCounted } from "./progress";
+import type { ArticleSnapshotStatus, StockHistoryEntry } from "./stockSnapshot";
 import type { CountEntry, CountSession, Location } from "./types";
 
 /**
@@ -70,4 +71,83 @@ export function buildArticleHistory(
   }
 
   return points;
+}
+
+/**
+ * Eén punt van de SAMENGEVOEGDE historiek (lokaal + geïmporteerd, rollend
+ * stockarchief): dezelfde vorm als `ArticleHistoryPoint`, uitgebreid met de
+ * tellingnaam en status telling — nodig zodra beide bronnen door elkaar
+ * kunnen lopen (spec: "een nieuw toestel moet onmiddellijk historische
+ * grafieken kunnen tonen na import, zonder lokale CountSessions").
+ */
+export interface MergedArticleHistoryPoint {
+  sessionName: string;
+  date: string;
+  totalCount: number | null;
+  difference: number | null;
+  locationNames: string[];
+  /** Lokale punten (uit `buildArticleHistory`) zijn per definitie altijd fysiek geteld deze sessie. */
+  status: ArticleSnapshotStatus;
+}
+
+/**
+ * Voegt de lokale historiek (dit toestel, uit CountSession/CountEntry) samen
+ * met geïmporteerde `StockHistoryEntry`-regels (rollend Excelarchief) voor
+ * ÉÉN artikel, zodat de grafiek/tabel op `ArticleDetailPage` beide bronnen
+ * naadloos toont — ook wanneer dit toestel geen enkele lokale CountSession
+ * kent (spec: "onmiddellijk historische grafieken tonen na import").
+ *
+ * Dedupliceert op tellingnaam (`localSessionNames` koppelt elke lokale
+ * `sessionId` aan diezelfde naamgevingsconventie als het geëxporteerde
+ * archief, zie `stockSnapshot.ts#sessionSnapshotName`) — bij een conflict
+ * wint het LOKALE punt (preciezer: exacte locatienamen uit echte entries).
+ * Na het samenvoegen wordt `difference` opnieuw berekend t.o.v. het
+ * chronologisch voorgaande punt IN DE SAMENGEVOEGDE reeks — anders zou een
+ * onafhankelijk berekend verschil van elke bron na het mergen onjuist zijn
+ * (spec: "vermijd dat meerdere OVERGENOMEN snapshots de betekenis
+ * vervormen").
+ */
+export function mergeArticleHistory(
+  articleId: string,
+  localPoints: ArticleHistoryPoint[],
+  localSessionNames: Map<string, string>,
+  importedEntries: StockHistoryEntry[],
+): MergedArticleHistoryPoint[] {
+  const byName = new Map<string, MergedArticleHistoryPoint>();
+
+  for (const point of localPoints) {
+    const sessionName = localSessionNames.get(point.sessionId) ?? point.sessionId;
+    byName.set(sessionName, {
+      sessionName,
+      date: point.date,
+      totalCount: point.totalCount,
+      difference: null, // wordt hieronder herberekend over de samengevoegde reeks
+      locationNames: point.locationNames,
+      status: "GETELD",
+    });
+  }
+
+  for (const entry of importedEntries) {
+    if (entry.articleId !== articleId) continue;
+    if (byName.has(entry.sessionName)) continue; // lokaal punt wint bij een conflict
+    byName.set(entry.sessionName, {
+      sessionName: entry.sessionName,
+      date: entry.countDate,
+      totalCount: entry.totalCount,
+      difference: null,
+      locationNames: entry.locationNames,
+      status: entry.status,
+    });
+  }
+
+  const sorted = Array.from(byName.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  let previousCount: number | null = null;
+  for (const point of sorted) {
+    point.difference =
+      previousCount === null || point.totalCount === null ? null : point.totalCount - previousCount;
+    if (point.totalCount !== null) previousCount = point.totalCount;
+  }
+
+  return sorted;
 }

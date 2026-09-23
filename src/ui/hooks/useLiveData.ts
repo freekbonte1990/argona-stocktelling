@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../adapters/storage/db";
-import { buildArticleHistory } from "../../domain/articleHistory";
+import { buildArticleHistory, mergeArticleHistory } from "../../domain/articleHistory";
+import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { CountEntry } from "../../domain/types";
 
 /**
@@ -128,7 +129,22 @@ export function useArticleHistory(officeId: string | undefined, articleId: strin
           entriesBySessionId.set(session.id, entries);
         }),
       );
-      return buildArticleHistory(articleId, sessions, entriesBySessionId, office?.locations ?? []);
+      const localHistory = buildArticleHistory(articleId, sessions, entriesBySessionId, office?.locations ?? []);
+
+      // Rollend stockarchief: voeg geïmporteerde HISTORIE-regels samen met de
+      // lokale historiek — zo toont een nieuw toestel, zonder lokale
+      // CountSessions, meteen de volledige, geïmporteerde grafiek/tabel
+      // (spec). `localSessionNames` koppelt elke lokale sessie aan dezelfde
+      // naamgevingsconventie als het geëxporteerde archief, zodat
+      // `mergeArticleHistory` correct kan dedupliceren.
+      const localSessionNames = new Map(sessions.map((s) => [s.id, sessionSnapshotName(s)]));
+      const importedEntries = await db.stockHistoryEntries
+        .where("officeId")
+        .equals(officeId)
+        .and((e) => e.articleId === articleId)
+        .toArray();
+
+      return mergeArticleHistory(articleId, localHistory, localSessionNames, importedEntries);
     },
     [officeId, articleId],
     [],

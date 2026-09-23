@@ -290,6 +290,19 @@ button {
   color: var(--color-primary);
 }
 
+/*
+ * v0.3 §7 (tablet-touch UX): de primaire telscherm-tabs ("Nog te tellen" /
+ * "Alles" / "Geteld" / "Nog nergens geteld") zijn de belangrijkste
+ * navigatie tijdens een magazijnronde en krijgen daarom het volle
+ * duimvriendelijke formaat (--touch-min), groter dan de secundaire
+ * productgroep-/sorteerchips die dit bewust niet nodig hebben.
+ */
+.chip--primary {
+  min-height: var(--touch-min);
+  font-size: 1.05rem;
+  padding: var(--space-2) var(--space-3);
+}
+
 .search-input {
   width: 100%;
   min-height: var(--touch-min);
@@ -309,6 +322,24 @@ button {
 .office-select {
   font-weight: 700;
   font-size: 1.2rem;
+}
+
+/*
+ * Aanvulling ("filters ziet er ook niet goed uit... dropdown per
+ * categorie?"): label boven een `<select>`, gestapeld — gebruikt door de
+ * Filters-modal op het Artikels-overzicht (één van deze per filtercategorie
+ * i.p.v. de vroegere rijen losse chips).
+ */
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.filter-field__label {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 .article-card {
@@ -398,16 +429,30 @@ button {
   border-radius: var(--radius);
   padding: var(--space-3);
   text-align: center;
+  /*
+   * Aanvulling ("deze venstertjes zien er lelijk uit, onoverzichtelijk"): een
+   * lang getal (bv. een grote correctiehoeveelheid of een eurobedrag met
+   * duizendtallen) overschreed voorheen gewoon de vaste breedte van de tegel
+   * en liep zichtbaar over in de buurtegel — vandaar het rommelige/overlappende
+   * beeld. `min-width: 0` laat de grid-cel echt krimpen i.p.v. op de inhoud
+   * te blijven forceren.
+   */
+  min-width: 0;
 }
 
 .summary-tile__value {
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   font-weight: 800;
+  /* Breekt een lang, ononderbroken getal netjes af naar een tweede regel
+     i.p.v. buiten de tegel te laten overlopen. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.2;
 }
 
 .summary-tile__label {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .modal-overlay {

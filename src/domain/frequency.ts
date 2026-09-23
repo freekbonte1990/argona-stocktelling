@@ -47,7 +47,21 @@ export const FREQUENCY_TO_RAW: Record<ArticleCountFrequency, string> = {
   TO_BE_DETERMINED: "NOG TE BEPALEN",
 };
 
-const INACTIVE_MARKERS = ["INACTIEF", "GEBLOKKEERD", "BLOK", "UITGEFASEERD", "STOPGEZET"];
+const INACTIVE_MARKERS = [
+  "INACTIEF",
+  "GEBLOKKEERD",
+  "BLOK",
+  "UITGEFASEERD",
+  "STOPGEZET",
+  // Aanvulling ("bij status moet je kunnen kiezen tussen actief, obsolete -
+  // paneel, obsolete - rood, non-actief"): elke "OBSOLETE - ..."-variant is
+  // per definitie niet-actief, en "NON-ACTIEF" bevat zelf niet de deelstring
+  // "INACTIEF" (wél "ACTIEF") — vandaar hier apart opgesomd, zowel met als
+  // zonder koppelteken (voor vrije Excel-tekst die het anders spelt).
+  "OBSOLETE",
+  "NON-ACTIEF",
+  "NON ACTIEF",
+];
 
 /**
  * Normaliseert kolom "Artikelstatus" naar ACTIVE/INACTIVE.
@@ -65,6 +79,29 @@ export function normalizeArticleStatus(raw: string | null | undefined): ArticleA
   }
   return "ACTIVE";
 }
+
+/**
+ * Aanvulling ("Bij status moet je kunnen kiezen tussen actief, obsolete -
+ * paneel, obsolete - rood, non-actief"): de vaste, door de gebruiker zelf
+ * te kiezen statuswaarden op de artikeldetailpagina — een select met exact
+ * deze 4 opties, i.p.v. vrije tekst. `raw` is wat er in `Article.rawStatus`
+ * (en dus ook de Excel-export, kolom "Artikelstatus") terechtkomt; `status`
+ * is de bijhorende genormaliseerde `ArticleActiveStatus` (zie
+ * `normalizeArticleStatus` hierboven, waarmee dit exact consistent moet
+ * blijven — enkel "ACTIEF" is ACTIVE, de rest is INACTIVE).
+ */
+export interface ArticleStatusOption {
+  raw: string;
+  status: ArticleActiveStatus;
+  label: string;
+}
+
+export const ARTICLE_STATUS_OPTIONS: ArticleStatusOption[] = [
+  { raw: "ACTIEF", status: "ACTIVE", label: "Actief" },
+  { raw: "OBSOLETE - PANEEL", status: "INACTIVE", label: "Obsolete - paneel" },
+  { raw: "OBSOLETE - ROOD", status: "INACTIVE", label: "Obsolete - rood" },
+  { raw: "NON-ACTIEF", status: "INACTIVE", label: "Non-actief" },
+];
 
 export interface FrequencyBreakdown {
   monthly: number;

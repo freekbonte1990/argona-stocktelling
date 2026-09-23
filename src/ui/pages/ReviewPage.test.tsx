@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { ReviewPage } from "./ReviewPage";
 import { db } from "../../adapters/storage/db";
 import { countingRepository, countingService, countSessionService } from "../../application/container";
+import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { Article, CountSession, Office } from "../../domain/types";
 
 /**
@@ -170,3 +171,317 @@ describe("ReviewPage — afrondvoorwaarden (v0.2.1 §6)", () => {
     expect(screen.queryByText(/locaties zijn nog niet afgerond/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Aanvulling: "Afronden met openstaande artikels" — de uitzonderingsflow
+ * naast de strikte afronding hierboven.
+ */
+describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () => {
+  it("toont de secundaire knop zolang de telling onvolledig is, en verbergt ze zodra alles klaar is", async () => {
+    await countingService.recordCount({
+      session,
+      articleId: articleM1.id,
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    // M2 blijft ongeteld, locatie 2 blijft open.
+    await countingService.completeLocation(session.id, office.locations[0].id);
+
+    render(
+      <ReviewPage
+        sessionId={session.id}
+        onRecount={() => {}}
+        onCompleted={() => {}}
+        onOpenLocationOverview={() => {}}
+        onOpenLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    expect(await screen.findByText("Afronden met openstaande artikels")).toBeInTheDocument();
+
+    // Volledig afronden -> de secundaire knop is niet meer nodig/zichtbaar.
+    await countingService.confirmAbsent(session, articleM2.id);
+    await countingService.completeLocation(session.id, office.locations[1].id);
+    await waitFor(() => {
+      expect(screen.queryByText("Afronden met openstaande artikels")).not.toBeInTheDocument();
+    });
+  });
+
+  it("klikken toont een bevestigingsdialoog met het aantal niet-getelde artikelen en niet-afgeronde locaties", async () => {
+    const user = userEvent.setup();
+    await countingService.recordCount({
+      session,
+      articleId: articleM1.id,
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    // M2 blijft ongeteld. Locatie 1 wordt afgerond, locatie 2 blijft open.
+    await countingService.completeLocation(session.id, office.locations[0].id);
+
+    render(
+      <ReviewPage
+        sessionId={session.id}
+        onRecount={() => {}}
+        onCompleted={() => {}}
+        onOpenLocationOverview={() => {}}
+        onOpenLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+
+    expect(await screen.findByText("Afronden met openstaande artikels?")).toBeInTheDocument();
+    expect(screen.getByText("1 artikel(en) worden overgenomen.")).toBeInTheDocument();
+    expect(screen.getByText("1 locatie(s) niet afgerond.")).toBeInTheDocument();
+  });
+
+  it("'Afronden en vorige voorraad overnemen' rondt de sessie af ondanks openstaande artikels/locaties", async () => {
+    const user = userEvent.setup();
+    let completed = false;
+    await countingService.recordCount({
+      session,
+      articleId: articleM1.id,
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+
+    render(
+      <ReviewPage
+        sessionId={session.id}
+        onRecount={() => {}}
+        onCompleted={() => (completed = true)}
+        onOpenLocationOverview={() => {}}
+        onOpenLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Afronden en vorige voorraad overnemen"));
+
+    await waitFor(() => expect(completed).toBe(true));
+    const completedSession = await countingRepository.getSession(session.id);
+    expect(completedSession?.status).toBe("COMPLETED");
+    expect(completedSession?.completedAt).not.toBeNull();
+  });
+
+  it("'Terug naar telling' sluit de dialoog zonder iets af te ronden", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReviewPage
+        sessionId={session.id}
+        onRecount={() => {}}
+        onCompleted={() => {}}
+        onOpenLocationOverview={() => {}}
+        onOpenLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Terug naar telling"));
+
+    expect(screen.queryByText("Afronden met openstaande artikels?")).not.toBeInTheDocument();
+    const stillActive = await countingRepository.getSession(session.id);
+    expect(stillActive?.status).toBe("ACTIVE");
+  });
+
+  it("een openstaande locatie blokkeert de uitzonderlijke afronding niet, ook als alle artikelen wel geteld zijn", async () => {
+    const user = userEvent.setup();
+    await countingService.recordCount({
+      session,
+      articleId: articleM1.id,
+      locationId: office.locations[0].id,
+      quantity: 3,
+    });
+    await countingService.confirmAbsent(session, articleM2.id);
+    // Beide artikelen zijn opgelost, maar GEEN enkele locatie is afgerond.
+
+    render(
+      <ReviewPage
+        sessionId={session.id}
+        onRecount={() => {}}
+        onCompleted={() => {}}
+        onOpenLocationOverview={() => {}}
+        onOpenLocation={() => {}}
+      />,
+    );
+    await waitUntilLoaded();
+
+    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    expect(screen.getByText("0 artikel(en) worden overgenomen.")).toBeInTheDocument();
+    expect(screen.getByText("2 locatie(s) niet afgerond.")).toBeInTheDocument();
+    await user.click(await screen.findByText("Afronden en vorige voorraad overnemen"));
+
+    const completedSession = await countingRepository.getSession(session.id);
+    expect(completedSession?.status).toBe("COMPLETED");
+  });
+});
+
+describe(
+  "ReviewPage — sorteren (aanvulling: \"in de controle van de maandtelling moet je ook kunnen sorteren " +
+    "op: verschil bedrag (hoog naar laag), kostprijs (hoog naar laag), verschil aantal (hoog naar laag)\")",
+  () => {
+    it("sorteert de artikelrijen op 'Verschil bedrag (hoog → laag)' via de dropdown", async () => {
+      const user = userEvent.setup();
+      // M1: kostprijs 1, telling 3 t.o.v. vorige 0 -> verschil +3 -> +3 €.
+      // M2: kostprijs 5, telling 4 t.o.v. vorige 0 -> verschil +4 -> +20 € (hoogste bedrag, ondanks lager aantal).
+      await countingRepository.saveArticles([
+        { ...articleM1, costPrice: 1 },
+        { ...articleM2, costPrice: 5 },
+      ]);
+      await countingService.recordCount({
+        session,
+        articleId: articleM1.id,
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+      await countingService.recordCount({
+        session,
+        articleId: articleM2.id,
+        locationId: office.locations[0].id,
+        quantity: 4,
+      });
+
+      render(
+        <ReviewPage
+          sessionId={session.id}
+          onRecount={() => {}}
+          onCompleted={() => {}}
+          onOpenLocationOverview={() => {}}
+          onOpenLocation={() => {}}
+        />,
+      );
+      await waitUntilLoaded();
+
+      function descriptionOrder(): string[] {
+        return screen
+          .getAllByText(/artikel$/i, { selector: ".review-row__description" })
+          .map((el) => el.textContent ?? "");
+      }
+
+      await user.selectOptions(screen.getByLabelText("Sorteren"), "Verschil bedrag (hoog → laag)");
+      await waitFor(() => {
+        expect(descriptionOrder()).toEqual(["Tweede artikel", "Eerste artikel"]);
+      });
+
+      await user.selectOptions(screen.getByLabelText("Sorteren"), "Verschil aantal (hoog → laag)");
+      await waitFor(() => {
+        // M2 heeft het hoogste verschil-AANTAL (+4 vs +3), ook al staat het bij bedrag hierboven.
+        expect(descriptionOrder()).toEqual(["Tweede artikel", "Eerste artikel"]);
+      });
+
+      await user.selectOptions(screen.getByLabelText("Sorteren"), "Kostprijs (hoog → laag)");
+      await waitFor(() => {
+        expect(descriptionOrder()).toEqual(["Tweede artikel", "Eerste artikel"]);
+      });
+
+      await user.selectOptions(screen.getByLabelText("Sorteren"), "Standaard volgorde");
+      await waitFor(() => {
+        expect(descriptionOrder()).toEqual(["Eerste artikel", "Tweede artikel"]);
+      });
+    });
+  },
+);
+
+describe(
+  "ReviewPage — vergelijken met een willekeurig gekozen telling (aanvulling: \"je moet hier ook kunnen " +
+    "kiezen om te vergelijken met een willekeurig gekozen telling (kiezen uit een dropdown menu)\")",
+  () => {
+    it("toont geen vergelijk-dropdown zolang er geen enkele afgeronde sessie bestaat om mee te vergelijken", async () => {
+      render(
+        <ReviewPage
+          sessionId={session.id}
+          onRecount={() => {}}
+          onCompleted={() => {}}
+          onOpenLocationOverview={() => {}}
+          onOpenLocation={() => {}}
+        />,
+      );
+      await waitUntilLoaded();
+      expect(screen.queryByText("Vergelijken met")).not.toBeInTheDocument();
+    });
+
+    it("vergelijkt standaard met Article.previousCount, en kan overschakelen naar een eerder gekozen afgeronde sessie", async () => {
+      const user = userEvent.setup();
+
+      // Data-integriteit-sprint §3: sinds `completeSession` zelf finaliseert
+      // (i.p.v. pas bij Excel-export), wordt `Article.previousCount` meteen
+      // bijgewerkt naar de laatst AFGERONDE, volledig getelde sessie — niet
+      // pas na een export/herimport-cyclus. Om toch een zinvol onderscheid
+      // te kunnen testen tussen "standaard" (Article.previousCount, van de
+      // MEEST RECENTE afgeronde sessie) en "een willekeurig GEKOZEN andere
+      // afgeronde sessie", bouwen we hier TWEE eerder afgeronde sessies op
+      // met een verschillend resultaat voor M1.
+
+      // Slechts één ACTIVE sessie per kantoor toegestaan — de sessie uit
+      // beforeEach annuleren zodat we hier zelf oudere afgeronde sessies
+      // kunnen opbouwen vóór de sessie die we effectief gaan controleren.
+      await countSessionService.cancelSession(session.id);
+
+      // Oudste afgeronde sessie: M1 werd toen op 1 geteld.
+      const oldestSession = await countSessionService.startSession("office-1", "QUARTERLY");
+      await countingService.recordCount({
+        session: oldestSession,
+        articleId: articleM1.id,
+        locationId: office.locations[0].id,
+        quantity: 1,
+      });
+      await countingService.confirmAbsent(oldestSession, articleM2.id);
+      await countingService.completeLocation(oldestSession.id, office.locations[0].id);
+      await countingService.completeLocation(oldestSession.id, office.locations[1].id);
+      await countSessionService.completeSession(oldestSession.id);
+
+      // Meer recente afgeronde sessie: M1 werd toen op 2 geteld — dit wordt
+      // meteen de nieuwe `Article.previousCount` (2), niet meer 1.
+      const olderSession = await countSessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session: olderSession,
+        articleId: articleM1.id,
+        locationId: office.locations[0].id,
+        quantity: 2,
+      });
+      await countingService.confirmAbsent(olderSession, articleM2.id);
+      await countingService.completeLocation(olderSession.id, office.locations[0].id);
+      await countingService.completeLocation(olderSession.id, office.locations[1].id);
+      await countSessionService.completeSession(olderSession.id);
+
+      // De sessie die nu effectief gecontroleerd wordt: M1 nu op 3 geteld.
+      const currentSession = await countSessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session: currentSession,
+        articleId: articleM1.id,
+        locationId: office.locations[0].id,
+        quantity: 3,
+      });
+
+      render(
+        <ReviewPage
+          sessionId={currentSession.id}
+          onRecount={() => {}}
+          onCompleted={() => {}}
+          onOpenLocationOverview={() => {}}
+          onOpenLocation={() => {}}
+        />,
+      );
+      await waitUntilLoaded();
+
+      // Standaard: vergelijkt met Article.previousCount (2, van de meest
+      // recente afgeronde sessie `olderSession`) -> verschil +1.
+      expect(screen.getAllByText("Vorige telling").length).toBeGreaterThan(0);
+      expect(screen.getByText("+1", { selector: ".review-row__figure-value" })).toBeInTheDocument();
+
+      const select = screen.getByLabelText("Vergelijken met");
+      await user.selectOptions(select, sessionSnapshotName(oldestSession));
+
+      // Nu vergeleken met de oudste sessie (M1 toen op 1) i.p.v. Article.previousCount (2) -> verschil +2.
+      await waitFor(() => {
+        expect(screen.queryByText("Vorige telling")).not.toBeInTheDocument();
+      });
+      expect(screen.getAllByText(sessionSnapshotName(oldestSession)).length).toBeGreaterThan(0);
+      expect(screen.getByText("+2", { selector: ".review-row__figure-value" })).toBeInTheDocument();
+    });
+  },
+);

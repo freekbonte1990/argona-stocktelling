@@ -138,9 +138,11 @@ describe("CountingPage — 'Tellen' op een artikel zonder bestaande CountEntry (
 describe("CountingPage — labels en visueel onderscheid (v0.2.1 correctieronde, UX-fix)", () => {
   it("toont '+ Bestaand artikel opzoeken' (niet meer '+ Ander artikel tellen') als subtielere tekstlink, en '+ Nieuw artikel gevonden' als volwaardige knop", async () => {
     render(<CountingPage sessionId={session.id} locationId={office.locations[0].id} />);
-    await waitFor(() => {
-      expect(screen.getByText("Sigen BAT 8")).toBeInTheDocument();
-    });
+    // v0.3 §3: de standaardweergave is nu "Nog te tellen", die M1 (al hier
+    // geteld in beforeEach) NIET toont — wacht daarom op een signaal dat
+    // filter-onafhankelijk is (de knoppen staan altijd op het scherm) i.p.v.
+    // op M1's omschrijving.
+    await screen.findByRole("button", { name: "+ Nieuw artikel gevonden" });
 
     expect(screen.queryByText("+ Ander artikel tellen")).not.toBeInTheDocument();
 
@@ -157,9 +159,9 @@ describe("CountingPage — '+ Nieuw artikel gevonden' (v0.2.1 correctieronde §3
     const user = userEvent.setup();
     render(<CountingPage sessionId={session.id} locationId={office.locations[0].id} />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Sigen BAT 8")).toBeInTheDocument();
-    });
+    // v0.3 §3: standaardweergave is nu "Nog te tellen" (M1, al hier geteld,
+    // is dan niet zichtbaar) — wacht op een filter-onafhankelijk signaal.
+    await screen.findByRole("button", { name: "+ Nieuw artikel gevonden" });
 
     await user.click(screen.getByRole("button", { name: "+ Nieuw artikel gevonden" }));
     const modal = screen.getByText("Nieuw artikel gevonden").closest(".modal-card") as HTMLElement;
@@ -201,9 +203,11 @@ describe("CountingPage — '+ Nieuw artikel gevonden' (v0.2.1 correctieronde §3
   it("een expliciete hoeveelheid 0 is een geldige invoer", async () => {
     const user = userEvent.setup();
     render(<CountingPage sessionId={session.id} locationId={office.locations[0].id} />);
-    await waitFor(() => {
-      expect(screen.getByText("Sigen BAT 8")).toBeInTheDocument();
-    });
+    // v0.3 §3: de standaardweergave is nu "Nog te tellen", die M1 (al hier
+    // geteld in beforeEach) NIET toont — wacht daarom op een signaal dat
+    // filter-onafhankelijk is (de knoppen staan altijd op het scherm) i.p.v.
+    // op M1's omschrijving.
+    await screen.findByRole("button", { name: "+ Nieuw artikel gevonden" });
 
     await user.click(screen.getByRole("button", { name: "+ Nieuw artikel gevonden" }));
     const modal = screen.getByText("Nieuw artikel gevonden").closest(".modal-card") as HTMLElement;

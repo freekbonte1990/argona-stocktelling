@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNextPreviousCounts,
+  computeSessionArticleTotals,
   computeSessionReview,
   filterReviewResults,
   isSessionReadyToComplete,
+  sortReviewResults,
 } from "./review";
 import type { Article, CountEntry, CountSession, Location, LocationSessionStatus } from "./types";
 
@@ -482,5 +484,131 @@ describe("nergens aangetroffen (v0.2.1 §5)", () => {
     expect(r1.newTotalCount).toBeNull();
     expect(r2.fullyCounted).toBe(true);
     expect(r2.newTotalCount).toBe(0);
+  });
+});
+
+describe("computeSessionArticleTotals", () => {
+  it("somt enkel counted-entries per artikel op", () => {
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 3, counted: true }),
+      makeEntry("office-1:A1", "office-1:loc-2", { quantity: 4, counted: true }),
+      makeEntry("office-1:A2", "office-1:loc-1", { quantity: 99, counted: false }), // niet geteld -> telt niet mee
+    ];
+    const totals = computeSessionArticleTotals(entries);
+    expect(totals.get("office-1:A1")).toBe(7);
+    expect(totals.has("office-1:A2")).toBe(false);
+  });
+
+  it("geeft een lege map voor lege entries", () => {
+    expect(computeSessionArticleTotals([]).size).toBe(0);
+  });
+});
+
+describe(
+  "computeSessionReview — vergelijken met een willekeurig gekozen telling (aanvulling: \"je moet hier ook " +
+    "kunnen kiezen om te vergelijken met een willekeurig gekozen telling\")",
+  () => {
+    it("gebruikt Article.previousCount zoals voorheen wanneer geen comparisonCounts wordt meegegeven", () => {
+      const article = makeArticle("A1", { previousCount: 10, costPrice: 2 });
+      const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 7, counted: true })];
+      const review = computeSessionReview(makeSession(["office-1:A1"]), [article], locations, entries);
+      expect(review.results[0].previousCount).toBe(10);
+      expect(review.results[0].differenceQuantity).toBe(-3);
+    });
+
+    it("gebruikt de meegegeven comparisonCounts i.p.v. Article.previousCount wanneer die is meegegeven", () => {
+      const article = makeArticle("A1", { previousCount: 10, costPrice: 2 });
+      const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 7, counted: true })];
+      const comparisonCounts = new Map([["office-1:A1", 20]]);
+      const review = computeSessionReview(
+        makeSession(["office-1:A1"]),
+        [article],
+        locations,
+        entries,
+        [],
+        comparisonCounts,
+      );
+      const result = review.results[0];
+      expect(result.previousCount).toBe(20); // niet 10 (Article.previousCount)
+      expect(result.differenceQuantity).toBe(-13); // 7 - 20
+      expect(result.differenceAmount).toBeCloseTo(-26); // -13 * 2
+    });
+
+    it("previousCount blijft null wanneer het artikel niet voorkomt in de gekozen vergelijkingssessie (nooit een fictieve 0)", () => {
+      const article = makeArticle("A1", { previousCount: 10 });
+      const entries = [makeEntry("office-1:A1", "office-1:loc-1", { quantity: 7, counted: true })];
+      const comparisonCounts = new Map<string, number>(); // A1 zat niet in die andere sessie
+      const review = computeSessionReview(
+        makeSession(["office-1:A1"]),
+        [article],
+        locations,
+        entries,
+        [],
+        comparisonCounts,
+      );
+      expect(review.results[0].previousCount).toBeNull();
+      expect(review.results[0].differenceQuantity).toBeNull(); // nooit "7 - 0"
+    });
+  },
+);
+
+describe("sortReviewResults", () => {
+  it("DEFAULT verandert de volgorde niet", () => {
+    const a1 = makeArticle("A1", { previousCount: 5, costPrice: 1 });
+    const a2 = makeArticle("A2", { previousCount: 5, costPrice: 9 });
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 5, counted: true }),
+      makeEntry("office-1:A2", "office-1:loc-1", { quantity: 5, counted: true }),
+    ];
+    const review = computeSessionReview(makeSession(["office-1:A1", "office-1:A2"]), [a1, a2], locations, entries);
+    expect(sortReviewResults(review.results, "DEFAULT").map((r) => r.articleId)).toEqual([
+      "office-1:A1",
+      "office-1:A2",
+    ]);
+  });
+
+  it("DIFFERENCE_AMOUNT_DESC sorteert van hoog naar laag verschil-bedrag, met null altijd laatst", () => {
+    const a1 = makeArticle("A1", { previousCount: 10, costPrice: 1 }); // -5 verschil-aantal -> -5 €
+    const a2 = makeArticle("A2", { previousCount: 0, costPrice: 2 }); // +10 verschil-aantal -> +20 €
+    const a3 = makeArticle("A3", { previousCount: 0, costPrice: 1 }); // niet geteld -> null
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 5, counted: true }),
+      makeEntry("office-1:A2", "office-1:loc-1", { quantity: 10, counted: true }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2", "office-1:A3"]),
+      [a1, a2, a3],
+      locations,
+      entries,
+    );
+    const sorted = sortReviewResults(review.results, "DIFFERENCE_AMOUNT_DESC");
+    expect(sorted.map((r) => r.articleId)).toEqual(["office-1:A2", "office-1:A1", "office-1:A3"]);
+  });
+
+  it("COST_PRICE_DESC sorteert van hoge naar lage kostprijs, met null altijd laatst", () => {
+    const a1 = makeArticle("A1", { costPrice: 3 });
+    const a2 = makeArticle("A2", { costPrice: 9 });
+    const a3 = makeArticle("A3", { costPrice: null });
+    const review = computeSessionReview(makeSession(["office-1:A1", "office-1:A2", "office-1:A3"]), [a1, a2, a3], locations, []);
+    const sorted = sortReviewResults(review.results, "COST_PRICE_DESC");
+    expect(sorted.map((r) => r.articleId)).toEqual(["office-1:A2", "office-1:A1", "office-1:A3"]);
+  });
+
+  it("DIFFERENCE_QUANTITY_DESC sorteert van hoog naar laag verschil-aantal, met null altijd laatst", () => {
+    const a1 = makeArticle("A1", { previousCount: 10 }); // -7
+    const a2 = makeArticle("A2", { previousCount: 0 }); // +8
+    const a3 = makeArticle("A3", { previousCount: 0 }); // niet geteld -> null
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 3, counted: true }),
+      makeEntry("office-1:A2", "office-1:loc-1", { quantity: 8, counted: true }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2", "office-1:A3"]),
+      [a1, a2, a3],
+      locations,
+      entries,
+    );
+    const sorted = sortReviewResults(review.results, "DIFFERENCE_QUANTITY_DESC");
+    expect(sorted.map((r) => r.articleId)).toEqual(["office-1:A2", "office-1:A1", "office-1:A3"]);
   });
 });

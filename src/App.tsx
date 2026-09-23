@@ -10,7 +10,7 @@ import { ReviewPage } from "./ui/pages/ReviewPage";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
-import { useAllOffices, useOffice, useSession } from "./ui/hooks/useLiveData";
+import { useOffice, useSession } from "./ui/hooks/useLiveData";
 import { countSessionService, countingRepository } from "./application/container";
 
 type Route =
@@ -25,31 +25,134 @@ type Route =
   | { screen: "articleDetail"; officeId: string; articleId: string }
   | { screen: "settings"; officeId: string };
 
+/**
+ * v0.3-hotfix (blokkerende bug, gemeld tijdens mobiel testen): de route leefde
+ * tot nu toe UITSLUITEND in React-state (`useState`), nergens bewaard. Op een
+ * telefoon wordt een achtergrondtab regelmatig door het besturingssysteem
+ * herladen (geheugendruk, schermvergrendeling, app-wissel) — de JS-context
+ * start dan volledig opnieuw, `route` valt terug op `null`, en de
+ * initialisatie-effect hieronder stuurde je dan altijd terug naar "Home",
+ * ongeacht waar je was ("terug naar het hoofdmenu" — exact het gemelde
+ * gedrag, en verklaart ook de "locatie verspringt"-indruk: je moet na zo'n
+ * herlaad handmatig opnieuw naar de juiste locatie navigeren).
+ *
+ * FIX: bij elke routewijziging bewaren we de route (puur een UI-
+ * comfortfunctie, geen businessdata); bij het opstarten proberen we die
+ * eerst te herstellen — ALTIJD gevalideerd tegen de immutabele
+ * `location.id`/`sessionId`/`officeId` (nooit `location.number`, index of
+ * sorteervolgorde), en enkel als de onderliggende data nog echt bestaat.
+ * Bestaat ze niet meer (bv. een oude/kapotte route), dan valt alles terug op
+ * de bestaande "Home"-afleiding hieronder — nooit een crash of blanco scherm.
+ *
+ * Aanvulling ("bij opstart wil ik dit menu [Home], nu opent hij precies
+ * altijd het laatst geopende venster"): bewust `sessionStorage` in plaats van
+ * `localStorage`. `sessionStorage` hoort bij de browsing-sessie (het tabblad/
+ * de app-instantie) en overleeft dus nog steeds precies het scenario waar
+ * deze hotfix voor gebouwd is — een door het OS geherladen ACHTERGRONDtab,
+ * want dat blijft dezelfde sessie — maar wordt, anders dan `localStorage`,
+ * geleegd zodra je de app/het tabblad écht sluit en opnieuw opent. Een
+ * bewuste herstart van de app landt daardoor weer op Home, zoals gevraagd,
+ * zonder de mobiele achtergrond-herlaad-fix hierboven ongedaan te maken.
+ */
+const ROUTE_STORAGE_KEY = "argona-stocktelling:lastRoute";
+
+function loadPersistedRoute(): Route | null {
+  try {
+    const raw = sessionStorage.getItem(ROUTE_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Route;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedRoute(route: Route | null) {
+  try {
+    if (route) {
+      sessionStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify(route));
+    } else {
+      sessionStorage.removeItem(ROUTE_STORAGE_KEY);
+    }
+  } catch {
+    // Privénavigatie / volle opslagquota op mobiel — routeherstel is puur
+    // comfort, nooit een reden om de app te laten crashen.
+  }
+}
+
+/**
+ * Bevestigt dat een bewaarde route nog naar bestaande data wijst, aan de
+ * hand van de immutabele id's (nooit `location.number`/index/volgorde).
+ * Een locatie die intussen inactief is gemaakt telt nog als geldig (zie
+ * CountingPage: dat blokkeert tellen niet), enkel een écht verdwenen
+ * kantoor/sessie/locatie-id maakt de route ongeldig.
+ */
+async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
+  switch (route.screen) {
+    case "import":
+      if (!route.fromOfficeId) return true;
+      return !!(await countingRepository.getOffice(route.fromOfficeId));
+    case "home":
+    case "newSession":
+    case "articles":
+    case "articleDetail":
+    case "settings":
+      return !!(await countingRepository.getOffice(route.officeId));
+    case "locationOverview":
+    case "withoutLocation":
+    case "review":
+      return !!(await countingRepository.getSession(route.sessionId));
+    case "counting": {
+      const session = await countingRepository.getSession(route.sessionId);
+      if (!session) return false;
+      const office = await countingRepository.getOffice(session.officeId);
+      return !!office?.locations.some((l) => l.id === route.locationId);
+    }
+  }
+}
+
 export default function App() {
-  const offices = useAllOffices();
   const [route, setRoute] = useState<Route | null>(null);
 
   // Bepaal het startscherm zodra we weten of er al een kantoor geïmporteerd is.
   // Dit is ook hoe "app sluiten en heropenen" werkt: er is geen aparte
-  // navigatiestatus bewaard, alles wordt afgeleid uit wat in IndexedDB staat
-  // (incl. welk kantoor laatst geselecteerd was — multi-kantoor).
+  // navigatiestatus bewaard (afgezien van de route-herstel-cache
+  // hierboven), alles wordt afgeleid uit wat in IndexedDB staat (incl. welk
+  // kantoor laatst geselecteerd was — multi-kantoor).
   //
-  // Let op: dit gebruikt bewust een eenmalige async call naar
-  // countingRepository.getSelectedOfficeId() in plaats van een reactieve
-  // live-query hook. Een live-query die nog niet is opgelost geeft ook
-  // `undefined` terug, exact hetzelfde als "er is nog geen rij" — dat is niet
-  // van elkaar te onderscheiden. Op een verse installatie (nul kantoren,
-  // dus ook nooit een appState-rij) zou de app dan voor altijd op een blanco
-  // scherm blijven hangen. Een Promise heeft dat probleem niet: die resolvet
-  // ondubbelzinnig, ook naar `undefined` wanneer er echt niets bewaard is.
+  // Let op: dit gebruikt bewust eenmalige async calls naar
+  // countingRepository (getAllOffices/getSelectedOfficeId) in plaats van een
+  // reactieve live-query hook. `useAllOffices()` geeft synchroon een lege
+  // array terug ZOLANG de query nog niet is opgelost — niet van "er zijn
+  // écht nul kantoren" te onderscheiden. Op een bestaande installatie kon
+  // die tijdelijke lege array deze beslissing daardoor onterecht en
+  // ONOMKEERBAAR naar het importscherm sturen (route wordt niet-null, dus
+  // dit effect loopt daarna nooit meer opnieuw) — precies het soort
+  // "onverwacht wegnavigeren" waar deze hotfix voor bedoeld is. Een Promise
+  // heeft dat probleem niet: die resolvet ondubbelzinnig, pas als de data er
+  // echt is.
   useEffect(() => {
-    if (route !== null || offices === undefined) return;
-    if (offices.length === 0) {
-      setRoute({ screen: "import" });
-      return;
-    }
+    if (route !== null) return;
     let cancelled = false;
     (async () => {
+      // v0.3-hotfix: eerst proberen de laatst bewaarde route te herstellen
+      // (bv. na een mobiele achtergrond-herlaad) — enkel als die nog
+      // geldig blijkt (zie isPersistedRouteStillValid hierboven).
+      const persisted = loadPersistedRoute();
+      if (persisted) {
+        const stillValid = await isPersistedRouteStillValid(persisted);
+        if (cancelled) return;
+        if (stillValid) {
+          setRoute(persisted);
+          return;
+        }
+        savePersistedRoute(null);
+      }
+      const offices = await countingRepository.getAllOffices();
+      if (cancelled) return;
+      if (offices.length === 0) {
+        setRoute({ screen: "import" });
+        return;
+      }
       const selectedOfficeId = await countingRepository.getSelectedOfficeId();
       if (cancelled) return;
       const preferredOffice = offices.find((o) => o.id === selectedOfficeId) ?? offices[0];
@@ -58,7 +161,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [offices, route]);
+  }, [route]);
+
+  // v0.3-hotfix: elke navigatie meteen bewaren, zodat een onverwachte
+  // herlaad (zie hierboven) je exact terugbrengt naar dezelfde route.
+  useEffect(() => {
+    if (route) savePersistedRoute(route);
+  }, [route]);
 
   if (!route) {
     return <div className="app-shell" />;
@@ -227,6 +336,7 @@ function RouteBody({
           }}
           onImportNewOffice={() => onNavigate({ screen: "import", fromOfficeId: route.officeId })}
           onOpenReview={(sessionId) => onNavigate({ screen: "review", sessionId })}
+          onCancelSession={(sessionId) => countSessionService.cancelSession(sessionId)}
         />
       );
     case "newSession":

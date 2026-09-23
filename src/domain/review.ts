@@ -38,7 +38,15 @@ export interface LocationCountValue {
 export interface ArticleReviewResult {
   articleId: string;
   article: Article;
-  /** Voorheen "vorige telling" (Article.previousCount, ongewijzigd voor dit scherm). */
+  /**
+   * Vergelijkingsbasis voor dit reviewscherm — normaal gezien
+   * `Article.previousCount`, maar aanvulling ("je moet hier ook kunnen
+   * kiezen om te vergelijken met een willekeurig gekozen telling"): wanneer
+   * `computeSessionReview` een `comparisonCounts`-map meekrijgt, komt deze
+   * waarde in plaats daarvan uit de gekozen (afgeronde) sessie. Blijft
+   * `null` zodra dat artikel in de gekozen vergelijkingsbasis niet
+   * (volledig) geteld was — nooit een fictieve 0.
+   */
   previousCount: number | null;
   perLocation: LocationCountValue[];
   /**
@@ -152,6 +160,7 @@ function buildArticleReviewResult(
   locations: Location[],
   entriesForArticle: CountEntry[],
   isManualAddition: boolean,
+  comparisonCounts: Map<string, number> | null,
 ): ArticleReviewResult {
   const fullyCounted = isArticleFullyCounted(entriesForArticle);
   const perLocation = buildLocationValues(locations, entriesForArticle);
@@ -163,9 +172,24 @@ function buildArticleReviewResult(
   const newTotalCount = fullyCounted
     ? entriesForArticle.reduce((sum, entry) => sum + (entry.counted ? entry.quantity ?? 0 : 0), 0)
     : null;
-  const previousCount = article.previousCount;
+  // Aanvulling ("vergelijken met een willekeurig gekozen telling"): zonder
+  // `comparisonCounts` (standaard) blijft dit gewoon `Article.previousCount`
+  // zoals voorheen. Mét, komt de waarde uit die andere sessie — en `null`
+  // wanneer dit artikel daar niet geteld werd (nooit een fictieve 0).
+  const previousCount = comparisonCounts ? comparisonCounts.get(article.id) ?? null : article.previousCount;
+  // Kernregel ("nooit een fictieve 0"): zonder `comparisonCounts` blijft het
+  // bestaande gedrag ongewijzigd — een onbekende `Article.previousCount`
+  // (nog nooit fysiek geteld) wordt als 0 behandeld. MÉT `comparisonCounts`
+  // betekent een `null` previousCount iets anders: dit artikel zat gewoon
+  // niet in de scope van de gekozen vergelijkingssessie (bv. een
+  // kwartaalartikel tijdens een gekozen maandtelling) — dan is er GEEN
+  // zinvolle vergelijking mogelijk, en moet het verschil `null` blijven,
+  // nooit "nieuwe telling - 0".
+  const hasComparisonBaseline = previousCount !== null || !comparisonCounts;
   const differenceQuantity =
-    fullyCounted && newTotalCount !== null ? newTotalCount - (previousCount ?? 0) : null;
+    fullyCounted && newTotalCount !== null && hasComparisonBaseline
+      ? newTotalCount - (previousCount ?? 0)
+      : null;
   const costPrice = article.costPrice;
   const previousValue = previousCount !== null && costPrice !== null ? previousCount * costPrice : null;
   const amount = newTotalCount !== null && costPrice !== null ? newTotalCount * costPrice : null;
@@ -199,12 +223,20 @@ function buildArticleReviewResult(
  * effectief geteld werd.
  */
 export function computeSessionReview(
-  session: Pick<CountSession, "articleIds">,
+  session: Pick<CountSession, "articleIds" | "locationIds">,
   articles: Article[],
   locations: Location[],
   entries: CountEntry[],
   /** Locatiestatussen van deze sessie (spec v0.2.1 §4-5) — leeg toegestaan (bv. oudere aanroepers/tests). */
   locationStatuses: LocationSessionStatus[] = [],
+  /**
+   * Aanvulling ("je moet hier ook kunnen kiezen om te vergelijken met een
+   * willekeurig gekozen telling"): som van geteld aantal per artikel van een
+   * ANDERE (doorgaans afgeronde) sessie, bv. via `computeSessionArticleTotals`.
+   * `null`/weggelaten = standaardgedrag, vergelijk met `Article.previousCount`
+   * zoals voorheen.
+   */
+  comparisonCounts: Map<string, number> | null = null,
 ): SessionReviewSummary {
   const articleById = new Map(articles.map((a) => [a.id, a]));
   const entriesByArticle = new Map<string, CountEntry[]>();
@@ -221,7 +253,13 @@ export function computeSessionReview(
     const article = articleById.get(articleId);
     if (!article) continue; // artikel niet (meer) gevonden — kan niet gebeuren zolang articles nooit verwijderd worden.
     results.push(
-      buildArticleReviewResult(article, locations, entriesByArticle.get(articleId) ?? [], false),
+      buildArticleReviewResult(
+        article,
+        locations,
+        entriesByArticle.get(articleId) ?? [],
+        false,
+        comparisonCounts,
+      ),
     );
   }
 
@@ -231,7 +269,7 @@ export function computeSessionReview(
     if (scopeIds.has(articleId)) continue;
     const article = articleById.get(articleId);
     if (!article) continue;
-    results.push(buildArticleReviewResult(article, locations, articleEntries, true));
+    results.push(buildArticleReviewResult(article, locations, articleEntries, true, comparisonCounts));
   }
 
   let countedArticles = 0;
@@ -261,7 +299,14 @@ export function computeSessionReview(
     }
   }
 
-  const activeLocations = locations.filter((l) => l.active);
+  // Data-integriteit-sprint §5: welke locaties voor DEZE sessie afgerond
+  // moeten worden komt uit de bij sessiestart bevroren `session.locationIds`
+  // wanneer die bekend is — niet uit de live `Location.active`-vlag. Zonder
+  // bevroren set (oudere sessie) valt dit terug op het vroegere gedrag
+  // (alle actieve locaties), exact backward-compatible.
+  const activeLocations = session.locationIds
+    ? locations.filter((l) => session.locationIds!.includes(l.id))
+    : locations.filter((l) => l.active);
   const statusByLocationId = new Map(locationStatuses.map((s) => [s.locationId, s.status]));
   const allLocationsCompleted =
     activeLocations.length > 0 &&
@@ -292,6 +337,25 @@ export function computeSessionReview(
   };
 }
 
+/**
+ * Som van het geteld aantal per artikel binnen ÉÉN gegeven sessie (typisch
+ * een eerder afgeronde sessie van hetzelfde kantoor) — aanvulling: "je moet
+ * hier ook kunnen kiezen om te vergelijken met een willekeurig gekozen
+ * telling (kiezen uit een dropdown menu)" i.p.v. altijd `Article.previousCount`.
+ * Enkel `counted: true`-entries tellen mee (zelfde regel als `newTotalCount`
+ * hierboven); een artikel zonder entry in die sessie komt NIET in de map
+ * terecht — de aanroeper (`buildArticleReviewResult`) valt dan terug op
+ * `null`, nooit op een fictieve 0.
+ */
+export function computeSessionArticleTotals(entries: CountEntry[]): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.counted) continue;
+    totals.set(entry.articleId, (totals.get(entry.articleId) ?? 0) + (entry.quantity ?? 0));
+  }
+  return totals;
+}
+
 export function filterReviewResults(
   results: ArticleReviewResult[],
   filter: ReviewFilter,
@@ -306,6 +370,54 @@ export function filterReviewResults(
     case "NOT_COUNTED":
       return results.filter((r) => !r.fullyCounted);
   }
+}
+
+/**
+ * Sorteermodi voor het reviewscherm (aanvulling: "in de controle van de
+ * maandtelling moet je ook kunnen sorteren op: verschil bedrag (hoog naar
+ * laag), kostprijs (hoog naar laag), verschil aantal (hoog naar laag)").
+ * `DEFAULT` = ongewijzigde volgorde (sessiescope-volgorde, zoals voorheen).
+ */
+export type ReviewSortMode =
+  | "DEFAULT"
+  | "DIFFERENCE_AMOUNT_DESC"
+  | "COST_PRICE_DESC"
+  | "DIFFERENCE_QUANTITY_DESC";
+
+export const REVIEW_SORT_MODE_LABELS: Record<ReviewSortMode, string> = {
+  DEFAULT: "Standaard volgorde",
+  DIFFERENCE_AMOUNT_DESC: "Verschil bedrag (hoog → laag)",
+  COST_PRICE_DESC: "Kostprijs (hoog → laag)",
+  DIFFERENCE_QUANTITY_DESC: "Verschil aantal (hoog → laag)",
+};
+
+export const DEFAULT_REVIEW_SORT_MODE: ReviewSortMode = "DEFAULT";
+
+/**
+ * Sorteert reviewresultaten. `null`-waarden (bv. nog niet (volledig) geteld,
+ * of geen kostprijs gekend) komen ALTIJD laatst, ongeacht sorteerrichting —
+ * nooit als fictieve 0 meegesorteerd (zelfde kernregel als de rest van dit
+ * bestand).
+ */
+export function sortReviewResults(
+  results: ArticleReviewResult[],
+  mode: ReviewSortMode,
+): ArticleReviewResult[] {
+  if (mode === "DEFAULT") return results;
+  const valueOf: (result: ArticleReviewResult) => number | null =
+    mode === "DIFFERENCE_AMOUNT_DESC"
+      ? (r) => r.differenceAmount
+      : mode === "COST_PRICE_DESC"
+        ? (r) => r.costPrice
+        : (r) => r.differenceQuantity;
+  return [...results].sort((a, b) => {
+    const aValue = valueOf(a);
+    const bValue = valueOf(b);
+    if (aValue === null && bValue === null) return 0;
+    if (aValue === null) return 1;
+    if (bValue === null) return -1;
+    return bValue - aValue;
+  });
 }
 
 /**

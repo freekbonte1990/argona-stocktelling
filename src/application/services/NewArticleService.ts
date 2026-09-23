@@ -1,6 +1,8 @@
 import { FREQUENCY_TO_RAW } from "../../domain/frequency";
+import { assertValidQuantity } from "../../domain/quantityValidation";
 import { generateTempArticleNumber } from "../../domain/tempArticleNumber";
 import type { Article, ArticleCountFrequency, CountSession } from "../../domain/types";
+import { assertSessionEditable } from "../errors";
 import type { CountingRepository } from "../ports/CountingRepository";
 import type { CountingService } from "./CountingService";
 import type { LocationAssignmentService } from "./LocationAssignmentService";
@@ -115,6 +117,13 @@ export class NewArticleService {
     locationId: string,
     input: NewArticleFoundDuringCountingInput,
   ): Promise<Article> {
+    // Data-integriteit-sprint §1/§6/§8: BEIDE controles vooraan, VÓÓR enige
+    // schrijfactie (artikel/locatiekoppeling/telling) — anders zou een
+    // ongeldige hoeveelheid of een niet-ACTIEVE sessie een half aangemaakt
+    // ("wees") artikel kunnen achterlaten (wel al opgeslagen, maar zonder
+    // geldige telling).
+    assertSessionEditable(session);
+    assertValidQuantity(input.quantity);
     const article = await this.buildNewArticle(session.officeId, input);
     await this.repository.saveArticles([article]);
     await this.locationAssignmentService.addLocation(session.officeId, [article.id], locationId);

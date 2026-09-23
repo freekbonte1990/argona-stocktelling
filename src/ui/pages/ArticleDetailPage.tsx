@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { activeLocationsInOrder } from "../../domain/locations";
+import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
+import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
+import type { ArticleCountFrequency } from "../../domain/types";
 import { countingRepository } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { SimpleLineChart } from "../components/SimpleLineChart";
-import { formatSignedCount } from "../../shared/format";
+import type { SimpleLineChartPoint } from "../components/SimpleLineChart";
+import { formatEuro, formatSignedCount } from "../../shared/format";
 import {
   useArticleHistory,
   useArticles,
@@ -16,10 +20,28 @@ interface ArticleDetailPageProps {
   articleId: string;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: "Actief",
-  INACTIVE: "Inactief",
-};
+/**
+ * Zoekt de `ARTICLE_STATUS_OPTIONS`-optie die bij een artikel hoort — op
+ * basis van `rawStatus` (case-insensitief/getrimd, want dat kan uit een
+ * oudere Excel-import komen met net iets andere spelling/hoofdletters dan
+ * onze eigen 4 canonieke waarden). Vindt niets (bv. een ANDERE, hier nog
+ * onbekende vrije-tekstwaarde uit een import), dan valt dit terug op de
+ * eerste optie die matcht met de al genormaliseerde `status` — zo krijgt de
+ * select bij "Bewerken" altijd een geldige, zinvolle startwaarde, en verliest
+ * een import met afwijkende tekst zijn ACTIVE/INACTIVE-classificatie niet
+ * totdat de gebruiker hier zelf expliciet opnieuw opslaat.
+ */
+function matchArticleStatusOption(
+  rawStatus: string | null,
+  status: "ACTIVE" | "INACTIVE",
+): (typeof ARTICLE_STATUS_OPTIONS)[number] {
+  const normalized = (rawStatus ?? "").trim().toUpperCase();
+  return (
+    ARTICLE_STATUS_OPTIONS.find((option) => option.raw.toUpperCase() === normalized) ??
+    ARTICLE_STATUS_OPTIONS.find((option) => option.status === status) ??
+    ARTICLE_STATUS_OPTIONS[0]
+  );
+}
 
 /**
  * Artikeldetailpagina (spec v0.2.1 §6-8): een echte beheerplek voor één
@@ -36,11 +58,85 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
 
   const [addingLocationId, setAddingLocationId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Aanvulling ("Bij Artikel moeten er gemakkelijk wijzigingen aangebracht
+  // kunnen worden aan: omschrijving, productgroep, leverancier, en de prijs
+  // moet ook zichtbaar zijn"): eenvoudige inline-bewerkmodus voor die 4
+  // velden op de "Algemeen"-kaart, i.p.v. een aparte pagina/wizard — past
+  // bij de bestaande filosofie hier ("elke actie past het domeinmodel meteen
+  // aan, zonder apart opslaan-moment" — enkel dit ene kaartje heeft nu wél
+  // een expliciete "Opslaan", omdat vrije tekst/prijs anders bij elke
+  // toetsaanslag zou wegschrijven).
+  const [editingGeneral, setEditingGeneral] = useState(false);
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftProductGroup, setDraftProductGroup] = useState("");
+  const [draftSupplier, setDraftSupplier] = useState("");
+  const [draftCostPrice, setDraftCostPrice] = useState("");
+  // Aanvulling ("telperiode en status moet je ook kunnen aanpassen"): dezelfde
+  // inline-bewerkmodus als hierboven, nu ook voor Telperiode (een vaste
+  // `ArticleCountFrequency`) en Status (een vaste ruwe tekst uit
+  // `ARTICLE_STATUS_OPTIONS` — zie domain/frequency.ts). Beide zijn selects
+  // i.p.v. vrije tekst: dit zijn genormaliseerde, businesslogica-gestuurde
+  // velden (sessiescope/telfrequentie resp. actief/inactief), geen vrije tekst
+  // zoals omschrijving/productgroep/leverancier.
+  const [draftCountPeriod, setDraftCountPeriod] = useState<ArticleCountFrequency>("MONTHLY");
+  const [draftStatusRaw, setDraftStatusRaw] = useState<string>(ARTICLE_STATUS_OPTIONS[0].raw);
+  const [savingGeneral, setSavingGeneral] = useState(false);
 
   const article = articles.find((a) => a.id === articleId);
 
   if (!article || !office) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
+  }
+
+  function startEditingGeneral() {
+    if (!article) return;
+    setError(null);
+    setDraftDescription(article.description);
+    setDraftProductGroup(article.productGroup ?? "");
+    setDraftSupplier(article.supplier ?? "");
+    setDraftCostPrice(article.costPrice !== null ? String(article.costPrice) : "");
+    setDraftCountPeriod(article.countPeriod);
+    setDraftStatusRaw(matchArticleStatusOption(article.rawStatus, article.status).raw);
+    setEditingGeneral(true);
+  }
+
+  async function saveGeneral() {
+    if (!article) return;
+    setError(null);
+    const trimmedDescription = draftDescription.trim();
+    if (trimmedDescription.length === 0) {
+      setError("Omschrijving mag niet leeg zijn.");
+      return;
+    }
+    const normalizedPrice = draftCostPrice.trim().replace(",", ".");
+    const parsedPrice = normalizedPrice === "" ? null : Number(normalizedPrice);
+    if (parsedPrice !== null && !Number.isFinite(parsedPrice)) {
+      setError("Kostprijs is geen geldig getal.");
+      return;
+    }
+    const statusOption =
+      ARTICLE_STATUS_OPTIONS.find((option) => option.raw === draftStatusRaw) ?? ARTICLE_STATUS_OPTIONS[0];
+    setSavingGeneral(true);
+    try {
+      await countingRepository.saveArticles([
+        {
+          ...article,
+          description: trimmedDescription,
+          productGroup: draftProductGroup.trim() === "" ? null : draftProductGroup.trim(),
+          supplier: draftSupplier.trim() === "" ? null : draftSupplier.trim(),
+          costPrice: parsedPrice,
+          countPeriod: draftCountPeriod,
+          rawCountPeriod: FREQUENCY_TO_RAW[draftCountPeriod],
+          status: statusOption.status,
+          rawStatus: statusOption.raw,
+        },
+      ]);
+      setEditingGeneral(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout bij het opslaan.");
+    } finally {
+      setSavingGeneral(false);
+    }
   }
 
   const locationById = new Map(office.locations.map((l) => [l.id, l]));
@@ -72,10 +168,17 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     setAddingLocationId("");
   }
 
-  const chartPoints = history.map((point) => ({
-    label: new Date(point.date).toLocaleDateString("nl-BE", { day: "2-digit", month: "2-digit" }),
-    value: point.totalCount,
-  }));
+  // Enkel punten met een gekende voorraad kunnen getekend worden (een
+  // OVERGENOMEN artikel zonder ooit een vorige fysieke telling heeft
+  // `totalCount: null` — spec: nooit een fictieve/geschatte waarde tonen).
+  const chartPoints: SimpleLineChartPoint[] = [];
+  for (const point of history) {
+    if (point.totalCount === null) continue;
+    chartPoints.push({
+      label: new Date(point.date).toLocaleDateString("nl-BE", { day: "2-digit", month: "2-digit" }),
+      value: point.totalCount,
+    });
+  }
 
   return (
     <div className="stack">
@@ -85,34 +188,136 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
       {error && <div className="error-banner">{error}</div>}
 
       <div className="card stack stack--tight">
-        <h2 style={{ margin: 0 }}>Algemeen</h2>
+        <div className="filter-row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Algemeen</h2>
+          {!editingGeneral && (
+            <button type="button" className="chip" onClick={startEditingGeneral}>
+              Bewerken
+            </button>
+          )}
+        </div>
         <div className="article-detail-field">
           <span className="article-detail-field__label">Artikelnummer</span>
           <span className="article-detail-field__value">{article.articleNumber}</span>
         </div>
-        <div className="article-detail-field">
-          <span className="article-detail-field__label">Omschrijving</span>
-          <span className="article-detail-field__value">{article.description || "—"}</span>
-        </div>
-        <div className="article-detail-field">
-          <span className="article-detail-field__label">Productgroep</span>
-          <span className="article-detail-field__value">{article.productGroup ?? "—"}</span>
-        </div>
-        <div className="article-detail-field">
-          <span className="article-detail-field__label">Leverancier</span>
-          <span className="article-detail-field__value">{article.supplier ?? "—"}</span>
-        </div>
+
+        {editingGeneral ? (
+          <>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Omschrijving</span>
+              <input
+                className="search-input"
+                value={draftDescription}
+                onChange={(e) => setDraftDescription(e.target.value)}
+              />
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Productgroep</span>
+              <input
+                className="search-input"
+                value={draftProductGroup}
+                onChange={(e) => setDraftProductGroup(e.target.value)}
+              />
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Leverancier</span>
+              <input
+                className="search-input"
+                value={draftSupplier}
+                onChange={(e) => setDraftSupplier(e.target.value)}
+              />
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Kostprijs</span>
+              <input
+                className="search-input"
+                inputMode="decimal"
+                placeholder="—"
+                value={draftCostPrice}
+                onChange={(e) => setDraftCostPrice(e.target.value)}
+              />
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Telperiode</span>
+              <select
+                className="search-input"
+                style={{ width: "auto" }}
+                value={draftCountPeriod}
+                onChange={(e) => setDraftCountPeriod(e.target.value as ArticleCountFrequency)}
+              >
+                {(Object.keys(FREQUENCY_FILTER_LABELS) as ArticleCountFrequency[]).map((period) => (
+                  <option key={period} value={period}>
+                    {FREQUENCY_FILTER_LABELS[period]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Status</span>
+              <select
+                className="search-input"
+                style={{ width: "auto" }}
+                value={draftStatusRaw}
+                onChange={(e) => setDraftStatusRaw(e.target.value)}
+              >
+                {ARTICLE_STATUS_OPTIONS.map((option) => (
+                  <option key={option.raw} value={option.raw}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="stack" style={{ flexDirection: "row" }}>
+              <BigButton variant="primary" style={{ width: "auto" }} disabled={savingGeneral} onClick={saveGeneral}>
+                {savingGeneral ? "Bezig..." : "Opslaan"}
+              </BigButton>
+              <BigButton
+                variant="ghost"
+                style={{ width: "auto" }}
+                disabled={savingGeneral}
+                onClick={() => {
+                  setEditingGeneral(false);
+                  setError(null);
+                }}
+              >
+                Annuleren
+              </BigButton>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Omschrijving</span>
+              <span className="article-detail-field__value">{article.description || "—"}</span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Productgroep</span>
+              <span className="article-detail-field__value">{article.productGroup ?? "—"}</span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Leverancier</span>
+              <span className="article-detail-field__value">{article.supplier ?? "—"}</span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Kostprijs</span>
+              <span className="article-detail-field__value">{formatEuro(article.costPrice)}</span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Telperiode</span>
+              <span className="article-detail-field__value">{FREQUENCY_FILTER_LABELS[article.countPeriod]}</span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Status</span>
+              <span className="article-detail-field__value">
+                {matchArticleStatusOption(article.rawStatus, article.status).label}
+              </span>
+            </div>
+          </>
+        )}
+
         <div className="article-detail-field">
           <span className="article-detail-field__label">Eenheid</span>
           <span className="article-detail-field__value">{article.unit ?? "—"}</span>
-        </div>
-        <div className="article-detail-field">
-          <span className="article-detail-field__label">Telperiode</span>
-          <span className="article-detail-field__value">{article.rawCountPeriod ?? "—"}</span>
-        </div>
-        <div className="article-detail-field">
-          <span className="article-detail-field__label">Status</span>
-          <span className="article-detail-field__value">{STATUS_LABELS[article.status] ?? article.status}</span>
         </div>
       </div>
 
@@ -171,18 +376,22 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
             <thead>
               <tr>
                 <th>Teldatum</th>
+                <th>Telling</th>
                 <th>Totale voorraad</th>
                 <th>Verschil</th>
                 <th>Locaties</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {[...history].reverse().map((point) => (
-                <tr key={point.sessionId}>
+                <tr key={point.sessionName}>
                   <td>{new Date(point.date).toLocaleDateString("nl-BE")}</td>
+                  <td>{point.sessionName}</td>
                   <td>{point.totalCount}</td>
                   <td>{formatSignedCount(point.difference)}</td>
                   <td>{point.locationNames.length > 0 ? point.locationNames.join(", ") : "—"}</td>
+                  <td>{point.status}</td>
                 </tr>
               ))}
             </tbody>

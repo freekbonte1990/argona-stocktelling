@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { newArticleService } from "../../application/container";
+import { isValidQuantity } from "../../domain/quantityValidation";
 import type { ArticleCountFrequency, CountSession } from "../../domain/types";
 import { BigButton } from "./BigButton";
 
@@ -50,12 +51,14 @@ export function NewArticleFoundModal({
   // getal is) blokkeert het opslaan — nooit `!quantity`, want dat zou "0"
   // ook als ongeldig behandelen.
   const parsedQuantity = quantity.trim() === "" ? null : Number(quantity);
+  // Data-integriteit-sprint §6: naast "geen getal", ook negatief/Infinity
+  // hier al blokkeren — niet enkel vertrouwen op de service-laagcontrole.
   const canSubmit =
     description.trim() !== "" &&
     productGroup.trim() !== "" &&
     unit.trim() !== "" &&
     parsedQuantity !== null &&
-    !Number.isNaN(parsedQuantity);
+    isValidQuantity(parsedQuantity);
 
   async function handleSubmit() {
     if (!canSubmit || parsedQuantity === null) return;
@@ -131,6 +134,7 @@ export function NewArticleFoundModal({
             className="search-input"
             type="number"
             step="1"
+            min="0"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
           />
