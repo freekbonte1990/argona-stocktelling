@@ -23,6 +23,15 @@ export interface DeviationThresholds {
   percentOfPrevious: number;
   /** Euro-waarde van het verschil (|verschil aantal| × kostprijs) die al een waarschuwing verdient. */
   euroValue: number;
+  /**
+   * Aanvulling: de percentage-drempel wordt pas toegepast vanaf een vorige
+   * telling van minstens dit aantal — bij een lage vorige telling (bv. 1 of
+   * 2 stuks) betekent een verschil van slechts 1 stuk al 50-100%, wat een
+   * heel gewone, kleine correctie onterecht als "grote afwijking" zou
+   * bestempelen. Onder dit minimum blijft enkel de absolute-aantal- en
+   * euro-drempel gelden, die voor kleine aantallen sowieso zinvoller zijn.
+   */
+  minPreviousCountForPercent: number;
 }
 
 /**
@@ -31,15 +40,20 @@ export interface DeviationThresholds {
  *     genoeg om een tikfout (bv. "150" i.p.v. "15") te vangen.
  *   - 50% t.o.v. de vorige telling: een halvering of verdubbeling van de
  *     voorraad is voor de meeste producttypes ongewoon genoeg om een tweede
- *     blik te verdienen.
- *   - €500: een correctie die het kantoor financieel merkbaar raakt.
+ *     blik te verdienen. Geldt pas vanaf `minPreviousCountForPercent`.
+ *   - vorige telling >= 10: onder de 10 stuks is een verschil van 1 stuk al
+ *     snel 10-100% — te ruisgevoelig om als percentage bruikbaar te zijn.
+ *   - €2.000: een correctie die het kantoor financieel merkbaar raakt, ook
+ *     bij artikelen die per stuk enkele honderden euro's kosten (bij €500
+ *     triggerde een verschil van al één duur artikel meteen).
  * Centraal hier gedefinieerd (spec: "centraal configureerbaar") — één plek
  * om aan te passen, geen verspreide magic numbers doorheen de UI.
  */
 export const DEFAULT_DEVIATION_THRESHOLDS: DeviationThresholds = {
   absoluteQuantity: 50,
   percentOfPrevious: 0.5,
-  euroValue: 500,
+  euroValue: 2000,
+  minPreviousCountForPercent: 10,
 };
 
 export interface DeviationCheckInput {
@@ -63,7 +77,11 @@ export function isExtremeDeviation(
   const diffQuantity = Math.abs(newQuantity - previousCount);
   if (diffQuantity >= thresholds.absoluteQuantity) return true;
 
-  if (previousCount !== 0 && diffQuantity / Math.abs(previousCount) >= thresholds.percentOfPrevious) {
+  if (
+    previousCount !== 0 &&
+    Math.abs(previousCount) >= thresholds.minPreviousCountForPercent &&
+    diffQuantity / Math.abs(previousCount) >= thresholds.percentOfPrevious
+  ) {
     return true;
   }
 

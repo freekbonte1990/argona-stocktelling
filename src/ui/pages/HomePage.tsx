@@ -9,6 +9,7 @@ import {
   useSessionsForOffice,
 } from "../hooks/useLiveData";
 import { SESSION_TYPE_LABELS, SESSION_TYPE_NOUN_LOWER } from "../sessionTypeLabels";
+import { formatDate } from "../../shared/format";
 
 interface HomePageProps {
   officeId: string;
@@ -44,14 +45,20 @@ export function HomePage({
   const activeEntries = useCountEntries(activeSession?.id) ?? [];
   const allSessions = useSessionsForOffice(officeId);
   const completedSessions = allSessions.filter((s) => s.status === "COMPLETED");
-  const cancelledSessions = allSessions.filter((s) => s.status === "CANCELLED");
+  /*
+   * UI/UX-fix (Home, spec-item 3): "Geannuleerde tellingen" verdwijnt
+   * uitsluitend uit de zichtbare Home-UI — de CANCELLED-records zelf blijven
+   * gewoon in de database bestaan (geen `application`/`adapters`-wijziging,
+   * puur een render-keuze hier). Er wordt bewust geen `cancelledSessions`
+   * meer berekend/gerenderd op dit scherm.
+   */
 
   const [dialog, setDialog] = useState<SessionDialog>("none");
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   /**
-   * Voortgang van de actieve sessie ("4 / 217 artikels afgewerkt") — dezelfde
+   * Voortgang van de actieve sessie ("4 / 217 artikelen afgewerkt") — dezelfde
    * berekening als LocationOverviewPage, hier enkel voor het "Lopende
    * telling"-blok/de waarschuwingsdialoog (spec punt 2 en 3).
    */
@@ -109,16 +116,16 @@ export function HomePage({
         </select>
       </label>
       {activeSession && activeProgress && (
-        <div className="card stack stack--tight">
+        <div className="card card--accent stack stack--tight">
           <h2 style={{ margin: 0 }}>Lopende telling</h2>
           <p style={{ margin: 0, fontWeight: 700 }}>
             {SESSION_TYPE_LABELS[activeSession.type] ?? activeSession.type}
           </p>
           <p className="screen-subtitle" style={{ margin: 0 }}>
-            {activeProgress.completedUniqueArticles} / {activeProgress.totalUniqueArticles} artikels afgewerkt
+            {activeProgress.completedUniqueArticles} / {activeProgress.totalUniqueArticles} artikelen afgewerkt
           </p>
           <p className="screen-subtitle" style={{ margin: 0 }}>
-            Gestart op {new Date(activeSession.startedAt).toLocaleDateString("nl-BE")}
+            Gestart op {formatDate(activeSession.startedAt)}
           </p>
           <BigButton variant="primary" onClick={onResumeSession}>
             Telling hervatten
@@ -132,7 +139,7 @@ export function HomePage({
             zelf — geen nieuwe annuleerlogica, enkel een directere ingang.
           */}
           <BigButton
-            variant="ghost"
+            variant="subtle"
             onClick={() => {
               setCancelError(null);
               setDialog("cancelConfirm");
@@ -159,50 +166,35 @@ export function HomePage({
       </div>
       {!office && <p className="screen-subtitle">Kantoor wordt geladen...</p>}
 
+      {/*
+        UI/UX-fix (Home, spec-item 3): "Vorige tellingen" mag de homepage niet
+        meer volledig innemen — dezelfde `<details>`-aanpak die voorheen enkel
+        voor geannuleerde tellingen gold, wordt nu hiervoor gebruikt: standaard
+        samengevouwen (enkel de samenvatting/`summary` zichtbaar), één tik om
+        de historiek te bekijken. Puur presentatie — de klikbare
+        `session-history-item`-knoppen en `onOpenReview` blijven ongewijzigd.
+      */}
       {completedSessions.length > 0 && (
         <div className="stack stack--tight">
-          <span className="screen-subtitle" style={{ margin: 0 }}>
-            Vorige tellingen
-          </span>
-          <div className="session-history">
-            {completedSessions.map((s) => (
-              <button
-                key={s.id}
-                className="session-history-item"
-                onClick={() => onOpenReview(s.id)}
-              >
-                <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
-                <span className="screen-subtitle" style={{ margin: 0 }}>
-                  {s.completedAt ? new Date(s.completedAt).toLocaleDateString("nl-BE") : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/*
-        Geannuleerde sessies (sessielogica-fix punt 5): enkel als
-        administratieve/auditinfo, duidelijk gelabeld "Geannuleerd" en
-        NIET tussen de officiële "Vorige tellingen" — daarom bewust geen
-        klikbare knop naar het reviewscherm (dat blijft voorbehouden voor
-        echt afgeronde tellingen).
-      */}
-      {cancelledSessions.length > 0 && (
-        <div className="stack stack--tight">
-          <span className="screen-subtitle" style={{ margin: 0 }}>
-            Geannuleerde tellingen
-          </span>
-          <div className="session-history">
-            {cancelledSessions.map((s) => (
-              <div key={s.id} className="session-history-item" style={{ opacity: 0.6 }}>
-                <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
-                <span className="screen-subtitle" style={{ margin: 0 }}>
-                  Geannuleerd
-                </span>
-              </div>
-            ))}
-          </div>
+          <details className="session-history-collapsible">
+            <summary className="screen-subtitle session-history-collapsible__summary" style={{ margin: 0 }}>
+              Vorige tellingen ({completedSessions.length})
+            </summary>
+            <div className="session-history">
+              {completedSessions.map((s) => (
+                <button
+                  key={s.id}
+                  className="session-history-item"
+                  onClick={() => onOpenReview(s.id)}
+                >
+                  <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
+                  <span className="screen-subtitle" style={{ margin: 0 }}>
+                    {s.completedAt ? formatDate(s.completedAt) : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </details>
         </div>
       )}
 
@@ -217,7 +209,7 @@ export function HomePage({
             </p>
             {activeProgress && (
               <p className="screen-subtitle" style={{ margin: 0 }}>
-                {activeProgress.completedUniqueArticles} / {activeProgress.totalUniqueArticles} artikels afgewerkt
+                {activeProgress.completedUniqueArticles} / {activeProgress.totalUniqueArticles} artikelen afgewerkt
               </p>
             )}
             <div className="stack">

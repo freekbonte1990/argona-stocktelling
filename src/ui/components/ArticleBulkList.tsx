@@ -304,7 +304,7 @@ function ArticleRow({
         <button type="button" className="article-row__open" onClick={onOpen}>
           <div className="article-card__description">{article.description || "(geen omschrijving)"}</div>
           <div className="article-card__meta">
-            <span>{article.articleNumber}</span>
+            <span className="meta-article-number">{article.articleNumber}</span>
             {article.productGroup && <span>{article.productGroup}</span>}
             <span>Telfrequentie: {article.rawCountPeriod ?? "—"}</span>
             <span>Vorige telling: {article.previousCount ?? "—"}</span>

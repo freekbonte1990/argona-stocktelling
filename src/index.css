@@ -4,21 +4,36 @@
   --color-surface: #ffffff;
   --color-text: #10151a;
   --color-text-muted: #4b5761;
+  /* Visuele-polish-sprint §1: een derde, nog stillere teksttint voor
+     puur secundaire/administratieve informatie (bv. geannuleerde
+     tellingen) — bewust nog subtieler dan --color-text-muted, zodat er
+     een echte hiërarchie is tussen "secundair" en "quasi-onzichtbaar,
+     puur archief". */
+  --color-text-faint: #8a94a0;
   --color-primary: #145c34;
   --color-primary-contrast: #ffffff;
   --color-primary-soft: #e3f2e9;
   --color-border: #d7dde2;
+  --color-border-soft: #e7ebee;
   --color-danger: #a3231d;
+  --color-danger-bg: #fbe7e6;
   --color-warning-bg: #fff4de;
   --color-warning-border: #f0c36d;
   --color-warning-text: #6b4a05;
   --radius: 14px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
   --space-1: 6px;
   --space-2: 10px;
   --space-3: 16px;
   --space-4: 24px;
   --space-5: 32px;
   --touch-min: 56px;
+  /* Visuele-polish-sprint §1: subtiele diepte i.p.v. zware randen — enkel
+     gebruikt om de belangrijkste kaart op een scherm (bv. de actieve
+     telling op Home) rustig te laten opvallen tussen gelijkaardige kaarten. */
+  --shadow-sm: 0 1px 2px rgba(16, 21, 26, 0.05);
+  --shadow-md: 0 6px 20px rgba(16, 21, 26, 0.09);
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
 }
 
@@ -102,22 +117,43 @@ button {
 
 .app-main {
   flex: 1;
-  padding: var(--space-4);
+  padding: var(--space-3);
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
 }
 
 .screen-title {
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  margin: 0 0 var(--space-2);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-1);
+}
+
+/*
+ * Visuele-polish-sprint §5: "een afgeronde/historische sessie moet
+ * duidelijk aanvoelen als alleen-lezen" — een kleine, rustige badge naast
+ * de titel van een afgeronde telling op het reviewscherm.
+ */
+.readonly-badge {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: var(--space-2);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  background: var(--color-border-soft);
+  border-radius: var(--radius-pill);
+  padding: 3px var(--space-2);
 }
 
 .screen-subtitle {
   color: var(--color-text-muted);
-  margin: 0 0 var(--space-4);
-  font-size: 1.05rem;
+  margin: 0 0 var(--space-3);
+  font-size: 1rem;
+  font-weight: 500;
 }
 
 .big-button {
@@ -152,13 +188,33 @@ button {
 
 .big-button--ghost {
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-text-muted);
   border-color: var(--color-border);
+  font-weight: 600;
 }
 
 .big-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/*
+ * Visuele-polish-sprint §2 (Home): "Annuleren" moet duidelijk minder
+ * prominent zijn dan "Hervatten" — een volwaardige, even brede knop ernaast
+ * (ook al is die knop zelf al de rustige --ghost-variant) oogt op het
+ * hoofdscherm nog steeds als een gelijkwaardig tweede hoofdactie. Deze
+ * variant is bewust GEEN aparte businesslogica, enkel een stillere,
+ * tekstuele stijl — zelfde knop/`onClick`, andere visuele nadruk. Gebruikt
+ * de bestaande `.text-link-button`-look, maar behoudt het volle
+ * duimvriendelijke `--touch-min`-formaat.
+ */
+.big-button--subtle {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /*
@@ -200,6 +256,28 @@ button {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
+/*
+ * Visuele-polish-sprint §2 (Home): de actieve telling is altijd de
+ * belangrijkste kaart op het scherm. Bewust GEEN felle kleur/achtergrond
+ * (dat zou "te veel kleur tegelijk" zijn) — enkel een iets sterkere rand in
+ * de merkkleur en een net iets dieper schaduwtje, zodat de kaart rustig
+ * opvalt tussen de andere, gelijkaardige kaarten eronder.
+ */
+.card--accent {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md);
+}
+
+/* Rij-variant van .stack: gebruikt op plekken waar velden naast elkaar
+   staan (bv. tekstveld + knop) — wrapt netjes i.p.v. horizontaal over te
+   lopen op een smal (~390px) scherm (responsive-controle §9). */
+.stack--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .progress-bar {
@@ -230,15 +308,16 @@ button {
 
 .location-card {
   background: var(--color-surface);
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: var(--space-4);
+  padding: var(--space-3);
   text-align: left;
-  min-height: 140px;
+  min-height: 108px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  box-shadow: var(--shadow-sm);
 }
 
 .location-card:active {
@@ -246,21 +325,40 @@ button {
 }
 
 .location-card__name {
-  font-size: 1.3rem;
+  font-size: 1.15rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .location-card__count {
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--color-text-muted);
+  font-weight: 600;
 }
 
+/*
+ * Visuele-polish-sprint §3: status als compacte badge i.p.v. losse,
+ * hoofdletter-uppercase tekst — herbruikt dezelfde pil-vorm als
+ * `.review-row__badge` elders in de app (consistente statusbadges
+ * doorheen de hele applicatie).
+ */
 .location-card__status {
-  font-size: 0.85rem;
+  align-self: flex-start;
+  font-size: 0.75rem;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+}
+
+.location-card__status--done {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
 }
 
 .location-card__done {
@@ -275,9 +373,9 @@ button {
 }
 
 .chip {
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   background: var(--color-surface);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: var(--space-1) var(--space-3);
   min-height: 44px;
   font-weight: 600;
@@ -301,6 +399,11 @@ button {
   min-height: var(--touch-min);
   font-size: 1.05rem;
   padding: var(--space-2) var(--space-3);
+  border-width: 1px;
+}
+
+.chip--primary.chip--active {
+  box-shadow: var(--shadow-sm);
 }
 
 .search-input {
@@ -342,6 +445,58 @@ button {
   font-size: 0.9rem;
 }
 
+/*
+ * CountingPage mobile/tablet UX-fix: de "Filters (N)"-knop en de compacte
+ * "Sorteren: ..."-control staan naast elkaar op één rij i.p.v. elk hun eigen
+ * rij te vragen — spaart verticale ruimte, zodat het eerste artikel op een
+ * 390x844-scherm sneller in beeld komt.
+ */
+.counting-controls-row {
+  justify-content: space-between;
+}
+
+.counting-controls-row__filters {
+  flex-shrink: 0;
+}
+
+.counting-sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.counting-sort__select {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  font-size: 0.95rem;
+  padding: 0 var(--space-2);
+}
+
+/*
+ * CountingPage mobile/tablet UX-fix: "+ Bestaand artikel opzoeken" /
+ * "Terug naar verwachte artikelen" en "+ Nieuw artikel gevonden" naast
+ * elkaar als gelijkwaardige secundaire acties (i.p.v. gestapeld, elk hun
+ * volle `.big-button`-breedte) — bespaart verticale ruimte en maakt ze
+ * visueel gelijkwaardig (spec: geen klein tekstlinkje tegenover een
+ * enorme knop).
+ */
+.counting-secondary-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.counting-secondary-actions .big-button {
+  flex: 1 1 160px;
+  width: auto;
+}
+
 .article-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -350,26 +505,35 @@ button {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  box-shadow: var(--shadow-sm);
 }
 
 .article-card--counted {
   border-color: var(--color-primary);
   background: var(--color-primary-soft);
+  box-shadow: none;
 }
 
 .article-card__description {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 700;
+  line-height: 1.25;
 }
 
 .article-card__meta {
   color: var(--color-text-muted);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
 }
 
+/*
+ * Visuele-polish-sprint §4 (CountingPage): hoeveelheidveld en de
+ * "Geteld & volgende"-knop visueel als één samenhangend geheel — enkel
+ * spacing/typografie/kleurverfijning, de duimvriendelijke afmetingen
+ * (`--touch-min`) en het focus-/toetsenbordgedrag blijven exact hetzelfde.
+ */
 .quantity-stepper {
   display: flex;
   align-items: center;
@@ -380,9 +544,9 @@ button {
   min-width: var(--touch-min);
   min-height: var(--touch-min);
   border-radius: var(--radius);
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   background: var(--color-surface);
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--color-primary);
 }
@@ -391,11 +555,17 @@ button {
   flex: 1;
   min-height: var(--touch-min);
   text-align: center;
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 700;
   border-radius: var(--radius);
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   min-width: 0;
+}
+
+.quantity-stepper__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  border-width: 2px;
 }
 
 .warning-banner {
@@ -407,8 +577,23 @@ button {
   font-weight: 600;
 }
 
+/*
+ * Duidelijkheids-fix (CountingPage "Bestaand artikel opzoeken"): een
+ * neutrale, informatieve banner — geen waarschuwing (niets is fout), enkel
+ * een expliciete aanduiding van de huidige modus. Zelfde vorm als
+ * `.warning-banner`, maar met de primaire (niet-alarmerende) kleur.
+ */
+.info-banner {
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  font-weight: 600;
+}
+
 .error-banner {
-  background: #fbe7e6;
+  background: var(--color-danger-bg);
   border: 1px solid var(--color-danger);
   color: var(--color-danger);
   border-radius: var(--radius);
@@ -417,9 +602,30 @@ button {
   white-space: pre-line;
 }
 
+/*
+ * Visuele-polish-sprint §5 (Review): de KPI-tegels worden per betekenisvolle
+ * groep getoond (voortgang / aantallen / financiële correctie — zie
+ * ReviewPage.tsx `summary-group`), i.p.v. één ononderscheiden rist van 10
+ * identieke tegels. `.summary-grid` blijft de tegel-layout binnen zo'n groep.
+ */
+.summary-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.summary-group__label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-2);
 }
 
@@ -429,6 +635,7 @@ button {
   border-radius: var(--radius);
   padding: var(--space-3);
   text-align: center;
+  box-shadow: var(--shadow-sm);
   /*
    * Aanvulling ("deze venstertjes zien er lelijk uit, onoverzichtelijk"): een
    * lang getal (bv. een grote correctiehoeveelheid of een eurobedrag met
@@ -450,9 +657,30 @@ button {
   line-height: 1.2;
 }
 
+.summary-tile__value--positive {
+  color: var(--color-primary);
+}
+
+.summary-tile__value--negative {
+  color: var(--color-danger);
+}
+
 .summary-tile__label {
   color: var(--color-text-muted);
   font-size: 0.85rem;
+}
+
+/*
+ * Visuele-polish-sprint §5: de financiële-correctiegroep krijgt een eigen,
+ * lichte kaart — "maak de financiële correctie especially professioneel
+ * leesbaar" — zodat de €-tegels visueel een samenhangend, iets rustiger
+ * blokje vormen i.p.v. tussen alle andere KPI's te verdwijnen.
+ */
+.summary-group--financial {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius);
+  padding: var(--space-3);
 }
 
 .modal-overlay {
@@ -472,6 +700,43 @@ button {
   padding: var(--space-4);
   max-width: 480px;
   width: 100%;
+  box-shadow: var(--shadow-md);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/*
+ * ReviewPage sticky bottom actions (mobile/tablet UX-fix): bij een lange
+ * reviewlijst moet de afrondings-/exportactie altijd bereikbaar blijven
+ * tijdens scrollen, niet pas na scrollen door honderden artikelen.
+ * Bewust `position: fixed` i.p.v. `sticky`: de pagina scrollt op
+ * body/html-niveau (er is geen aparte overflow-container), en als laatste
+ * kind van `.stack` zou een sticky element pas vlak vóór het einde van de
+ * lijst in beeld verschijnen — niet "altijd bereikbaar" zoals gevraagd.
+ * `.review-page` compenseert de extra ruimte die deze balk als fixed
+ * element buiten de normale flow inneemt, zodat ze nooit reviewrijen
+ * bedekt; `env(safe-area-inset-bottom)` houdt rekening met een mobiele
+ * home-indicator/notch onderaan.
+ */
+.sticky-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
+}
+
+.sticky-bottom-bar__inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom));
+}
+
+.review-page {
+  padding-bottom: calc(var(--touch-min) + var(--space-5) + var(--space-3) + env(safe-area-inset-bottom));
 }
 
 .empty-state {
@@ -501,6 +766,18 @@ button {
 
 .review-row--not-counted {
   border-left-color: var(--color-danger);
+}
+
+/*
+ * Visuele-polish-sprint §5: "een afgeronde/historische sessie moet
+ * duidelijk als alleen-lezen aanvoelen" — een neutrale, gedempte rand i.p.v.
+ * de actieve statuskleuren hierboven (die suggereren dat er nog iets te
+ * doen is), plus een zachtere achtergrond zodat de rij zelf iets "vlakker"
+ * oogt dan een rij in een lopende telling.
+ */
+.review-row--readonly {
+  border-left-color: var(--color-border);
+  background: var(--color-bg);
 }
 
 .review-row__header {
@@ -537,9 +814,20 @@ button {
 }
 
 .review-row__badge--not-counted {
-  background: #fbe7e6;
+  background: var(--color-danger-bg);
   color: var(--color-danger);
   border: 1px solid var(--color-danger);
+}
+
+/* Visuele-polish-sprint §5: expliciete "Geteld"-badge zodra een artikel
+   volledig geteld is (voorheen toonde een volledig/correct geteld artikel
+   HELEMAAL geen badge — enkel de afwijkende statussen waren zichtbaar). Puur
+   presentatie op reeds bestaande, berekende velden (`fullyCounted` /
+   `isManualAddition`) — geen nieuwe data, geen nieuwe logica. */
+.review-row__badge--counted {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
 }
 
 .review-row__badge--manual {
@@ -551,6 +839,18 @@ button {
 .review-row__meta {
   color: var(--color-text-muted);
   font-size: 0.95rem;
+}
+
+/*
+ * Visuele-polish-sprint §6 (Articles) / §9: artikelnummer vs. omschrijving
+ * beter leesbaar uit elkaar houden — een lichte, "tabular"/mono-achtige
+ * behandeling van het nummer (elders steeds naast de vetgedrukte
+ * omschrijving) i.p.v. exact dezelfde tekststijl als productgroep/eenheid.
+ */
+.meta-article-number {
+  font-variant-numeric: tabular-nums;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9em;
 }
 
 .review-row__locations {
@@ -626,19 +926,61 @@ button {
 .session-history {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
+/*
+ * Visuele-polish-sprint §2: "vorige tellingen" compacter — kleinere
+ * padding/rand dan een volwaardige kaart, dit is een lijst van rijen, geen
+ * verzameling even belangrijke kaarten.
+ */
 .session-history-item {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   text-align: left;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
+  min-height: 44px;
+}
+
+/*
+ * UI/UX-fix (Home, spec-item 3): "Vorige tellingen" mag de homepage niet meer
+ * volledig innemen — dezelfde samenvouwbare `<details>`-aanpak die voorheen
+ * enkel voor geannuleerde tellingen bestond ("Geannuleerde tellingen" is
+ * intussen uit de zichtbare Home-UI gehaald, de onderliggende records blijven
+ * gewoon bestaan) wordt hiervoor hergebruikt: standaard dichtgevouwen, enkel
+ * de samenvatting zichtbaar, één tik om de volledige historiek te tonen.
+ */
+.session-history-collapsible__summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  font-weight: 600;
+}
+
+.session-history-collapsible__summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-history-collapsible__summary::before {
+  content: "▸";
+  font-size: 0.75em;
+  transition: transform 0.1s ease;
+}
+
+.session-history-collapsible[open] .session-history-collapsible__summary::before {
+  transform: rotate(90deg);
+}
+
+.session-history-collapsible .session-history {
+  margin-top: var(--space-2);
 }
 
 .line-chart {
@@ -672,6 +1014,17 @@ button {
   font-weight: 700;
 }
 
+/*
+ * Responsive-controle §9: de historiektabel heeft 6 kolommen (datum,
+ * tellingnaam, aantallen, locaties, status) — op een smal (~390px) scherm
+ * past dat niet naast elkaar. I.p.v. de tekst te laten overlopen of de hele
+ * pagina horizontaal te laten scrollen, scrollt enkel de tabel zelf opzij.
+ */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .history-table {
   width: 100%;
   border-collapse: collapse;
@@ -692,10 +1045,11 @@ button {
 
 .article-detail-field {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
-  padding: var(--space-1) 0;
+  gap: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border-soft);
+  padding: var(--space-2) 0;
 }
 
 .article-detail-field:last-child {
@@ -709,6 +1063,8 @@ button {
 .article-detail-field__value {
   font-weight: 600;
   text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -723,12 +1079,14 @@ button {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-sm);
 }
 
 .article-row--selected {
   border-color: var(--color-primary);
   background: var(--color-primary-soft);
+  box-shadow: none;
 }
 
 .article-row__checkbox {
@@ -860,8 +1218,186 @@ button {
   font-weight: 600;
 }
 
+/*
+ * Visuele-polish-sprint §7 (Instellingen/locaties): rustigere lijst dan
+ * voorheen ("een lange rij invoervelden") — platte tekst i.p.v. een
+ * permanent open veld, grotere/duimvriendelijke actieknoppen, en de
+ * op/omlaag-knoppen visueel gegroepeerd los van de overige acties.
+ */
+.location-settings-row {
+  padding: var(--space-3);
+}
+
+.location-settings-row--inactive {
+  opacity: 0.7;
+}
+
+.location-settings-row__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.location-settings-row__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.location-settings-row__order {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.chip--settings {
+  min-height: var(--touch-min);
+}
+
 @media (min-width: 700px) {
   body {
     font-size: 19px;
+  }
+}
+
+/*
+ * Visuele-polish-sprint §9 (responsive): vanaf tabletbreedte iets meer
+ * ademruimte — de kleinere, telefoon-georiënteerde padding hierboven is op
+ * een groter scherm nodeloos krap.
+ */
+@media (min-width: 700px) {
+  .app-main {
+    padding: var(--space-4);
+  }
+}
+
+/*
+ * Vanaf tabletlandschap/desktop: locatiekaarten en samenvattingstegels
+ * mogen wat breder worden i.p.v. eindeloos in enkele rijen te stapelen —
+ * puur een `minmax`-aanpassing, geen nieuwe structuur.
+ */
+@media (min-width: 1024px) {
+  .location-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
+/*
+ * Desktopoptimalisatie ReviewPage (>=1024px, UITSLUITEND dit scherm — geen
+ * enkele regel hieronder mag Home/locaties/Articles/Instellingen raken).
+ * Alle selectors zijn daarom bewust scoped via `.review-page`/`.review-*` of
+ * `:has()`, nooit op de generieke `.app-main`/`.stack`/`.summary-grid`/
+ * `.review-row__*`-klassen zelf. Geen enkele wijziging aan businesslogica,
+ * filters, vergelijking of exportgedrag — puur layout. Onder 1024px (mobiel
+ * en tablet) bestaat deze media query niet: die layout blijft exact zoals ze
+ * was.
+ */
+@media (min-width: 1024px) {
+  /*
+   * Bredere contentcontainer, maar enkel wanneer `.app-main` het reviewscherm
+   * bevat — `.app-main` zelf (gedeeld door alle schermen) blijft overal
+   * anders op zijn bestaande 1100px.
+   */
+  .app-main:has(> .review-page) {
+    max-width: 1200px;
+  }
+
+  /*
+   * KPI-sectie compacter/horizontaler: dezelfde 3 groepen/tegels, nu naast
+   * elkaar i.p.v. gestapeld — spaart verticale ruimte en benut de bredere
+   * container. `flex-wrap` behoudt een nette val-terug op een iets smaller
+   * (maar nog altijd >=1024px) venster.
+   */
+  .review-summary {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .review-summary > .summary-group {
+    flex: 1 1 280px;
+    min-width: 260px;
+  }
+
+  /* Iets dichter op elkaar dan de mobiele 150px-tegels, zodat 3 groepen naast elkaar niet meteen zelf weer omslaan. */
+  .review-summary .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  }
+
+  /*
+   * Artikelresultaten compacter/table-like: dezelfde `ReviewRow`-markup
+   * (header/meta/locaties/cijfers/acties/notitie), nu als CSS-grid met vaste
+   * kolommen i.p.v. alles onder elkaar gestapeld — waardes lijnen zo
+   * kolomsgewijs uit tussen rijen, zoals een tabel. De `:has(> .review-row__figures)`-
+   * scoping raakt bewust NIET de eenvoudigere "Artikels nergens
+   * aangetroffen"-rijen (die hebben geen `__figures`/`__locations` en
+   * behouden hun bestaande, compacte lay-out).
+   */
+  .review-results {
+    gap: var(--space-2);
+  }
+
+  .review-page .review-row:has(> .review-row__figures) {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(160px, 1fr) minmax(380px, 1.7fr);
+    grid-template-areas:
+      "header    locations figures"
+      "meta      locations figures"
+      "actions   actions   actions"
+      "note      note      note";
+    align-items: center;
+    column-gap: var(--space-4);
+    row-gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .review-row__header {
+    grid-area: header;
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .review-row__meta {
+    grid-area: meta;
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .review-row__locations {
+    grid-area: locations;
+    align-content: center;
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .review-row__figures {
+    grid-area: figures;
+    grid-template-columns: repeat(5, minmax(80px, 1fr));
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .filter-row {
+    grid-area: actions;
+    margin: 0;
+  }
+
+  .review-page .review-row:has(> .review-row__figures) > .review-row__note {
+    grid-area: note;
+  }
+
+  /*
+   * Sticky bar: dezelfde balk/logica, enkel breder (in lijn met de
+   * bredere contentcontainer hierboven) en de knop hoeft hier niet meer
+   * full-width te zijn — rechts uitgelijnd, natuurlijke breedte i.p.v. de
+   * globale `.big-button { width: 100% }`. `.sticky-bottom-bar` wordt op dit
+   * moment uitsluitend door ReviewPage gebruikt.
+   */
+  .sticky-bottom-bar__inner {
+    max-width: 1200px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .sticky-bottom-bar__inner .big-button {
+    width: auto;
+    min-width: 280px;
   }
 }

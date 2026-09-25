@@ -95,13 +95,19 @@ afterEach(() => {
 });
 
 /**
- * De breadcrumb ("Antwerpen > Rek B") staat zowel in `AppHeader` als, op het
- * telscherm, nogmaals als `<h1 className="screen-title">` — `getByText`
- * gooit dan "meerdere elementen gevonden". We lezen daarom rechtstreeks de
- * header-breadcrumb (uniek, altijd aanwezig), i.p.v. op tekst te zoeken.
+ * Mobile/tablet UX-fix: de vroegere gecombineerde breadcrumb ("Antwerpen >
+ * Rek B") is vervangen door één compacte header — de locatienaam als
+ * primaire breadcrumb, het kantoor subtiel eronder als `subtitle` (geen
+ * dubbele locatie/breadcrumb-weergave meer). We lezen daarom de
+ * header-breadcrumb en -subtitle als aparte, unieke elementen i.p.v. op
+ * samengestelde tekst te zoeken.
  */
 function breadcrumb(): string | null {
   return document.querySelector(".app-header__breadcrumb")?.textContent ?? null;
+}
+
+function headerSubtitle(): string | null {
+  return document.querySelector(".app-header__subtitle")?.textContent ?? null;
 }
 
 describe("App — route blijft op dezelfde location.id na een onverwachte herlaad (v0.3-hotfix)", () => {
@@ -134,7 +140,8 @@ describe("App — route blijft op dezelfde location.id na een onverwachte herlaa
     render(<App />);
 
     await waitFor(() => {
-      expect(breadcrumb()).toBe("Antwerpen > Rek B");
+      expect(breadcrumb()).toBe("Rek B");
+      expect(headerSubtitle()).toBe("Antwerpen");
     });
   });
 
@@ -160,7 +167,8 @@ describe("App — route blijft op dezelfde location.id na een onverwachte herlaa
     render(<App />);
 
     await waitFor(() => {
-      expect(breadcrumb()).toBe("Antwerpen > Rek B");
+      expect(breadcrumb()).toBe("Rek B");
+      expect(headerSubtitle()).toBe("Antwerpen");
     });
   });
 
@@ -186,7 +194,8 @@ describe("App — route blijft op dezelfde location.id na een onverwachte herlaa
 
     render(<App />);
     await waitFor(() => {
-      expect(breadcrumb()).toBe("Antwerpen > Rek A");
+      expect(breadcrumb()).toBe("Rek A");
+      expect(headerSubtitle()).toBe("Antwerpen");
     });
 
     const stored = JSON.parse(sessionStorage.getItem("argona-stocktelling:lastRoute") as string);
@@ -228,7 +237,8 @@ describe(
       render(<App />);
 
       await waitFor(() => {
-        expect(breadcrumb()).toBe("Antwerpen > Rek B");
+        expect(breadcrumb()).toBe("Rek B");
+        expect(headerSubtitle()).toBe("Antwerpen");
       });
     });
   },

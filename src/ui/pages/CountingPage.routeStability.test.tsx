@@ -89,17 +89,25 @@ beforeEach(async () => {
   session = await countSessionService.startSession("office-1", "MONTHLY");
 });
 
-function title(): string | null {
-  return document.querySelector(".screen-title")?.textContent ?? null;
-}
-
+/*
+ * Mobile/tablet UX-fix: CountingPage toonde voorheen zelf ook een eigen
+ * "<kantoor> > <locatie>"-titel (`.screen-title`) — die dubbele weergave is
+ * eruit, de locatienaam/kantoor tonen voortaan enkel nog in de globale
+ * `AppHeader` (App.tsx), die hier (bewust een geïsoleerde render van enkel
+ * `CountingPage`, zonder App.tsx) niet meegerenderd wordt. De vroegere
+ * `title()`-helper hieronder verviel daarom; "geen navigatie weg van deze
+ * locatie" wordt in de tests hieronder nu uitsluitend via de data zelf
+ * geverifieerd (CountEntries/assignments op de juiste `locationId`, en dat
+ * de juiste artikelen/modal-tekst voor Rek B in beeld blijven) — zie
+ * App.test.tsx voor de route-herstel-tests op app-niveau, inclusief de
+ * header/titel daar.
+ */
 describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
   it("route blijft op dezelfde location.id ná tellen van een artikel", async () => {
     const user = userEvent.setup();
     render(<CountingPage sessionId={session.id} locationId={locB} />);
 
     await screen.findByText("Artikel M2 (nog nergens gekend)");
-    expect(title()).toBe("Antwerpen > Rek B");
 
     const card = (await screen.findByText("Artikel M2 (nog nergens gekend)")).closest(
       ".article-card",
@@ -111,8 +119,6 @@ describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
       const entries = await countingRepository.getCountEntries(session.id);
       expect(entries.some((e) => e.articleId === articleM2.id && e.counted)).toBe(true);
     });
-    // Nog steeds exact dezelfde locatie — geen navigatie.
-    expect(title()).toBe("Antwerpen > Rek B");
   });
 
   it("route blijft op dezelfde locatie nadat tellen automatisch een nieuwe assignment leert", async () => {
@@ -131,7 +137,6 @@ describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
         assignments.some((a) => a.articleId === articleM2.id && a.locationId === locB && a.active),
       ).toBe(true);
     });
-    expect(title()).toBe("Antwerpen > Rek B");
   });
 
   it("route blijft op dezelfde locatie na het bevestigen van 'onverwachte locatie', en telt daadwerkelijk hier (niet op Rek A)", async () => {
@@ -165,7 +170,6 @@ describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
     expect(
       await screen.findByText(/Dit artikel werd normaal op Rek A verwacht, maar wordt nu op Rek B geteld\./),
     ).toBeInTheDocument();
-    expect(title()).toBe("Antwerpen > Rek B"); // de modal zelf verandert de route niet.
 
     await user.click(screen.getByRole("button", { name: "Ja, toevoegen" }));
 
@@ -184,7 +188,6 @@ describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
     expect(assignments.some((a) => a.articleId === articleM1.id && a.locationId === locB && a.active)).toBe(
       true,
     );
-    expect(title()).toBe("Antwerpen > Rek B");
   });
 
   it("het laatste zichtbare artikel tellen geeft geen navigatie — enkel de eindmelding, op dezelfde pagina", async () => {
@@ -197,9 +200,7 @@ describe("CountingPage — route/locatie blijft stabiel (v0.3-hotfix)", () => {
     await user.click(within(card).getByRole("button", { name: /Geteld/ }));
 
     await waitFor(() => {
-      expect(screen.getByText("Alle zichtbare artikels zijn geteld.")).toBeInTheDocument();
+      expect(screen.getByText("Alle zichtbare artikelen zijn geteld.")).toBeInTheDocument();
     });
-    // Nog steeds dezelfde pagina/locatie — geen navigatie naar Home of het overzicht.
-    expect(title()).toBe("Antwerpen > Rek A");
   });
 });

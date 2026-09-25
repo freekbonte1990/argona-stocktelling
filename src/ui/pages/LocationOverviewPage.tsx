@@ -87,7 +87,7 @@ export function LocationOverviewPage({
       <h1 className="screen-title">{SESSION_TYPE_LABELS[session.type] ?? session.type}</h1>
       <p className="screen-subtitle">{office.name}</p>
       <ProgressBar
-        label="artikels afgewerkt"
+        label="artikelen afgewerkt"
         done={progress.completedUniqueArticles}
         total={progress.totalUniqueArticles}
       />
@@ -128,7 +128,7 @@ export function LocationOverviewPage({
           onClick={onOpenWithoutLocation}
         >
           <span className="location-card__name">Zonder locatie</span>
-          <span className="location-card__count">{withoutLocationCount} artikels</span>
+          <span className="location-card__count">{withoutLocationCount} artikelen</span>
         </button>
       </div>
       <BigButton variant="secondary" onClick={onOpenReview}>

@@ -14,7 +14,11 @@ export function LocationCard({ location, counted, total, onOpen, statusLabel }: 
   return (
     <button className="location-card" onClick={() => onOpen(location)}>
       <span className="location-card__name">{location.name}</span>
-      {statusLabel && <span className="location-card__status">{statusLabel}</span>}
+      {statusLabel && (
+        <span className={`location-card__status ${done ? "location-card__status--done" : ""}`}>
+          {statusLabel}
+        </span>
+      )}
       <span className={done ? "location-card__count location-card__done" : "location-card__count"}>
         {counted} / {total} geteld
       </span>

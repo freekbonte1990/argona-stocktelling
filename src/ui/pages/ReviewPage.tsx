@@ -25,7 +25,7 @@ import {
   useSessionsForOffice,
 } from "../hooks/useLiveData";
 import { SESSION_TYPE_LABELS } from "../sessionTypeLabels";
-import { formatEuro } from "../../shared/format";
+import { formatDate, formatEuro, formatSignedEuro } from "../../shared/format";
 
 /** Sentinel voor de vergelijk-dropdown: "geen andere sessie gekozen" = standaardgedrag (Article.previousCount). */
 const PREVIOUS_COUNT_SENTINEL = "";
@@ -138,6 +138,14 @@ export function ReviewPage({
   const filtered = sortReviewResults(filterReviewResults(review.results, filter), sortMode);
   const ready = isSessionReadyToComplete(review);
   const isCompleted = session.status === "COMPLETED";
+  /**
+   * Desktopoptimalisatie: "Financiële correctie" duidelijk groeperen als
+   * +/-/netto. Geen nieuwe businesslogica — een pure weergavesom van de twee
+   * reeds door domain/review.ts berekende totalen, dezelfde manier waarop
+   * hieronder ook al met `formatEuro`/`formatSignedEuro` enkel geformatteerd
+   * wordt, nooit herberekend.
+   */
+  const netCorrectionAmount = review.totalPositiveCorrectionAmount + review.totalNegativeCorrectionAmount;
 
   async function handleComplete() {
     setError(null);
@@ -230,12 +238,15 @@ export function ReviewPage({
   };
 
   return (
-    <div className="stack">
-      <h1 className="screen-title">{SESSION_TYPE_LABELS[session.type] ?? session.type} — controle</h1>
+    <div className="stack review-page">
+      <h1 className="screen-title">
+        {SESSION_TYPE_LABELS[session.type] ?? session.type} — controle
+        {isCompleted && <span className="readonly-badge">Alleen-lezen</span>}
+      </h1>
       <p className="screen-subtitle">
         {office.name}
         {isCompleted && session.completedAt
-          ? ` · afgerond op ${new Date(session.completedAt).toLocaleDateString("nl-BE")}`
+          ? ` · afgerond op ${formatDate(session.completedAt)}`
           : ""}
       </p>
 
@@ -266,23 +277,67 @@ export function ReviewPage({
         </label>
       )}
 
-      <div className="summary-grid">
-        <SummaryTile
-          label="Locaties afgerond"
-          value={`${review.completedActiveLocationsCount} / ${review.totalActiveLocations}`}
-        />
-        <SummaryTile
-          label="Artikels afgewerkt"
-          value={`${review.countedArticles} / ${review.totalArticlesInScope}`}
-        />
-        <SummaryTile label="Totaal in scope" value={review.totalArticlesInScope} />
-        <SummaryTile label="Geteld" value={review.countedArticles} />
-        <SummaryTile label="Niet geteld" value={review.notCountedArticles} />
-        <SummaryTile label="Met verschil" value={review.articlesWithDifference} />
-        <SummaryTile label="Correctie +" value={review.totalPositiveCorrectionQuantity} />
-        <SummaryTile label="Correctie -" value={review.totalNegativeCorrectionQuantity} />
-        <SummaryTile label="Correctie + (€)" value={formatEuro(review.totalPositiveCorrectionAmount)} />
-        <SummaryTile label="Correctie - (€)" value={formatEuro(review.totalNegativeCorrectionAmount)} />
+      {/*
+        Visuele-polish-sprint §5: dezelfde 10 KPI's als voorheen, nu in 3
+        betekenisvolle groepen i.p.v. één ononderscheiden rist tegels —
+        "Voortgang" (waar sta ik), "Verschillen" (wat wijkt af) en de apart
+        uitgelichte "Financiële correctie" (€-bedragen, het belangrijkste
+        voor een beheerder). Geen enkel cijfer of berekening is gewijzigd.
+      */}
+      {/*
+        Desktopoptimalisatie (>=1024px, uitsluitend ReviewPage): dezelfde 3
+        groepen, dezelfde tegels/cijfers — enkel de `review-summary`-klasse
+        laat index.css ze vanaf desktopbreedte naast elkaar tonen i.p.v.
+        gestapeld (compacter, meer horizontale ruimte benut). Mobiel/tablet
+        blijft ongewijzigd (die media query bestaat niet onder 1024px).
+      */}
+      <div className="stack stack--tight review-summary">
+        <div className="summary-group">
+          <p className="summary-group__label">Voortgang</p>
+          <div className="summary-grid">
+            <SummaryTile
+              label="Locaties afgerond"
+              value={`${review.completedActiveLocationsCount} / ${review.totalActiveLocations}`}
+            />
+            <SummaryTile
+              label="Artikelen afgewerkt"
+              value={`${review.countedArticles} / ${review.totalArticlesInScope}`}
+            />
+            <SummaryTile label="Totaal in scope" value={review.totalArticlesInScope} />
+            <SummaryTile label="Geteld" value={review.countedArticles} />
+            <SummaryTile label="Niet geteld" value={review.notCountedArticles} />
+          </div>
+        </div>
+
+        <div className="summary-group">
+          <p className="summary-group__label">Verschillen</p>
+          <div className="summary-grid">
+            <SummaryTile label="Met verschil" value={review.articlesWithDifference} />
+            <SummaryTile label="Correctie +" value={review.totalPositiveCorrectionQuantity} tone="positive" />
+            <SummaryTile label="Correctie -" value={review.totalNegativeCorrectionQuantity} tone="negative" />
+          </div>
+        </div>
+
+        <div className="summary-group summary-group--financial">
+          <p className="summary-group__label">Financiële correctie</p>
+          <div className="summary-grid">
+            <SummaryTile
+              label="Correctie + (€)"
+              value={formatEuro(review.totalPositiveCorrectionAmount)}
+              tone="positive"
+            />
+            <SummaryTile
+              label="Correctie - (€)"
+              value={formatEuro(review.totalNegativeCorrectionAmount)}
+              tone="negative"
+            />
+            <SummaryTile
+              label="Netto (€)"
+              value={formatSignedEuro(netCorrectionAmount)}
+              tone={netCorrectionAmount > 0 ? "positive" : netCorrectionAmount < 0 ? "negative" : "neutral"}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="filter-row">
@@ -363,7 +418,15 @@ export function ReviewPage({
       )}
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="stack">
+      {/*
+        Desktopoptimalisatie: `review-results` laat index.css de bestaande
+        `.review-row`'s vanaf 1024px compacter/table-like tonen (kolommen die
+        onder elkaar uitlijnen i.p.v. gestapelde blokken) — `ReviewRow.tsx`
+        zelf, en dus alle bestaande markup/tekst/acties, blijft volledig
+        ongewijzigd. Mobiel/tablet: geen wijziging, de bestaande kaartlayout
+        blijft exact zoals ze was.
+      */}
+      <div className="stack review-results">
         {filtered.length === 0 && <p className="empty-state">Geen artikelen voor dit filter.</p>}
         {filtered.map((result) => (
           <ReviewRow
@@ -432,32 +495,33 @@ export function ReviewPage({
         </div>
       )}
 
-      {!isCompleted && (
-        <BigButton variant="primary" disabled={!ready || completing} onClick={handleComplete}>
-          {completing ? "Bezig met afronden..." : "Telling afronden"}
-        </BigButton>
-      )}
-      {!isCompleted && !ready && (
-        <BigButton variant="secondary" onClick={() => setConfirmingOutstanding(true)}>
-          Afronden met openstaande artikels
-        </BigButton>
-      )}
       {/*
-        Data-integriteit-sprint §2: een officiële export (nieuw benoemd
-        tellingtabblad + HISTORIE + previousCount) mag enkel voor een reeds
-        AFGERONDE (COMPLETED) sessie — een lopende (ACTIVE) telling exporteert
-        hier bewust niet meer stilzwijgend mee (de service-laag blokkeert dit
-        toch, zie `ActiveSessionExportError`, maar de knop maakt dat meteen
-        duidelijk i.p.v. pas na een klik een foutmelding te tonen).
+        Mobile/tablet UX-fix: bij een lange reviewlijst (honderden artikelen)
+        moest je voorheen tot onderaan de pagina scrollen om af te ronden of
+        te exporteren. Deze balk blijft nu altijd bereikbaar tijdens
+        scrollen (`position: fixed`, zie index.css `.sticky-bottom-bar`) en
+        toont bewust nooit meer dan één primaire actie tegelijk — welke
+        precies hangt enkel af van bestaande state (`isCompleted`/`ready`),
+        de acties zelf (`handleComplete`/`setConfirmingOutstanding`/
+        `handleExport`) en alle bevestigingen/services blijven ongewijzigd.
       */}
-      <BigButton
-        variant="secondary"
-        disabled={exporting || !isCompleted}
-        title={!isCompleted ? "Rond de telling eerst af — enkel een afgeronde telling kan geëxporteerd worden." : undefined}
-        onClick={() => handleExport()}
-      >
-        {exporting ? "Bezig met exporteren..." : "Exporteren naar Excel"}
-      </BigButton>
+      <div className="sticky-bottom-bar">
+        <div className="sticky-bottom-bar__inner">
+          {isCompleted ? (
+            <BigButton variant="primary" disabled={exporting} onClick={() => handleExport()}>
+              {exporting ? "Bezig met exporteren..." : "Exporteren naar Excel"}
+            </BigButton>
+          ) : ready ? (
+            <BigButton variant="primary" disabled={completing} onClick={handleComplete}>
+              {completing ? "Bezig met afronden..." : "Telling afronden"}
+            </BigButton>
+          ) : (
+            <BigButton variant="primary" onClick={() => setConfirmingOutstanding(true)}>
+              {`Afronden met ${review.notCountedArticles} openstaande artikelen`}
+            </BigButton>
+          )}
+        </div>
+      </div>
 
       {confirmingArticleId && (
         <div className="modal-overlay">

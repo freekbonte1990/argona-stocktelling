@@ -30,6 +30,16 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   const assignments = useAssignments(officeId) ?? [];
   const [newLocationName, setNewLocationName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Visuele-polish-sprint §7: locaties tonen voortaan als platte tekst, met
+   * een expliciete "Naam wijzigen"-actie die pas dan het (ongewijzigde)
+   * tekstveld toont — voorheen stond ELKE locatie altijd als open
+   * invoerveld, wat op een lange lijst als een rommelige rij formuliervelden
+   * oogde. Het onderliggende opslaggedrag (`handleRename`, opslaan bij het
+   * verlaten van het veld) is functioneel exact hetzelfde, enkel wanneer het
+   * veld zichtbaar is, is nieuw.
+   */
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
 
   if (!officeOrUndefined) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
@@ -54,6 +64,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   };
 
   const handleRename = async (locationId: string, name: string) => {
+    setEditingLocationId(null);
     await persist(renameLocation(office, locationId, name));
   };
 
@@ -115,58 +126,88 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
         <div className="stack stack--tight">
           {orderedLocations.map((location, index) => {
             const used = !canHardDeleteLocation(location.id, assignments, []);
+            const isEditing = editingLocationId === location.id;
             return (
-              <div key={location.id} className="card stack stack--tight" style={{ padding: "var(--space-3)" }}>
-                <div className="stack stack--tight" style={{ flexDirection: "row", alignItems: "center" }}>
-                  {/*
-                    Bewust ONGECONTROLEERD (defaultValue, geen value): de
-                    naam komt reactief uit Dexie (useOffice), en die render-
-                    cyclus mag de cursorpositie niet verstoren tijdens het
-                    typen. Opslaan gebeurt pas bij het verlaten van het veld.
-                  */}
-                  <input
-                    key={location.id}
-                    className="search-input"
-                    style={{ flex: 1 }}
-                    defaultValue={location.name}
-                    onBlur={(e) => handleRename(location.id, e.target.value)}
-                  />
+              <div
+                key={location.id}
+                className={`card stack stack--tight location-settings-row ${
+                  !location.active ? "location-settings-row--inactive" : ""
+                }`}
+              >
+                <div className="stack stack--tight stack--row">
+                  {isEditing ? (
+                    // Bewust ONGECONTROLEERD (defaultValue, geen value): de
+                    // naam komt reactief uit Dexie (useOffice), en die
+                    // render-cyclus mag de cursorpositie niet verstoren
+                    // tijdens het typen. Opslaan gebeurt pas bij het
+                    // verlaten van het veld (of Enter) — functioneel exact
+                    // hetzelfde als voorheen, enkel nu achter een expliciete
+                    // "Naam wijzigen"-actie i.p.v. altijd open.
+                    <input
+                      key={location.id}
+                      className="search-input"
+                      style={{ flex: 1 }}
+                      defaultValue={location.name}
+                      autoFocus
+                      onBlur={(e) => handleRename(location.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="location-settings-row__name">{location.name}</span>
+                      <button
+                        type="button"
+                        className="chip chip--settings"
+                        onClick={() => setEditingLocationId(location.id)}
+                      >
+                        Naam wijzigen
+                      </button>
+                    </>
+                  )}
                   {!location.active && (
                     <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
                   )}
                 </div>
-                <div className="filter-row">
-                  <button
-                    type="button"
-                    className="chip"
-                    disabled={index === 0}
-                    onClick={() => handleMove(location.id, -1)}
-                  >
-                    ↑ Omhoog
-                  </button>
-                  <button
-                    type="button"
-                    className="chip"
-                    disabled={index === orderedLocations.length - 1}
-                    onClick={() => handleMove(location.id, 1)}
-                  >
-                    ↓ Omlaag
-                  </button>
-                  <button type="button" className="chip" onClick={() => handleToggleActive(location)}>
-                    {location.active ? "Inactief maken" : "Activeren"}
-                  </button>
-                  {!used && (
-                    <button type="button" className="chip" onClick={() => handleDelete(location)}>
-                      Verwijderen
+                <div className="location-settings-row__actions">
+                  <div className="filter-row location-settings-row__order">
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omhoog verplaatsen"
+                      disabled={index === 0}
+                      onClick={() => handleMove(location.id, -1)}
+                    >
+                      ↑ Omhoog
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omlaag verplaatsen"
+                      disabled={index === orderedLocations.length - 1}
+                      onClick={() => handleMove(location.id, 1)}
+                    >
+                      ↓ Omlaag
+                    </button>
+                  </div>
+                  <div className="filter-row">
+                    <button type="button" className="chip chip--settings" onClick={() => handleToggleActive(location)}>
+                      {location.active ? "Inactief maken" : "Activeren"}
+                    </button>
+                    {!used && (
+                      <button type="button" className="chip chip--settings" onClick={() => handleDelete(location)}>
+                        Verwijderen
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
 
-        <div className="stack stack--tight" style={{ flexDirection: "row" }}>
+        <div className="stack stack--tight stack--row">
           <input
             className="search-input"
             style={{ flex: 1 }}

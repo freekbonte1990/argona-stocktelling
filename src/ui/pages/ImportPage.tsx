@@ -3,6 +3,7 @@ import { importService } from "../../application/container";
 import type { ImportPreview, ImportSummary } from "../../application/services/ImportService";
 import { BigButton } from "../components/BigButton";
 import { SummaryTile } from "../components/SummaryTile";
+import { formatDate } from "../../shared/format";
 
 interface ImportPageProps {
   onImported: (officeId: string) => void;
@@ -84,7 +85,7 @@ export function ImportPage({ onImported, onCancel }: ImportPageProps) {
             Er bestaat al een kantoor "{preview.existing.office.name}" met{" "}
             {preview.existing.articleCount.toLocaleString("nl-BE")} artikelen
             {preview.existing.importedAt
-              ? `, laatst geïmporteerd op ${new Date(preview.existing.importedAt).toLocaleDateString("nl-BE")}`
+              ? `, laatst geïmporteerd op ${formatDate(preview.existing.importedAt)}`
               : ""}
             .{" "}
             {preview.existing.hasActiveSession &&

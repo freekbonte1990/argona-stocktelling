@@ -85,7 +85,7 @@ async function waitUntilLoaded() {
 }
 
 describe("ReviewPage — afrondvoorwaarden (v0.2.1 §6)", () => {
-  it("toont '1 / 2 locaties afgerond' en '1 / 2 artikels afgewerkt', en houdt 'Telling afronden' disabled", async () => {
+  it("toont '1 / 2 locaties afgerond' en '1 / 2 artikels afgewerkt', en toont i.p.v. een disabled 'Telling afronden' de knop 'Afronden met openstaande artikelen'", async () => {
     await countingService.recordCount({
       session,
       articleId: articleM1.id,
@@ -110,15 +110,21 @@ describe("ReviewPage — afrondvoorwaarden (v0.2.1 §6)", () => {
       expect(screen.getAllByText("1 / 2")).toHaveLength(2); // locaties afgerond + artikels afgewerkt
     });
     expect(screen.getByText("Locaties afgerond")).toBeInTheDocument();
-    expect(screen.getByText("Artikels afgewerkt")).toBeInTheDocument();
+    expect(screen.getByText("Artikelen afgewerkt")).toBeInTheDocument();
 
     // Melding noemt zowel de open locatie als het onopgeloste artikel.
     expect(screen.getByText(/1 locatie is nog niet afgerond/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rek 2" })).toBeInTheDocument();
     expect(screen.getByText(/Nog 1 artikel\(en\) in scope zijn niet/)).toBeInTheDocument();
 
-    const completeButton = screen.getByRole("button", { name: "Telling afronden" });
-    expect(completeButton).toBeDisabled();
+    // Sticky-bottombalk (ReviewPage UX-fix): toont nooit een disabled
+    // "Telling afronden" naast de uitzonderingsknop — zolang de telling
+    // onvolledig is, is enkel de "Afronden met X openstaande artikelen"-knop
+    // zichtbaar/beschikbaar.
+    expect(screen.queryByRole("button", { name: "Telling afronden" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Afronden met 1 openstaande artikelen" }),
+    ).toBeInTheDocument();
   });
 
   it("klikken op de naam van een niet-afgeronde locatie roept onOpenLocation aan met de juiste locationId", async () => {
@@ -198,13 +204,13 @@ describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () =
     );
     await waitUntilLoaded();
 
-    expect(await screen.findByText("Afronden met openstaande artikels")).toBeInTheDocument();
+    expect(await screen.findByText("Afronden met 1 openstaande artikelen")).toBeInTheDocument();
 
     // Volledig afronden -> de secundaire knop is niet meer nodig/zichtbaar.
     await countingService.confirmAbsent(session, articleM2.id);
     await countingService.completeLocation(session.id, office.locations[1].id);
     await waitFor(() => {
-      expect(screen.queryByText("Afronden met openstaande artikels")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Afronden met \d+ openstaande artikelen/)).not.toBeInTheDocument();
     });
   });
 
@@ -230,7 +236,7 @@ describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () =
     );
     await waitUntilLoaded();
 
-    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Afronden met 1 openstaande artikelen"));
 
     expect(await screen.findByText("Afronden met openstaande artikels?")).toBeInTheDocument();
     expect(screen.getByText("1 artikel(en) worden overgenomen.")).toBeInTheDocument();
@@ -258,7 +264,7 @@ describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () =
     );
     await waitUntilLoaded();
 
-    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Afronden met 1 openstaande artikelen"));
     await user.click(await screen.findByText("Afronden en vorige voorraad overnemen"));
 
     await waitFor(() => expect(completed).toBe(true));
@@ -280,7 +286,7 @@ describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () =
     );
     await waitUntilLoaded();
 
-    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Afronden met 2 openstaande artikelen"));
     await user.click(await screen.findByText("Terug naar telling"));
 
     expect(screen.queryByText("Afronden met openstaande artikels?")).not.toBeInTheDocument();
@@ -310,7 +316,7 @@ describe("ReviewPage — 'Afronden met openstaande artikels' (aanvulling)", () =
     );
     await waitUntilLoaded();
 
-    await user.click(await screen.findByText("Afronden met openstaande artikels"));
+    await user.click(await screen.findByText("Afronden met 0 openstaande artikelen"));
     expect(screen.getByText("0 artikel(en) worden overgenomen.")).toBeInTheDocument();
     expect(screen.getByText("2 locatie(s) niet afgerond.")).toBeInTheDocument();
     await user.click(await screen.findByText("Afronden en vorige voorraad overnemen"));
@@ -473,7 +479,13 @@ describe(
       expect(screen.getAllByText("Vorige telling").length).toBeGreaterThan(0);
       expect(screen.getByText("+1", { selector: ".review-row__figure-value" })).toBeInTheDocument();
 
-      const select = screen.getByLabelText("Vergelijken met");
+      // `comparisonSessions` komt uit een aparte live query (useSessionsForOffice)
+      // dan degene die "Bezig met laden..." bepaalt — die kan nog even
+      // achterlopen na `waitUntilLoaded()`. `findByLabelText` wacht dit netjes
+      // af i.p.v. te veronderstellen dat de dropdown er al synchroon staat
+      // (anders racy, machine-afhankelijk: bleek in de praktijk op een echte
+      // Windows-omgeving soms nog niet bijgewerkt te zijn op dit punt).
+      const select = await screen.findByLabelText("Vergelijken met");
       await user.selectOptions(select, sessionSnapshotName(oldestSession));
 
       // Nu vergeleken met de oudste sessie (M1 toen op 1) i.p.v. Article.previousCount (2) -> verschil +2.

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Article } from "../../domain/types";
-import { type ArticleSortMode, sortArticlesForLocation } from "../../domain/sorting";
+import { ARTICLE_SORT_MODE_LABELS, type ArticleSortMode, sortArticlesForLocation } from "../../domain/sorting";
 import { requiresOutOfScopeConfirmation } from "../../domain/sessionScope";
 import { isExtremeDeviation } from "../../domain/deviationWarning";
 import {
+  COUNT_FILTER_LABELS,
   defaultCountFilter,
   findNextTodoItem,
   matchesCountFilter,
@@ -12,7 +13,6 @@ import {
 import { countingService } from "../../application/container";
 import { ArticleCard } from "../components/ArticleCard";
 import { BigButton } from "../components/BigButton";
-import { FilterBar } from "../components/FilterBar";
 import { NewArticleFoundModal } from "../components/NewArticleFoundModal";
 import { SESSION_TYPE_NOUN_LOWER } from "../sessionTypeLabels";
 import { formatCount, formatSignedCount, formatSignedEuro } from "../../shared/format";
@@ -61,7 +61,28 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   const [productGroup, setProductGroup] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<ArticleSortMode>("GROUP_THEN_DESCRIPTION");
   const [search, setSearch] = useState("");
+  /**
+   * Mobile/tablet UX-fix: productgroepen en het "Nog nergens geteld"-filter
+   * staan niet langer permanent open, maar achter deze compacte
+   * "Filters (N)"-knop (zelfde patroon als ArticlesPage) — puur presentatie,
+   * `filter`/`productGroup` en hun betekenis (`matchesCountFilter` in
+   * domain/countView.ts) blijven volledig ongewijzigd.
+   */
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [showOtherSearch, setShowOtherSearch] = useState(false);
+  /**
+   * BUGFIX "Bestaand artikel opzoeken": apart van `showOtherSearch` zelf,
+   * omdat die state OOK automatisch aangezet wordt door het
+   * `focusArticleId`-effect hieronder (v0.2.1-hotfix: "Tellen" vanuit
+   * Review op een artikel zonder bestaande verwachting/entry hier) — dat
+   * bestaande pad moet, zoals voorheen, gewoon ALLES tonen (inclusief al
+   * gekende artikelen), puur om het gefocuste artikel gegarandeerd
+   * zichtbaar te maken. Enkel de EXPLICIETE, door de gebruiker zelf
+   * aangeklikte "+ Bestaand artikel opzoeken"-knop is de echte office-wide
+   * zoekmodus uit deze bugfix, en sluit al-gekende (normaal al zichtbare)
+   * artikelen uit.
+   */
+  const [manualLookup, setManualLookup] = useState(false);
   const [draftQuantities, setDraftQuantities] = useState<Record<string, number | null>>({});
   const [outOfScopeConfirm, setOutOfScopeConfirm] = useState<{ article: Article; index: number } | null>(
     null,
@@ -145,7 +166,51 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
 
   const isLearningMode = knownAtLocation.length === 0;
   const defaultPool = isLearningMode ? scopeArticles : knownAtLocation;
-  const pool = showOtherSearch ? officeArticles : defaultPool;
+
+  /**
+   * BUGFIX (functionele regressie "Bestaand artikel opzoeken toont nog
+   * steeds enkel de verwachte locatie-artikelen"): de eigenlijke
+   * poolwissel (`officeArticles` i.p.v. `defaultPool`) klopte al, maar
+   * `sortArticlesForLocation` zet artikelen die HIER verwacht worden altijd
+   * eerst — bij een kantoor met veel artikelen bleven die dus bovenaan
+   * staan en leek de (ongewijzigde) lijst zichtbaar identiek, ook al stond
+   * het net gevonden artikel verderop al wél tussen de resultaten.
+   * Spec-fix: artikelen die al "gekoppeld" zijn aan deze locatie (exact
+   * `knownAtLocation`: verwacht hier, of hier al een entry) horen sowieso
+   * niet als zoekresultaat terug te komen — die zijn al gewoon zichtbaar in
+   * de normale modus. Dat maakt de office-wide zoekmodus ook meteen
+   * ondubbelzinnig ander dan de normale weergave.
+   */
+  const knownAtLocationIds = useMemo(
+    () => new Set(knownAtLocation.map((article) => article.id)),
+    [knownAtLocation],
+  );
+  const pool = showOtherSearch
+    ? manualLookup
+      ? officeArticles.filter((article) => !knownAtLocationIds.has(article.id))
+      : officeArticles
+    : defaultPool;
+
+  /**
+   * Enkel gevuld tijdens de EXPLICIETE "Bestaand artikel opzoeken"-modus:
+   * per artikel de namen van de locatie(s) waar het al een actieve vaste
+   * koppeling heeft (spec: "toon ... eventueel bestaande locatie(s)"). Puur
+   * presentatie/leesvoer op basis van de al beschikbare `assignments`-data —
+   * geen nieuwe businesslogica of extra repository-aanroepen.
+   */
+  const existingLocationNamesByArticleId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    if (!manualLookup || !office) return map;
+    for (const assignment of assignments) {
+      if (!assignment.active) continue;
+      const locationName = office.locations.find((l) => l.id === assignment.locationId)?.name;
+      if (!locationName) continue;
+      const names = map.get(assignment.articleId);
+      if (names) names.push(locationName);
+      else map.set(assignment.articleId, [locationName]);
+    }
+    return map;
+  }, [manualLookup, office, assignments]);
 
   const filter: CountFilter = filterOverride ?? defaultCountFilter(isLearningMode);
 
@@ -406,82 +471,167 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   const locationProgressPct =
     locationEntriesTotal > 0 ? Math.round((locationEntriesCounted / locationEntriesTotal) * 100) : 0;
 
+  /**
+   * Mobile/tablet UX-fix: badge op de "Filters"-knop, zelfde patroon als
+   * ArticlesPage se `activeFilterCount` — telt enkel mee wat NIET al via de
+   * drie permanente tabs zichtbaar/bedienbaar is (productgroep, en het
+   * "Nog nergens geteld"-filter dat nu in deze modal zit i.p.v. als vierde
+   * permanente tab).
+   */
+  const activeFilterCount = (productGroup ? 1 : 0) + (filter === "NOT_COUNTED_ANYWHERE" ? 1 : 0);
+
   return (
     <div className="stack">
-      <h1 className="screen-title">
-        {office.name} &gt; {location.name}
-      </h1>
-
-      <div>
-        <div className="progress-label">
-          <span>
-            {locationEntriesCounted} / {locationEntriesTotal} geteld
-          </span>
-          <span>{locationEntriesRemaining} nog te tellen</span>
+      <div className="stack stack--tight">
+        <div>
+          <div className="progress-label">
+            <span>
+              {locationEntriesCounted} / {locationEntriesTotal} geteld
+            </span>
+            <span>{locationEntriesRemaining} nog te tellen</span>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-bar__fill" style={{ width: `${locationProgressPct}%` }} />
+          </div>
         </div>
-        <div className="progress-bar">
-          <div className="progress-bar__fill" style={{ width: `${locationProgressPct}%` }} />
+
+        <input
+          className="search-input"
+          placeholder="Zoek op artikelnummer of omschrijving..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            // v0.3 §6: bij exact één (logisch) zoekresultaat kan de gebruiker
+            // meteen tellen — Enter springt rechtstreeks naar het hoeveelheidveld,
+            // zonder de kaart eerst te moeten aantikken.
+            if (sorted.length === 1) {
+              e.preventDefault();
+              activateArticle(sorted[0].id);
+            }
+          }}
+        />
+
+        {/*
+         * Mobile/tablet UX-fix: enkel nog de drie primaire tabs staan
+         * permanent open — exact dezelfde `filter`/`onFilterChange`-waarden
+         * en `matchesCountFilter`-logica (domain/countView.ts) als voorheen,
+         * puur de vierde tab ("Nog nergens geteld") verhuisde naar de
+         * Filters-modal hieronder.
+         */}
+        <div className="filter-row">
+          {(["TODO", "ALL", "DONE"] as CountFilter[]).map((key) => (
+            <button
+              key={key}
+              className={`chip chip--primary ${filter === key ? "chip--active" : ""}`}
+              onClick={() => setFilterOverride(key)}
+            >
+              {COUNT_FILTER_LABELS[key]}
+            </button>
+          ))}
+        </div>
+
+        <div className="stack stack--row counting-controls-row">
+          <button
+            type="button"
+            className="chip counting-controls-row__filters"
+            onClick={() => setFiltersOpen(true)}
+          >
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+          <label className="counting-sort">
+            <span>Sorteren:</span>
+            <select
+              className="search-input counting-sort__select"
+              aria-label="Sorteren"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as ArticleSortMode)}
+            >
+              {(Object.keys(ARTICLE_SORT_MODE_LABELS) as ArticleSortMode[]).map((mode) => (
+                <option key={mode} value={mode}>
+                  {ARTICLE_SORT_MODE_LABELS[mode]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {isLearningMode && !showOtherSearch && (
+          <div className="warning-banner">
+            Nog geen vaste artikelindeling voor deze locatie. Zoek en tel een artikel — de volgende
+            keer verschijnt het automatisch hier.
+          </div>
+        )}
+
+        {/*
+         * Duidelijkheids-fix ("terug naar verwachte artikelen is niet
+         * duidelijk, ik kan niet opmaken wat deze menu's betekenen"): de
+         * knoppen zelf wisselden wel van label, maar er stond nergens
+         * expliciet WAT er precies aan het gebeuren was terwijl je in de
+         * office-wide zoekmodus zat. Deze banner maakt de actieve modus
+         * ondubbelzinnig, los van de knoptekst zelf — puur presentatie,
+         * `manualLookup` bestond al en wijzigt hier niets aan businesslogica.
+         */}
+        {manualLookup && (
+          <div className="info-banner">
+            Je doorzoekt nu alle artikelen van dit kantoor, ook artikelen die hier normaal niet
+            verwacht worden.
+          </div>
+        )}
+
+        {/*
+         * UX-fix (v0.2.1 correctieronde, nu verder doorgetrokken): "Bestaand
+         * artikel opzoeken" en "Nieuw artikel gevonden" zijn voortaan
+         * visueel gelijkwaardige secundaire acties (beide `big-button
+         * big-button--secondary`, naast elkaar) i.p.v. een klein onderlijnd
+         * tekstlinkje tegenover een volwaardige knop — enkel presentatie,
+         * businesslogica/sessiescope-bevestigingen zijn ongewijzigd.
+         */}
+        <div className="counting-secondary-actions">
+          {!isLearningMode && !showOtherSearch && (
+            <button
+              type="button"
+              className="big-button big-button--secondary"
+              onClick={() => {
+                // Bugfix: schakel over naar de echte office-wide zoekmodus EN
+                // start met neutrale filters — een productgroep/zoekterm/tab
+                // die nog uit de normale weergave stond zou anders de
+                // bredere pool weer onterecht kunnen versmallen (spec: "geen
+                // verwarrende gemengde toestand").
+                setShowOtherSearch(true);
+                setManualLookup(true);
+                setSearch("");
+                setProductGroup(null);
+                setFilterOverride(null);
+              }}
+            >
+              + Bestaand artikel opzoeken
+            </button>
+          )}
+          {showOtherSearch && (
+            <button
+              type="button"
+              className="big-button big-button--secondary"
+              onClick={() => {
+                setShowOtherSearch(false);
+                setManualLookup(false);
+                setSearch("");
+                setProductGroup(null);
+                setFilterOverride(null);
+              }}
+            >
+              ← Terug naar artikelen van deze locatie
+            </button>
+          )}
+          <button
+            type="button"
+            className="big-button big-button--secondary"
+            onClick={() => setNewArticleFoundOpen(true)}
+          >
+            + Nieuw artikel gevonden
+          </button>
         </div>
       </div>
-
-      {isLearningMode && !showOtherSearch && (
-        <div className="warning-banner">
-          Nog geen vaste artikelindeling voor deze locatie. Zoek en tel een artikel — de volgende
-          keer verschijnt het automatisch hier.
-        </div>
-      )}
-
-      <input
-        className="search-input"
-        placeholder="Zoek op artikelnummer of omschrijving..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
-          // v0.3 §6: bij exact één (logisch) zoekresultaat kan de gebruiker
-          // meteen tellen — Enter springt rechtstreeks naar het hoeveelheidveld,
-          // zonder de kaart eerst te moeten aantikken.
-          if (sorted.length === 1) {
-            e.preventDefault();
-            activateArticle(sorted[0].id);
-          }
-        }}
-      />
-
-      <FilterBar
-        filter={filter}
-        onFilterChange={setFilterOverride}
-        productGroups={productGroups}
-        selectedProductGroup={productGroup}
-        onProductGroupChange={setProductGroup}
-        sortMode={sortMode}
-        onSortModeChange={setSortMode}
-      />
-
-      {/*
-       * UX-fix (v0.2.1 correctieronde, kleine naam/visuele correctie):
-       * "Bestaand artikel opzoeken" is een secundaire, subtielere actie
-       * (kantoorbreed zoeken naar een bestaand artikel dat hier niet
-       * verwacht werd) — de gewone zoekbalk hierboven blijft de normale weg
-       * binnen de huidige weergave. "Nieuw artikel gevonden" (een artikel
-       * dat nog niet in de artikelstam staat) blijft bewust een duidelijk
-       * zichtbare, eigen actie — vandaar het visuele verschil (tekstlink vs.
-       * volwaardige knop). Businesslogica/sessiescope-bevestigingen zijn
-       * hierdoor niet gewijzigd.
-       */}
-      {!isLearningMode && !showOtherSearch && (
-        <button className="text-link-button" onClick={() => setShowOtherSearch(true)}>
-          + Bestaand artikel opzoeken
-        </button>
-      )}
-      {showOtherSearch && (
-        <button className="text-link-button" onClick={() => setShowOtherSearch(false)}>
-          Terug naar verwachte artikelen
-        </button>
-      )}
-      <button className="big-button big-button--secondary" onClick={() => setNewArticleFoundOpen(true)}>
-        + Nieuw artikel gevonden
-      </button>
 
       <div className="stack">
         {/*
@@ -491,7 +641,7 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
          */}
         {sorted.length === 0 && (
           <p className="empty-state">
-            {filter === "TODO" ? "Alle zichtbare artikels zijn geteld." : "Geen artikelen gevonden."}
+            {filter === "TODO" ? "Alle zichtbare artikelen zijn geteld." : "Geen artikelen gevonden."}
           </p>
         )}
         {sorted.map((article, index) => {
@@ -515,6 +665,7 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
               }
               onConfirm={() => confirm(article, index)}
               confirmLabel={hasNextTodo ? "Geteld & volgende" : "Geteld"}
+              existingLocationNames={existingLocationNamesByArticleId.get(article.id)}
               quantityInputRef={(el) => {
                 if (el) quantityInputRefs.current.set(article.id, el);
                 else quantityInputRefs.current.delete(article.id);
@@ -548,6 +699,62 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
       >
         {locationStatus === "COMPLETED" ? "Locatie heropenen" : "✓ Locatie afgerond"}
       </BigButton>
+
+      {/*
+       * Mobile/tablet UX-fix: productgroep en "Nog nergens geteld" achter
+       * één compacte "Filters (N)"-knop i.p.v. permanent open — zelfde
+       * `productGroup`/`onProductGroupChange` en `filter`/`setFilterOverride`
+       * state als voorheen, enkel verhuisd naar deze modal. Zelfde
+       * "Toepassen"-patroon als de Filters-modal op ArticlesPage.
+       */}
+      {filtersOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>Filters</p>
+            <div className="stack">
+              {productGroups.length > 0 && (
+                <label className="filter-field">
+                  <span className="filter-field__label">Productgroep</span>
+                  <select
+                    className="search-input"
+                    value={productGroup ?? ""}
+                    onChange={(e) => setProductGroup(e.target.value || null)}
+                  >
+                    <option value="">Alle productgroepen</option>
+                    {productGroups.map((group) => (
+                      <option key={group} value={group}>
+                        {group}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="filter-field">
+                <span className="filter-field__label">Weergave</span>
+                <select
+                  className="search-input"
+                  value={filter === "NOT_COUNTED_ANYWHERE" ? "NOT_COUNTED_ANYWHERE" : ""}
+                  onChange={(e) =>
+                    setFilterOverride(
+                      e.target.value === "NOT_COUNTED_ANYWHERE"
+                        ? "NOT_COUNTED_ANYWHERE"
+                        : defaultCountFilter(isLearningMode),
+                    )
+                  }
+                >
+                  <option value="">Standaard (tabs hierboven)</option>
+                  <option value="NOT_COUNTED_ANYWHERE">
+                    {COUNT_FILTER_LABELS.NOT_COUNTED_ANYWHERE}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <BigButton variant="primary" onClick={() => setFiltersOpen(false)}>
+              Toepassen
+            </BigButton>
+          </div>
+        </div>
+      )}
 
       {unexpectedLocationConfirm && (
         <div className="modal-overlay">

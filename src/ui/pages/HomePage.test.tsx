@@ -7,6 +7,7 @@ import { HomePage } from "./HomePage";
 import { db } from "../../adapters/storage/db";
 import { countingRepository, countSessionService } from "../../application/container";
 import type { Article, Office } from "../../domain/types";
+import { formatDate } from "../../shared/format";
 
 /**
  * Sessielogica-fix: "Telling hervatten"/"Nieuwe telling" op het hoofdscherm.
@@ -121,11 +122,11 @@ describe("HomePage — sessielogica-fix", () => {
     // tot de echte voortgang (1/2) verschijnt i.p.v. een synchrone check.
     expect(
       await screen.findByText(
-        (_content, element) => element?.textContent === "1 / 2 artikels afgewerkt",
+        (_content, element) => element?.textContent === "1 / 2 artikelen afgewerkt",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(`Gestart op ${new Date(session.startedAt).toLocaleDateString("nl-BE")}`),
+      screen.getByText(`Gestart op ${formatDate(session.startedAt)}`),
     ).toBeInTheDocument();
   });
 
@@ -233,7 +234,7 @@ describe("HomePage — sessielogica-fix", () => {
     expect(screen.queryByText("Er loopt al een telling")).not.toBeInTheDocument();
   });
 
-  it("toont geannuleerde tellingen apart, gelabeld 'Geannuleerd', gescheiden van 'Vorige tellingen'", async () => {
+  it("toont 'Vorige tellingen' compact/samengevouwen, en toont NERGENS geannuleerde tellingen in de UI (records blijven wel bestaan)", async () => {
     const completedSession = await countSessionService.startSession("office-1", "MONTHLY");
     for (const article of [articleA1, articleA2]) {
       await countingRepository.saveCountEntry({
@@ -265,10 +266,20 @@ describe("HomePage — sessielogica-fix", () => {
     renderHomePage();
     await waitUntilOfficeLoaded();
 
-    expect(await screen.findByText("Vorige tellingen")).toBeInTheDocument();
-    expect(await screen.findByText("Geannuleerde tellingen")).toBeInTheDocument();
-    const cancelledSection = screen.getByText("Geannuleerde tellingen").closest("div") as HTMLElement;
-    expect(within(cancelledSection).getByText("Kwartaaltelling")).toBeInTheDocument();
-    expect(within(cancelledSection).getByText("Geannuleerd")).toBeInTheDocument();
+    // Home/UI-fix: "Vorige tellingen" staat samengevouwen achter een
+    // samenvatting met aantal — de rij zelf ("Maandtelling") komt pas na een
+    // klik in beeld, maar mag (net als bij de vroegere geannuleerde-sessies
+    // `<details>`) al wel in de DOM aanwezig zijn.
+    expect(await screen.findByText("Vorige tellingen (1)")).toBeInTheDocument();
+    expect(screen.getByText("Maandtelling")).toBeInTheDocument();
+
+    // Geannuleerde tellingen mogen nergens in de zichtbare Home-UI opduiken.
+    expect(screen.queryByText("Geannuleerde tellingen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Geannuleerd")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kwartaaltelling")).not.toBeInTheDocument();
+
+    // Het CANCELLED-record zelf blijft gewoon bestaan (enkel de UI verbergt het).
+    const allSessions = await countingRepository.getSessionsForOffice("office-1");
+    expect(allSessions.some((s) => s.id === cancelledSession.id && s.status === "CANCELLED")).toBe(true);
   });
 });

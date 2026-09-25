@@ -82,8 +82,8 @@ export function WithoutLocationPage({ sessionId, onOpenArticle }: WithoutLocatio
       <h1 className="screen-title">Zonder locatie</h1>
       <p className="screen-subtitle">
         {office.name} — {sorted.length === withoutLocation.length
-          ? `${withoutLocation.length} artikels`
-          : `${sorted.length} van ${withoutLocation.length} artikels`}
+          ? `${withoutLocation.length} artikelen`
+          : `${sorted.length} van ${withoutLocation.length} artikelen`}
       </p>
 
       <div className="articles-toolbar">

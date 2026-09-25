@@ -163,7 +163,7 @@ describe("CountingPage — Enter-toetsenbediening en automatisch doorschakelen (
 
     // Geen volgende niet-getelde artikel meer -> duidelijke eindmelding.
     await waitFor(() => {
-      expect(screen.getByText("Alle zichtbare artikels zijn geteld.")).toBeInTheDocument();
+      expect(screen.getByText("Alle zichtbare artikelen zijn geteld.")).toBeInTheDocument();
     });
     expect(screen.queryByText("Artikel A1")).not.toBeInTheDocument();
     expect(screen.queryByText("Artikel A2")).not.toBeInTheDocument();

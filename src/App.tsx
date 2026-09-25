@@ -291,10 +291,15 @@ function RouteHeader({
     );
   }
   // counting
+  // Mobile/tablet UX-fix: CountingPage toonde voorheen ZELF ook nog een
+  // eigen "<kantoor> > <locatie>"-titel (dubbele weergave) — dat is er nu
+  // uit; deze ene, compacte globale header toont de locatienaam als
+  // primaire breadcrumb en het kantoor subtiel eronder als `subtitle`.
   const location = sessionOffice?.locations.find((l) => l.id === route.locationId);
   return (
     <AppHeader
-      breadcrumb={`${sessionOffice?.name ?? ""} > ${location?.name ?? ""}`}
+      breadcrumb={location?.name ?? ""}
+      subtitle={sessionOffice?.name}
       onBack={() => onNavigate({ screen: "locationOverview", sessionId: route.sessionId })}
     />
   );

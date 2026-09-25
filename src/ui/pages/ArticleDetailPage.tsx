@@ -7,7 +7,7 @@ import { countingRepository } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { SimpleLineChart } from "../components/SimpleLineChart";
 import type { SimpleLineChartPoint } from "../components/SimpleLineChart";
-import { formatEuro, formatSignedCount } from "../../shared/format";
+import { formatDate, formatEuro, formatSignedCount } from "../../shared/format";
 import {
   useArticleHistory,
   useArticles,
@@ -31,6 +31,19 @@ interface ArticleDetailPageProps {
  * een import met afwijkende tekst zijn ACTIVE/INACTIVE-classificatie niet
  * totdat de gebruiker hier zelf expliciet opnieuw opslaat.
  */
+/**
+ * Visuele-polish-sprint §5: dezelfde 4 statuswaarden als de Excel-export
+ * (`ArticleSnapshotStatus`) staan hier in de Historiek-tabel al langer als
+ * kale tekst — deze mapping geeft elke waarde enkel een kleuraccent/badge,
+ * zonder de tekst of de onderliggende data te wijzigen.
+ */
+const HISTORY_STATUS_BADGE_CLASS: Record<string, string> = {
+  GETELD: "review-row__badge--counted",
+  "0 BEVESTIGD": "review-row__badge--manual",
+  OVERGENOMEN: "review-row__badge--control",
+  "OVERGENOMEN - NIET GETELD": "review-row__badge--not-counted",
+};
+
 function matchArticleStatusOption(
   rawStatus: string | null,
   status: "ACTIVE" | "INACTIVE",
@@ -267,7 +280,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                 ))}
               </select>
             </div>
-            <div className="stack" style={{ flexDirection: "row" }}>
+            <div className="stack stack--row">
               <BigButton variant="primary" style={{ width: "auto" }} disabled={savingGeneral} onClick={saveGeneral}>
                 {savingGeneral ? "Bezig..." : "Opslaan"}
               </BigButton>
@@ -341,7 +354,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
         </div>
 
         {availableLocationsToAdd.length > 0 && (
-          <div className="stack stack--tight" style={{ flexDirection: "row" }}>
+          <div className="stack stack--tight stack--row">
             <select
               className="search-input"
               style={{ flex: 1 }}
@@ -372,6 +385,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
         {history.length === 0 ? (
           <p className="empty-state">Nog geen afgeronde tellingen voor dit artikel.</p>
         ) : (
+          <div className="table-scroll">
           <table className="history-table">
             <thead>
               <tr>
@@ -386,16 +400,23 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
             <tbody>
               {[...history].reverse().map((point) => (
                 <tr key={point.sessionName}>
-                  <td>{new Date(point.date).toLocaleDateString("nl-BE")}</td>
+                  <td>{formatDate(point.date)}</td>
                   <td>{point.sessionName}</td>
                   <td>{point.totalCount}</td>
                   <td>{formatSignedCount(point.difference)}</td>
                   <td>{point.locationNames.length > 0 ? point.locationNames.join(", ") : "—"}</td>
-                  <td>{point.status}</td>
+                  <td>
+                    <span
+                      className={`review-row__badge ${HISTORY_STATUS_BADGE_CLASS[point.status] ?? ""}`}
+                    >
+                      {point.status}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -71,6 +71,10 @@ export function ReviewRow({
     !result.fullyCounted && !result.isManualAddition ? "review-row--not-counted" : "",
     result.fullyCounted && result.differenceQuantity ? "review-row--difference" : "",
     result.flaggedForControl ? "review-row--control" : "",
+    // Visuele-polish-sprint §5: een historische (readOnly) rij mag geen
+    // actieve/actiegerichte accentkleur meer voeren (dat suggereert iets is
+    // "aan te pakken") — enkel nog een neutrale, gedempte rand.
+    readOnly ? "review-row--readonly" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -88,13 +92,23 @@ export function ReviewRow({
           {!result.fullyCounted && (
             <span className="review-row__badge review-row__badge--not-counted">Niet geteld</span>
           )}
+          {/*
+            Visuele-polish-sprint §5: ook de "goede" toestand (volledig
+            geteld, geen bijzonderheid) krijgt nu een eigen, rustige badge —
+            voorheen was "geen badge" de enige aanduiding hiervoor, wat de 4
+            mogelijke statussen niet even duidelijk onderscheidde. Zuiver
+            gebaseerd op reeds bestaande, berekende velden.
+          */}
+          {result.fullyCounted && !result.isManualAddition && !result.flaggedForControl && (
+            <span className="review-row__badge review-row__badge--counted">Geteld</span>
+          )}
           {result.flaggedForControl && (
             <span className="review-row__badge review-row__badge--control">Controle</span>
           )}
         </div>
       </div>
       <div className="review-row__meta">
-        {result.article.articleNumber}
+        <span className="meta-article-number">{result.article.articleNumber}</span>
         {result.article.productGroup ? ` · ${result.article.productGroup}` : ""}
       </div>
 

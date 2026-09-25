@@ -80,7 +80,7 @@ describe("LocationOverviewPage — 'Zonder locatie' (v0.2.1 correctieronde §2)"
     await waitUntilLoaded();
 
     expect(await screen.findByText("Zonder locatie")).toBeInTheDocument();
-    expect(screen.getByText("2 artikels")).toBeInTheDocument();
+    expect(screen.getByText("2 artikelen")).toBeInTheDocument();
   });
 
   it("een artikel verdwijnt uit 'Zonder locatie' zodra het een actieve locatie krijgt", async () => {
@@ -103,7 +103,7 @@ describe("LocationOverviewPage — 'Zonder locatie' (v0.2.1 correctieronde §2)"
     );
     await waitUntilLoaded();
 
-    expect(await screen.findByText("1 artikels")).toBeInTheDocument();
+    expect(await screen.findByText("1 artikelen")).toBeInTheDocument();
   });
 
   it("toont de kaart ook wanneer het aantal 0 is (consistente aanpak, spec §2)", async () => {
@@ -135,7 +135,7 @@ describe("LocationOverviewPage — 'Zonder locatie' (v0.2.1 correctieronde §2)"
     await waitUntilLoaded();
 
     expect(await screen.findByText("Zonder locatie")).toBeInTheDocument();
-    expect(screen.getByText("0 artikels")).toBeInTheDocument();
+    expect(screen.getByText("0 artikelen")).toBeInTheDocument();
   });
 
   it("klikken op de kaart roept onOpenWithoutLocation aan, en maakt geen fysieke locatie aan", async () => {
@@ -217,6 +217,6 @@ describe("LocationOverviewPage — 'Zonder locatie' (v0.2.1 correctieronde §2)"
     );
     await waitUntilLoaded();
     expect(await screen.findByText("Zonder locatie")).toBeInTheDocument();
-    expect(screen.getByText("2 artikels")).toBeInTheDocument();
+    expect(screen.getByText("2 artikelen")).toBeInTheDocument();
   });
 });
