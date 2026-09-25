@@ -175,6 +175,23 @@ export interface ArticleComparisonRow {
   stockValueB: number | null;
   /** B - A, enkel gekend wanneer beide zijden een gekende voorraadwaarde hadden. */
   valueDifference: number | null;
+  /**
+   * Sprint 3.1 §1: kostprijs B - kostprijs A, enkel gekend wanneer het
+   * artikel in BEIDE snapshots voorkomt MET een gekende kostprijs aan beide
+   * kanten. Nooit met 0 invullen wanneer een kostprijs onbekend is (spec §2).
+   */
+  priceDifferencePerUnit: number | null;
+  /** Percentagevariant van `priceDifferencePerUnit` — `null` wanneer kostprijs A 0 is of een van beide onbekend is. */
+  pricePercentChange: number | null;
+  /**
+   * Sprint 3.1 §2: ontbinding van `valueDifference` in een hoeveelheids- en
+   * een prijscomponent — `(quantityB - quantityA) × costPriceA`. Beide enkel
+   * gekend wanneer hoeveelheid ÉN kostprijs aan beide kanten gekend zijn;
+   * samen tellen ze exact op tot `valueDifference` (spec §2).
+   */
+  quantityEffect: number | null;
+  /** Sprint 3.1 §2: `quantityB × (costPriceB - costPriceA)`. */
+  priceEffect: number | null;
   /** true enkel wanneer het artikel in BEIDE snapshots voorkomt met exact dezelfde gekende hoeveelheid (spec §7). */
   quantityUnchanged: boolean;
   /** true enkel wanneer het artikel in BEIDE snapshots voorkomt met een gekende, VERSCHILLENDE hoeveelheid. */
@@ -227,6 +244,8 @@ function buildArticleComparisonRows(
     const quantityB = b?.finalQuantity ?? null;
     const stockValueA = a?.stockValue ?? null;
     const stockValueB = b?.stockValue ?? null;
+    const costPriceA = a?.costPrice ?? null;
+    const costPriceB = b?.costPrice ?? null;
 
     const bothKnownQuantity = presentInA && presentInB && quantityA !== null && quantityB !== null;
     const quantityDifference = bothKnownQuantity ? (quantityB as number) - (quantityA as number) : null;
@@ -234,6 +253,24 @@ function buildArticleComparisonRows(
     const valueDifference = bothKnownValue ? (stockValueB as number) - (stockValueA as number) : null;
     const quantityUnchanged = bothKnownQuantity && quantityA === quantityB;
     const quantityChanged = bothKnownQuantity && quantityA !== quantityB;
+
+    // Sprint 3.1 §1-2: prijsverschil + hoeveelheids-/prijseffect-ontbinding.
+    // Bewust apart van `bothKnownValue` hierboven: een voorraadwaarde kan om
+    // een andere reden onbekend zijn, en omgekeerd — enkel wanneer zowel de
+    // hoeveelheid als de kostprijs aan BEIDE kanten gekend zijn, mag hier iets
+    // afgeleid worden (spec §2: "nooit met 0 invullen").
+    const bothKnownCostPrice = presentInA && presentInB && costPriceA !== null && costPriceB !== null;
+    const priceDifferencePerUnit = bothKnownCostPrice ? (costPriceB as number) - (costPriceA as number) : null;
+    const pricePercentChange = bothKnownCostPrice
+      ? percentChange(costPriceA as number, costPriceB as number)
+      : null;
+    const canDecomposeValueChange = bothKnownQuantity && bothKnownCostPrice;
+    const quantityEffect = canDecomposeValueChange
+      ? ((quantityB as number) - (quantityA as number)) * (costPriceA as number)
+      : null;
+    const priceEffect = canDecomposeValueChange
+      ? (quantityB as number) * ((costPriceB as number) - (costPriceA as number))
+      : null;
 
     const isNewArticle = !presentInA && presentInB;
     const isDisappeared = presentInA && !presentInB;
@@ -276,11 +313,15 @@ function buildArticleComparisonRows(
       quantityA,
       quantityB,
       quantityDifference,
-      costPriceA: a?.costPrice ?? null,
-      costPriceB: b?.costPrice ?? null,
+      costPriceA,
+      costPriceB,
       stockValueA,
       stockValueB,
       valueDifference,
+      priceDifferencePerUnit,
+      pricePercentChange,
+      quantityEffect,
+      priceEffect,
       quantityUnchanged,
       quantityChanged,
       isNewArticle,
@@ -465,6 +506,11 @@ export interface MoverRow {
   stockValueB: number | null;
   valueDifference: number;
   driver: ValueChangeDriver;
+  /** Sprint 3.1 §3: zodat bij `driver === "BOTH"` zichtbaar is hoeveel van `valueDifference` door hoeveelheid resp. kostprijs komt. */
+  priceDifferencePerUnit: number | null;
+  pricePercentChange: number | null;
+  quantityEffect: number | null;
+  priceEffect: number | null;
 }
 
 function determineDriver(row: ArticleComparisonRow): ValueChangeDriver {
@@ -495,6 +541,10 @@ function toMoverRow(row: ArticleComparisonRow): MoverRow {
     stockValueB: row.stockValueB,
     valueDifference: row.valueDifference as number,
     driver: determineDriver(row),
+    priceDifferencePerUnit: row.priceDifferencePerUnit,
+    pricePercentChange: row.pricePercentChange,
+    quantityEffect: row.quantityEffect,
+    priceEffect: row.priceEffect,
   };
 }
 
@@ -510,6 +560,76 @@ function buildMovers(rows: ArticleComparisonRow[], limit = 10): MoversAnalysis {
   return {
     biggestIncreases: increases.slice(0, limit).map(toMoverRow),
     biggestDecreases: decreases.slice(0, limit).map(toMoverRow),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Grootste prijsstijgingen/dalingen (Sprint 3.1 §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Eén artikel binnen "Grootste prijsstijgingen/dalingen" — bewust een apart
+ * type van `MoverRow` (die sorteert op totale €-waardeverandering, niet
+ * specifiek op prijs): hier telt uitsluitend het FINANCIEEL prijseffect op de
+ * huidige voorraad (`quantityB × prijsverschil`), zodat een kleine
+ * prijswijziging op veel stuks relevanter weegt dan een grote wijziging op
+ * één stuk (spec §6, letterlijk voorbeeld).
+ */
+export interface PriceMoverRow {
+  articleId: string;
+  articleNumber: string;
+  description: string;
+  productGroup: string | null;
+  costPriceA: number;
+  costPriceB: number;
+  priceDifferencePerUnit: number;
+  pricePercentChange: number | null;
+  quantityB: number | null;
+  /** Financieel prijseffect op de huidige stock (`quantityB × priceDifferencePerUnit`) — de sorteersleutel. */
+  priceEffect: number;
+}
+
+export interface PriceMoversAnalysis {
+  biggestIncreases: PriceMoverRow[];
+  biggestDecreases: PriceMoverRow[];
+}
+
+function toPriceMoverRow(row: ArticleComparisonRow): PriceMoverRow {
+  return {
+    articleId: row.articleId,
+    articleNumber: row.articleNumber,
+    description: row.description,
+    productGroup: row.productGroup,
+    costPriceA: row.costPriceA as number,
+    costPriceB: row.costPriceB as number,
+    priceDifferencePerUnit: row.priceDifferencePerUnit as number,
+    pricePercentChange: row.pricePercentChange,
+    quantityB: row.quantityB,
+    priceEffect: row.priceEffect as number,
+  };
+}
+
+/**
+ * `limit`: zelfde conventie als `buildMovers` (standaard 10). Enkel
+ * artikelen waarvoor zowel het prijsverschil als het financieel prijseffect
+ * op de huidige voorraad gekend zijn (spec §7: nooit een onbekende kostprijs
+ * verzinnen) — dus zowel A als B moeten een bevroren kostprijs hebben ÉN
+ * `quantityB` moet gekend zijn (anders is er geen "huidige stock" om het
+ * effect op te berekenen).
+ */
+function buildPriceMovers(rows: ArticleComparisonRow[], limit = 10): PriceMoversAnalysis {
+  const comparable = rows.filter(
+    (r) => r.priceDifferencePerUnit !== null && r.priceDifferencePerUnit !== 0 && r.priceEffect !== null,
+  );
+  const increases = comparable
+    .filter((r) => (r.priceDifferencePerUnit as number) > 0)
+    .sort((a, b) => (b.priceEffect as number) - (a.priceEffect as number));
+  const decreases = comparable
+    .filter((r) => (r.priceDifferencePerUnit as number) < 0)
+    .sort((a, b) => (a.priceEffect as number) - (b.priceEffect as number));
+  return {
+    biggestIncreases: increases.slice(0, limit).map(toPriceMoverRow),
+    biggestDecreases: decreases.slice(0, limit).map(toPriceMoverRow),
   };
 }
 
@@ -794,6 +914,8 @@ export interface SessionComparison {
   kpis: ComparisonKpis;
   productGroups: ProductGroupComparisonRow[];
   movers: MoversAnalysis;
+  /** Sprint 3.1 §6: aparte "Grootste prijsstijgingen/dalingen", gesorteerd op financieel prijseffect op de huidige stock. */
+  priceMovers: PriceMoversAnalysis;
   unchanged: UnchangedStockAnalysis;
   obsoleteCandidates: ArticleComparisonRow[];
   obsoleteTransitions: ObsoleteTransitionLists;
@@ -840,6 +962,7 @@ export function buildSessionComparison(
 
   const articles = buildArticleComparisonRows(rowsAById, rowsBById, consecutiveFor);
   const movers = buildMovers(articles);
+  const priceMovers = buildPriceMovers(articles);
   const unchanged = buildUnchangedStockAnalysis(articles, kpis.stockValue.valueB);
   const obsoleteCandidates = buildObsoleteCandidates(articles);
   const obsoleteTransitions = buildObsoleteTransitions(articles);
@@ -864,6 +987,7 @@ export function buildSessionComparison(
     kpis,
     productGroups,
     movers,
+    priceMovers,
     unchanged,
     obsoleteCandidates,
     obsoleteTransitions,

@@ -20,6 +20,15 @@ export interface ArticleHistoryPoint {
   difference: number | null;
   /** Namen van de locatie(s) waar dit artikel toen geteld werd, alfabetisch. Leeg bij een bevestigd-afwezige telling. */
   locationNames: string[];
+  /**
+   * Sprint 3.1 §7: de BEVROREN kostprijs van dit artikel op het moment dat
+   * deze sessie werd afgerond (`FinalizedSessionResult.snapshot`), nooit de
+   * huidige levende `Article.costPrice`. `null` wanneer deze sessie geen
+   * bevroren `FinalizedSessionResult` heeft (legacy/pre-hardening sessie) —
+   * dan is de historische prijs op dit punt simpelweg onbekend, en wordt dat
+   * ook zo getoond (nooit verzonnen/opgevuld).
+   */
+  costPrice: number | null;
 }
 
 /**
@@ -33,6 +42,15 @@ export function buildArticleHistory(
   completedSessions: CountSession[],
   entriesBySessionId: Map<string, CountEntry[]>,
   locations: Location[],
+  /**
+   * Sprint 3.1 §7: bevroren kostprijs per sessie voor DIT artikel, uit
+   * `FinalizedSessionResult.snapshot` — `undefined` (of een ontbrekende
+   * ingang) betekent een sessie zonder bevroren resultaat (legacy), wat hier
+   * hetzelfde behandeld wordt als "onbekend" (`null`), nooit als 0 of als de
+   * huidige levende kostprijs. Optioneel voor backward-compatibiliteit met
+   * bestaande aanroepers/tests die dit (nog) niet meegeven.
+   */
+  costPriceBySessionId?: Map<string, number | null>,
 ): ArticleHistoryPoint[] {
   const locationById = new Map(locations.map((l) => [l.id, l]));
 
@@ -66,6 +84,7 @@ export function buildArticleHistory(
       totalCount,
       difference: previousCount === null ? null : totalCount - previousCount,
       locationNames,
+      costPrice: costPriceBySessionId?.get(session.id) ?? null,
     });
     previousCount = totalCount;
   }
@@ -88,6 +107,32 @@ export interface MergedArticleHistoryPoint {
   locationNames: string[];
   /** Lokale punten (uit `buildArticleHistory`) zijn per definitie altijd fysiek geteld deze sessie. */
   status: ArticleSnapshotStatus;
+  /**
+   * Sprint 3.1 §4-5: bevroren historische kostprijs op dit punt — lokaal uit
+   * `FinalizedSessionResult.snapshot`, geïmporteerd uit `StockHistoryEntry.costPrice`
+   * (spec §8: al forward-compatible, geen aparte legacy-mapping nodig zodra
+   * een toekomstige legacy-import dit veld vult). `null` = onbekend, nooit verzonnen.
+   */
+  costPrice: number | null;
+  /**
+   * Verschil met de dichtstbijzijnde VOORGAANDE, BETROUWBARE (gekende)
+   * kostprijs in deze samengevoegde reeks — niet noodzakelijk het letterlijk
+   * vorige punt, want een tussenliggend punt kan zelf een onbekende prijs
+   * hebben (spec §4: "indien er een vorige betrouwbare prijs bestaat").
+   * `null` wanneer dit punt zelf geen gekende prijs heeft, of wanneer er nog
+   * geen eerdere gekende prijs was.
+   */
+  priceDifference: number | null;
+  /** Percentagevariant van `priceDifference` — `null` wanneer de vorige betrouwbare prijs 0 was, of wanneer `priceDifference` zelf `null` is. */
+  pricePercentChange: number | null;
+  /** Sprint 3.1 §5: `totalCount × costPrice` (op DIT historische punt) — `null` zodra één van beide onbekend is. */
+  stockValue: number | null;
+}
+
+/** `null` wanneer de basiswaarde 0 is — zelfde conventie als `domain/comparison.ts#percentChange`. */
+function percentChangeForPrice(from: number, to: number): number | null {
+  if (from === 0) return null;
+  return ((to - from) / from) * 100;
 }
 
 /**
@@ -124,6 +169,10 @@ export function mergeArticleHistory(
       difference: null, // wordt hieronder herberekend over de samengevoegde reeks
       locationNames: point.locationNames,
       status: "GETELD",
+      costPrice: point.costPrice,
+      priceDifference: null, // idem, hieronder herberekend
+      pricePercentChange: null,
+      stockValue: null,
     });
   }
 
@@ -137,16 +186,34 @@ export function mergeArticleHistory(
       difference: null,
       locationNames: entry.locationNames,
       status: entry.status,
+      costPrice: entry.costPrice,
+      priceDifference: null,
+      pricePercentChange: null,
+      stockValue: null,
     });
   }
 
   const sorted = Array.from(byName.values()).sort((a, b) => a.date.localeCompare(b.date));
 
   let previousCount: number | null = null;
+  // Sprint 3.1 §4: de "vorige betrouwbare prijs" is de dichtstbijzijnde
+  // EERDERE gekende prijs, niet noodzakelijk het letterlijk vorige punt (een
+  // tussenliggend punt kan zelf `costPrice: null` hebben).
+  let previousKnownPrice: number | null = null;
   for (const point of sorted) {
     point.difference =
       previousCount === null || point.totalCount === null ? null : point.totalCount - previousCount;
     if (point.totalCount !== null) previousCount = point.totalCount;
+
+    point.stockValue =
+      point.totalCount !== null && point.costPrice !== null ? point.totalCount * point.costPrice : null;
+
+    if (point.costPrice !== null) {
+      point.priceDifference = previousKnownPrice === null ? null : point.costPrice - previousKnownPrice;
+      point.pricePercentChange =
+        previousKnownPrice === null ? null : percentChangeForPrice(previousKnownPrice, point.costPrice);
+      previousKnownPrice = point.costPrice;
+    }
   }
 
   return sorted;

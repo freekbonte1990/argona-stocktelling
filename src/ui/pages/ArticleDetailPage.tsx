@@ -8,7 +8,8 @@ import { countingRepository } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { SimpleLineChart } from "../components/SimpleLineChart";
 import type { SimpleLineChartPoint } from "../components/SimpleLineChart";
-import { formatDate, formatEuro, formatSignedCount } from "../../shared/format";
+import type { MergedArticleHistoryPoint } from "../../domain/articleHistory";
+import { formatDate, formatEuro, formatSignedCount, formatSignedEuro } from "../../shared/format";
 import {
   useArticleHistory,
   useArticles,
@@ -44,6 +45,36 @@ const HISTORY_STATUS_BADGE_CLASS: Record<string, string> = {
   OVERGENOMEN: "review-row__badge--control",
   "OVERGENOMEN - NIET GETELD": "review-row__badge--not-counted",
 };
+
+/** Percentagevariant van `formatSignedEuro` — zelfde conventie als `domain/comparison.ts`s (private) `formatSignedPercent`. */
+function formatSignedPercent(value: number | null): string {
+  if (value === null) return "—";
+  const formatted = Math.abs(value).toFixed(1);
+  if (value > 0) return `+${formatted}%`;
+  if (value < 0) return `-${formatted}%`;
+  return `${formatted}%`;
+}
+
+/**
+ * Sprint 3.1 §5/§7: de 3 nieuwe prijsgerelateerde Historiek-kolommen tonen
+ * expliciet "onbekend" i.p.v. het generieke "—" van de andere kolommen —
+ * dit is een bevroren historisch punt waarvoor simpelweg geen betrouwbare
+ * kostprijs bekend is (bv. een legacy-sessie zonder `FinalizedSessionResult`),
+ * en dat mag nooit met een fictieve 0 of met "niet van toepassing" verward
+ * worden.
+ */
+function formatKostprijsCell(point: MergedArticleHistoryPoint): string {
+  return point.costPrice === null ? "onbekend" : formatEuro(point.costPrice);
+}
+function formatPrijswijzigingCell(point: MergedArticleHistoryPoint): string {
+  if (point.costPrice === null) return "onbekend";
+  if (point.priceDifference === null) return "—";
+  const pct = point.pricePercentChange;
+  return `${formatSignedEuro(point.priceDifference)}${pct !== null ? ` (${formatSignedPercent(pct)})` : ""}`;
+}
+function formatVoorraadwaardeCell(point: MergedArticleHistoryPoint): string {
+  return point.stockValue === null ? "onbekend" : formatEuro(point.stockValue);
+}
 
 function matchArticleStatusOption(
   rawStatus: string | null,
@@ -198,6 +229,26 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     chartPoints.push({
       label: new Date(point.date).toLocaleDateString("nl-BE", { day: "2-digit", month: "2-digit" }),
       value: point.totalCount,
+    });
+  }
+
+  // Sprint 3.1 §4: aparte, tweede lijngrafiek voor de kostprijsevolutie —
+  // dezelfde chronologische, betrouwbare snapshots als hierboven, maar
+  // GEEN dubbele Y-as in één grafiek: enkel punten met een gekende bevroren
+  // kostprijs worden getekend (spec §7: nooit een onbekende prijs verzinnen).
+  const priceChartPoints: SimpleLineChartPoint[] = [];
+  for (const point of history) {
+    if (point.costPrice === null) continue;
+    const tooltipParts = [formatEuro(point.costPrice)];
+    if (point.priceDifference !== null) {
+      const pct = point.pricePercentChange;
+      tooltipParts.push(`${formatSignedEuro(point.priceDifference)}${pct !== null ? ` (${formatSignedPercent(pct)})` : ""}`);
+    }
+    priceChartPoints.push({
+      label: new Date(point.date).toLocaleDateString("nl-BE", { day: "2-digit", month: "2-digit" }),
+      value: point.costPrice,
+      valueLabel: formatEuro(point.costPrice),
+      tooltip: tooltipParts.join(" · "),
     });
   }
 
@@ -410,6 +461,15 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
       </div>
 
       <div className="card stack">
+        <h2 style={{ margin: 0 }}>Kostprijsevolutie</h2>
+        <SimpleLineChart
+          points={priceChartPoints}
+          ariaLabel="Kostprijsevolutie"
+          emptyStateLabel="Nog geen betrouwbare historische kostprijs gekend voor dit artikel."
+        />
+      </div>
+
+      <div className="card stack">
         <h2 style={{ margin: 0 }}>Historiek</h2>
         {history.length === 0 ? (
           <p className="empty-state">Nog geen afgeronde tellingen voor dit artikel.</p>
@@ -421,6 +481,9 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                 <th>Teldatum</th>
                 <th>Telling</th>
                 <th>Totale voorraad</th>
+                <th>Kostprijs</th>
+                <th>Prijswijziging</th>
+                <th>Voorraadwaarde</th>
                 <th>Verschil</th>
                 <th>Locaties</th>
                 <th>Status</th>
@@ -432,6 +495,9 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                   <td>{formatDate(point.date)}</td>
                   <td>{point.sessionName}</td>
                   <td>{point.totalCount}</td>
+                  <td>{formatKostprijsCell(point)}</td>
+                  <td>{formatPrijswijzigingCell(point)}</td>
+                  <td>{formatVoorraadwaardeCell(point)}</td>
                   <td>{formatSignedCount(point.difference)}</td>
                   <td>{point.locationNames.length > 0 ? point.locationNames.join(", ") : "—"}</td>
                   <td>

@@ -375,6 +375,128 @@ describe("Classificatie-overgangen (spec §16 'Classificatie' / spec §10)", () 
   });
 });
 
+describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbinding (Sprint 3.1 §1-2)", () => {
+  it("alleen quantity verandert: prijsverschil 0, hoeveelheidseffect = volledige waardeverandering, prijseffect 0", () => {
+    const a1 = makeArticle("A1", { costPrice: 10 });
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 4, costPrice: 10 })]); // 40
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 7, costPrice: 10 })]); // 70
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.priceDifferencePerUnit).toBe(0);
+    expect(row.pricePercentChange).toBe(0);
+    expect(row.quantityEffect).toBe(30); // (7-4)*10
+    expect(row.priceEffect).toBe(0);
+    expect(row.valueDifference).toBe(30);
+  });
+
+  it("alleen kostprijs verandert: hoeveelheidseffect 0, prijseffect = volledige waardeverandering", () => {
+    const a1 = makeArticle("A1");
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: 10 })]); // 50
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 5, costPrice: 12 })]); // 60
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.priceDifferencePerUnit).toBe(2);
+    expect(row.pricePercentChange).toBeCloseTo(20, 5);
+    expect(row.quantityEffect).toBe(0); // (5-5)*10
+    expect(row.priceEffect).toBe(10); // 5*(12-10)
+    expect(row.valueDifference).toBe(10);
+  });
+
+  it("beide veranderen: hoeveelheidseffect + prijseffect telt exact op tot de totale waardeverandering (spec-voorbeeld)", () => {
+    // Exact het voorbeeld uit de opdracht: A 10×€100=€1.000, B 12×€110=€1.320.
+    const a1 = makeArticle("A1");
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 10, costPrice: 100 })]);
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 12, costPrice: 110 })]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.quantityEffect).toBe(200); // (12-10)*100
+    expect(row.priceEffect).toBe(120); // 12*(110-100)
+    expect(row.valueDifference).toBe(320); // 1320 - 1000
+    expect((row.quantityEffect as number) + (row.priceEffect as number)).toBe(row.valueDifference);
+  });
+
+  it("prijs daalt: prijsverschil en prijseffect zijn negatief, en het artikel verschijnt bij 'Grootste prijsdalingen'", () => {
+    const a1 = makeArticle("A1");
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 10, costPrice: 20 })]);
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 10, costPrice: 15 })]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.priceDifferencePerUnit).toBe(-5);
+    expect(row.priceEffect).toBe(-50);
+    expect(cmp.priceMovers.biggestDecreases).toHaveLength(1);
+    expect(cmp.priceMovers.biggestDecreases[0].articleId).toBe(row.articleId);
+    expect(cmp.priceMovers.biggestIncreases).toHaveLength(0);
+  });
+
+  it("quantity blijft gelijk (en kostprijs ook): hoeveelheidseffect en prijseffect zijn beide 0, geen fictieve waarde", () => {
+    const a1 = makeArticle("A1", { costPrice: 8 });
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 6, costPrice: 8 })]);
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 6, costPrice: 8 })]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.quantityEffect).toBe(0);
+    expect(row.priceEffect).toBe(0);
+    expect(row.valueDifference).toBe(0);
+  });
+
+  it("kostprijs ontbreekt in A of B: hoeveelheidseffect/prijseffect/prijsverschil zijn null, NOOIT 0 (spec §2/§7)", () => {
+    const a1 = makeArticle("A1");
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: null })]);
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 8, costPrice: 12 })]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.costPriceA).toBeNull();
+    expect(row.priceDifferencePerUnit).toBeNull();
+    expect(row.pricePercentChange).toBeNull();
+    expect(row.quantityEffect).toBeNull();
+    expect(row.priceEffect).toBeNull();
+    // Dit artikel mag nooit in de prijsstijgingen/-dalingen verschijnen — er is geen betrouwbaar prijsverschil.
+    expect(cmp.priceMovers.biggestIncreases.find((r) => r.articleId === row.articleId)).toBeUndefined();
+    expect(cmp.priceMovers.biggestDecreases.find((r) => r.articleId === row.articleId)).toBeUndefined();
+  });
+});
+
+describe("Kostprijs 0 als basiswaarde (v0.6.1 review-punt 1) — percentage nooit Infinity/NaN", () => {
+  it("costPriceA = 0: pricePercentChange is null (niet-berekenbaar), nooit Infinity of NaN, prijsverschil in € blijft wel gekend", () => {
+    const a1 = makeArticle("A1");
+    const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: 0 })]);
+    const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 5, costPrice: 8 })]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const row = cmp.articles[0];
+    expect(row.costPriceA).toBe(0);
+    expect(row.priceDifferencePerUnit).toBe(8); // € blijft berekenbaar (8 - 0)
+    expect(row.pricePercentChange).toBeNull(); // percentage t.o.v. 0 is niet zinvol — nooit Infinity/NaN
+    expect(Number.isFinite(row.pricePercentChange as number)).toBe(false); // null is per definitie niet "finite" — geen Infinity/NaN-lek
+    expect(row.priceEffect).toBe(40); // 5 * (8 - 0), quantity ongewijzigd dus quantityEffect blijft 0
+    expect(row.quantityEffect).toBe(0);
+
+    // Ook in de "Grootste prijswijzigingen"-sectie geen Infinity/NaN — enkel een gekend €-effect, percentage blijft null.
+    const mover = cmp.priceMovers.biggestIncreases.find((r) => r.articleId === row.articleId);
+    expect(mover?.pricePercentChange).toBeNull();
+    expect(mover?.priceEffect).toBe(40);
+  });
+});
+
+describe("Grootste prijsstijgingen/dalingen (Sprint 3.1 §6) — sorteert op financieel effect, niet op ruwe €/eenheid-verschil", () => {
+  it("een kleine prijswijziging op veel stuks weegt zwaarder dan een grote wijziging op één stuk", () => {
+    // Spec-voorbeeld: €1 op 1.000 stuks (€1.000 effect) > €10 op 1 stuk (€10 effect).
+    const bulk = makeArticle("BULK", { costPrice: 5 });
+    const single = makeArticle("SINGLE", { costPrice: 5 });
+    const snapA = makeSnapshot("s-a", "A", [
+      makeRow(bulk, { quantity: 1000, costPrice: 5 }),
+      makeRow(single, { quantity: 1, costPrice: 5 }),
+    ]);
+    const snapB = makeSnapshot("s-b", "B", [
+      makeRow(bulk, { quantity: 1000, costPrice: 6 }), // +€1/eenheid, 1000 stuks -> €1.000 effect
+      makeRow(single, { quantity: 1, costPrice: 15 }), // +€10/eenheid, 1 stuk -> €10 effect
+    ]);
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    expect(cmp.priceMovers.biggestIncreases.map((r) => r.articleId)).toEqual([bulk.id, single.id]);
+    expect(cmp.priceMovers.biggestIncreases[0].priceEffect).toBe(1000);
+    expect(cmp.priceMovers.biggestIncreases[1].priceEffect).toBe(10);
+  });
+});
+
 describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
   const rows: ArticleComparisonRow[] = [
     {
@@ -395,6 +517,10 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
       stockValueA: 10,
       stockValueB: 10,
       valueDifference: 0,
+      priceDifferencePerUnit: 0,
+      pricePercentChange: 0,
+      quantityEffect: 0,
+      priceEffect: 0,
       quantityUnchanged: true,
       quantityChanged: false,
       isNewArticle: false,
@@ -428,6 +554,10 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
       stockValueA: 10,
       stockValueB: 16,
       valueDifference: 6,
+      priceDifferencePerUnit: 0,
+      pricePercentChange: 0,
+      quantityEffect: 6,
+      priceEffect: 0,
       quantityUnchanged: false,
       quantityChanged: true,
       isNewArticle: false,

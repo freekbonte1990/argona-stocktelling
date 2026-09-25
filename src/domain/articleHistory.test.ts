@@ -156,7 +156,14 @@ describe("mergeArticleHistory — rollend stockarchief: artikelgrafiek uit geïm
 
   it("dedupliceert op tellingnaam en geeft het LOKALE punt voorrang", () => {
     const local = [
-      { sessionId: "s1", date: "2026-09-30T10:00:00.000Z", totalCount: 9, difference: null, locationNames: ["Rek 1"] },
+      {
+        sessionId: "s1",
+        date: "2026-09-30T10:00:00.000Z",
+        totalCount: 9,
+        difference: null,
+        locationNames: ["Rek 1"],
+        costPrice: null,
+      },
     ];
     const imported = [makeHistoryEntry({ sessionName: "2026-09 Maand", totalCount: 999 })];
     const merged = mergeArticleHistory(
@@ -167,5 +174,94 @@ describe("mergeArticleHistory — rollend stockarchief: artikelgrafiek uit geïm
     );
     expect(merged).toHaveLength(1);
     expect(merged[0].totalCount).toBe(9); // lokaal wint, niet de geïmporteerde 999
+  });
+});
+
+describe("Kostprijsevolutie per artikel (Sprint 3.1)", () => {
+  it("buildArticleHistory vult costPrice uit de meegegeven bevroren costPriceBySessionId-map, nooit de levende Article-kostprijs", () => {
+    const s1 = makeSession({ id: "s1", completedAt: "2026-07-01T10:00:00.000Z" });
+    const s2 = makeSession({ id: "s2", completedAt: "2026-08-01T10:00:00.000Z" });
+    const entries = new Map([
+      ["s1", [makeEntry({ sessionId: "s1", quantity: 9 })]],
+      ["s2", [makeEntry({ sessionId: "s2", quantity: 9 })]],
+    ]);
+    // s1 heeft een bevroren prijs; s2 ontbreekt bewust in de map (bv. een
+    // legacy-sessie zonder `FinalizedSessionResult`) — dat moet `null`
+    // opleveren, nooit 0 of een verzonnen waarde.
+    const costPriceBySessionId = new Map<string, number | null>([["s1", 12.5]]);
+    const history = buildArticleHistory("office-1:M1", [s2, s1], entries, locations, costPriceBySessionId);
+    expect(history.find((p) => p.sessionId === "s1")?.costPrice).toBe(12.5);
+    expect(history.find((p) => p.sessionId === "s2")?.costPrice).toBeNull();
+  });
+
+  it("buildArticleHistory zonder costPriceBySessionId (backward-compatibel) levert overal costPrice: null op", () => {
+    const session = makeSession({ id: "s1", completedAt: "2026-09-30T10:00:00.000Z" });
+    const entries = new Map([["s1", [makeEntry({ sessionId: "s1", quantity: 4 })]]]);
+    const history = buildArticleHistory("office-1:M1", [session], entries, locations);
+    expect(history[0].costPrice).toBeNull();
+  });
+
+  it("mergeArticleHistory berekent prijsverschil/%/voorraadwaarde en slaat een tussenliggende ONBEKENDE prijs correct over", () => {
+    const local = [
+      { sessionId: "s1", date: "2026-07-01T10:00:00.000Z", totalCount: 10, difference: null, locationNames: [], costPrice: 100 },
+      // Tussenliggend punt: prijs onbekend (bv. legacy) — mag de "vorige
+      // betrouwbare prijs"-berekening van het volgende punt niet stilzwijgend
+      // als 0 of als "geen wijziging" behandelen.
+      { sessionId: "s2", date: "2026-08-01T10:00:00.000Z", totalCount: 10, difference: null, locationNames: [], costPrice: null },
+      { sessionId: "s3", date: "2026-09-01T10:00:00.000Z", totalCount: 12, difference: null, locationNames: [], costPrice: 110 },
+    ];
+    const merged = mergeArticleHistory(
+      "office-1:M1",
+      local,
+      new Map([
+        ["s1", "2026-07 Maand"],
+        ["s2", "2026-08 Maand"],
+        ["s3", "2026-09 Maand"],
+      ]),
+      [],
+    );
+
+    expect(merged[0].priceDifference).toBeNull(); // eerste punt, geen vorige referentie
+    expect(merged[0].stockValue).toBe(1000); // 10 * 100
+
+    expect(merged[1].costPrice).toBeNull();
+    expect(merged[1].priceDifference).toBeNull(); // eigen prijs onbekend
+    expect(merged[1].stockValue).toBeNull(); // nooit verzinnen/opvullen
+
+    // s3 vergelijkt met de dichtstbijzijnde EERDERE BEKENDE prijs (s1: 100), niet met het tussenliggende onbekende punt.
+    expect(merged[2].priceDifference).toBe(10);
+    expect(merged[2].pricePercentChange).toBeCloseTo(10, 5);
+    expect(merged[2].stockValue).toBe(1320); // 12 * 110
+  });
+
+  it("v0.6.1 review-punt 1: vorige betrouwbare prijs 0 → pricePercentChange is null, nooit Infinity/NaN (priceDifference in € blijft wel gekend)", () => {
+    const local = [
+      { sessionId: "s1", date: "2026-07-01T10:00:00.000Z", totalCount: 5, difference: null, locationNames: [], costPrice: 0 },
+      { sessionId: "s2", date: "2026-08-01T10:00:00.000Z", totalCount: 5, difference: null, locationNames: [], costPrice: 8 },
+    ];
+    const merged = mergeArticleHistory(
+      "office-1:M1",
+      local,
+      new Map([
+        ["s1", "2026-07 Maand"],
+        ["s2", "2026-08 Maand"],
+      ]),
+      [],
+    );
+    expect(merged[1].priceDifference).toBe(8);
+    expect(merged[1].pricePercentChange).toBeNull();
+    expect(Number.isFinite(merged[1].pricePercentChange as number)).toBe(false);
+  });
+
+  it("een geïmporteerde StockHistoryEntry.costPrice stroomt automatisch mee (forward-compatibel met toekomstige legacy-import, spec §8)", () => {
+    const imported: StockHistoryEntry[] = [
+      makeHistoryEntry({ sessionName: "2026-06 Maand", countDate: "2026-06-30", totalCount: 5, costPrice: 8, status: "OVERGENOMEN" }),
+      makeHistoryEntry({ sessionName: "2026-07 Maand", countDate: "2026-07-31", totalCount: 5, costPrice: 9, status: "GETELD" }),
+    ];
+    const merged = mergeArticleHistory("office-1:M1", [], new Map(), imported);
+    expect(merged[0].costPrice).toBe(8);
+    expect(merged[1].costPrice).toBe(9);
+    expect(merged[1].priceDifference).toBe(1);
+    expect(merged[1].stockValue).toBe(45); // 5 * 9
   });
 });

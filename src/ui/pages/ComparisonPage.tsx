@@ -9,6 +9,7 @@ import {
   type ArticleComparisonRow,
   type ArticleComparisonSortMode,
   type MoverRow,
+  type PriceMoverRow,
   type SessionComparison,
 } from "../../domain/comparison";
 import { STOCK_CLASSIFICATION_LABELS } from "../../domain/stockClassification";
@@ -279,7 +280,7 @@ function ComparisonBody({
   onFilterProductGroup: (group: string) => void;
   onFilterState: (state: ArticleComparisonFilters["state"]) => void;
 }) {
-  const { headerA, headerB, kpis, productGroups, movers, unchanged, obsoleteCandidates, obsoleteTransitions, transitionCounts, attentionPoints, articles } = comparison;
+  const { headerA, headerB, kpis, productGroups, movers, priceMovers, unchanged, obsoleteCandidates, obsoleteTransitions, transitionCounts, attentionPoints, articles } = comparison;
 
   return (
     <>
@@ -421,6 +422,23 @@ function ComparisonBody({
         <div>
           <h3 style={{ margin: 0 }}>Grootste dalingen</h3>
           <MoverTable rows={movers.biggestDecreases} onOpenArticle={onOpenArticle} />
+        </div>
+      </div>
+
+      {/* Prijswijzigingen op managementniveau (Sprint 3.1 §6). */}
+      <div className="card stack">
+        <h2 style={{ margin: 0 }}>Grootste prijswijzigingen</h2>
+        <p className="screen-subtitle" style={{ margin: 0 }}>
+          Gesorteerd op financieel prijseffect op de huidige voorraad (aantal B × prijsverschil) — zo weegt een
+          prijswijziging van € 1 op 1.000 stuks zwaarder dan € 10 op één stuk.
+        </p>
+        <div>
+          <h3 style={{ margin: 0 }}>Grootste prijsstijgingen</h3>
+          <PriceMoverTable rows={priceMovers.biggestIncreases} onOpenArticle={onOpenArticle} />
+        </div>
+        <div>
+          <h3 style={{ margin: 0 }}>Grootste prijsdalingen</h3>
+          <PriceMoverTable rows={priceMovers.biggestDecreases} onOpenArticle={onOpenArticle} />
         </div>
       </div>
 
@@ -703,6 +721,10 @@ function ComparisonBody({
                 <th>Waarde A</th>
                 <th>Waarde B</th>
                 <th>€ verschil</th>
+                <th>Prijsverschil €</th>
+                <th>Prijsverschil %</th>
+                <th>Hoeveelheidseffect €</th>
+                <th>Prijseffect €</th>
               </tr>
             </thead>
             <tbody>
@@ -724,11 +746,15 @@ function ComparisonBody({
                   <td>{row.presentInA ? formatEuro(row.stockValueA) : "—"}</td>
                   <td>{row.presentInB ? formatEuro(row.stockValueB) : "—"}</td>
                   <td>{formatSignedEuro(row.valueDifference)}</td>
+                  <td>{row.priceDifferencePerUnit !== null ? formatSignedEuro(row.priceDifferencePerUnit) : "onbekend"}</td>
+                  <td>{row.priceDifferencePerUnit !== null ? formatSignedPercentDisplay(row.pricePercentChange) : "onbekend"}</td>
+                  <td>{row.quantityEffect !== null ? formatSignedEuro(row.quantityEffect) : "onbekend"}</td>
+                  <td>{row.priceEffect !== null ? formatSignedEuro(row.priceEffect) : "onbekend"}</td>
                 </tr>
               ))}
               {filteredArticles.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="empty-state">
+                  <td colSpan={16} className="empty-state">
                     Geen artikelen voor dit filter.
                   </td>
                 </tr>
@@ -760,6 +786,8 @@ function MoverTable({ rows, onOpenArticle }: { rows: MoverRow[]; onOpenArticle: 
             <th>Waarde B</th>
             <th>€ verschil</th>
             <th>Oorzaak</th>
+            <th>Hoeveelheidseffect €</th>
+            <th>Prijseffect €</th>
           </tr>
         </thead>
         <tbody>
@@ -779,6 +807,56 @@ function MoverTable({ rows, onOpenArticle }: { rows: MoverRow[]; onOpenArticle: 
               <td>{formatEuro(row.stockValueB)}</td>
               <td>{formatSignedEuro(row.valueDifference)}</td>
               <td>{DRIVER_LABELS[row.driver]}</td>
+              <td>{row.quantityEffect !== null ? formatSignedEuro(row.quantityEffect) : "onbekend"}</td>
+              <td>{row.priceEffect !== null ? formatSignedEuro(row.priceEffect) : "onbekend"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PriceMoverTable({
+  rows,
+  onOpenArticle,
+}: {
+  rows: PriceMoverRow[];
+  onOpenArticle: (articleId: string) => void;
+}) {
+  if (rows.length === 0) {
+    return <p className="empty-state">Geen artikelen.</p>;
+  }
+  return (
+    <div className="table-scroll">
+      <table className="history-table">
+        <thead>
+          <tr>
+            <th>Artikel</th>
+            <th>Productgroep</th>
+            <th>Prijs A</th>
+            <th>Prijs B</th>
+            <th>Verschil €</th>
+            <th>Verschil %</th>
+            <th>Aantal B</th>
+            <th>Financieel prijseffect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.articleId}>
+              <td>
+                <button type="button" className="text-link-button" onClick={() => onOpenArticle(row.articleId)}>
+                  {row.articleNumber} — {row.description}
+                </button>
+              </td>
+              <td>{row.productGroup ?? "—"}</td>
+              <td>{formatEuro(row.costPriceA)}</td>
+              <td>{formatEuro(row.costPriceB)}</td>
+              <td>{formatSignedEuro(row.priceDifferencePerUnit)}</td>
+              <td>{formatSignedPercentDisplay(row.pricePercentChange)}</td>
+              <td>{formatCount(row.quantityB)}</td>
+              <td>{formatSignedEuro(row.priceEffect)}</td>
             </tr>
           ))}
         </tbody>

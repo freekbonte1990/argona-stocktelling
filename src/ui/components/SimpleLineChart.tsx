@@ -1,10 +1,25 @@
 export interface SimpleLineChartPoint {
   label: string;
   value: number;
+  /**
+   * Sprint 3.1 §4: optionele opgemaakte tekst i.p.v. de kale `value` boven
+   * elk punt (bv. "€ 112,40" i.p.v. "112.4") — puur weergave, `value` blijft
+   * bepalend voor de positie op de as. Weglaten toont gewoon `value`.
+   */
+  valueLabel?: string;
+  /**
+   * Sprint 3.1 §4: optionele tooltip/detail bij hover (bv. "+€6,50 (+6,1%)"),
+   * gerenderd als een native SVG `<title>` op dit punt. Weglaten toont geen tooltip.
+   */
+  tooltip?: string;
 }
 
 interface SimpleLineChartProps {
   points: SimpleLineChartPoint[];
+  /** Overschrijft het standaard `aria-label` ("Voorraad doorheen de tijd") — bv. "Kostprijsevolutie" voor de prijsgrafiek (Sprint 3.1 §4). */
+  ariaLabel?: string;
+  /** Overschrijft de standaardtekst bij een lege puntenlijst. */
+  emptyStateLabel?: string;
 }
 
 /**
@@ -14,9 +29,9 @@ interface SimpleLineChartProps {
  * historische punten worden getekend (de aanroeper, ArticleDetailPage,
  * geeft hier nooit geschatte waarden aan mee).
  */
-export function SimpleLineChart({ points }: SimpleLineChartProps) {
+export function SimpleLineChart({ points, ariaLabel, emptyStateLabel }: SimpleLineChartProps) {
   if (points.length === 0) {
-    return <p className="empty-state">Nog geen historische tellingen.</p>;
+    return <p className="empty-state">{emptyStateLabel ?? "Nog geen historische tellingen."}</p>;
   }
 
   const width = 640;
@@ -51,7 +66,7 @@ export function SimpleLineChart({ points }: SimpleLineChartProps) {
       viewBox={`0 0 ${width} ${height}`}
       className="line-chart"
       role="img"
-      aria-label="Voorraad doorheen de tijd"
+      aria-label={ariaLabel ?? "Voorraad doorheen de tijd"}
     >
       <line
         x1={paddingX}
@@ -65,6 +80,7 @@ export function SimpleLineChart({ points }: SimpleLineChartProps) {
       )}
       {coords.map((c, index) => (
         <g key={c.point.label + index}>
+          {c.point.tooltip && <title>{c.point.tooltip}</title>}
           <circle cx={c.x} cy={c.y} r={4} className="line-chart__dot" />
           {(index === 0 || index === coords.length - 1 || index % labelStep === 0) && (
             <text x={c.x} y={height - 4} textAnchor="middle" className="line-chart__label">
@@ -72,7 +88,7 @@ export function SimpleLineChart({ points }: SimpleLineChartProps) {
             </text>
           )}
           <text x={c.x} y={c.y - 10} textAnchor="middle" className="line-chart__value">
-            {c.point.value}
+            {c.point.valueLabel ?? c.point.value}
           </text>
         </g>
       ))}

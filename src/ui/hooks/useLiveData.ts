@@ -119,17 +119,33 @@ export function useArticleHistory(officeId: string | undefined, articleId: strin
           .toArray(),
       ]);
       const entriesBySessionId = new Map<string, CountEntry[]>();
+      // Sprint 3.1 §7: bevroren kostprijs per sessie voor dit artikel, uit
+      // `FinalizedSessionResult.snapshot` — nooit de levende `Article.costPrice`.
+      // Een sessie zonder bevroren resultaat (legacy/pre-hardening) levert hier
+      // bewust `null` op ("onbekend"), zie `domain/articleHistory.ts`.
+      const costPriceBySessionId = new Map<string, number | null>();
       await Promise.all(
         sessions.map(async (session) => {
-          const entries = await db.countEntries
-            .where("sessionId")
-            .equals(session.id)
-            .and((e) => e.articleId === articleId)
-            .toArray();
+          const [entries, finalizedResult] = await Promise.all([
+            db.countEntries
+              .where("sessionId")
+              .equals(session.id)
+              .and((e) => e.articleId === articleId)
+              .toArray(),
+            db.finalizedSessionResults.get(session.id),
+          ]);
           entriesBySessionId.set(session.id, entries);
+          const articleSnapshot = finalizedResult?.snapshot.articles.find((a) => a.articleId === articleId);
+          costPriceBySessionId.set(session.id, articleSnapshot?.costPrice ?? null);
         }),
       );
-      const localHistory = buildArticleHistory(articleId, sessions, entriesBySessionId, office?.locations ?? []);
+      const localHistory = buildArticleHistory(
+        articleId,
+        sessions,
+        entriesBySessionId,
+        office?.locations ?? [],
+        costPriceBySessionId,
+      );
 
       // Rollend stockarchief: voeg geïmporteerde HISTORIE-regels samen met de
       // lokale historiek — zo toont een nieuw toestel, zonder lokale
