@@ -5,6 +5,7 @@ import { CountSessionService } from "./services/CountSessionService";
 import { CountingService } from "./services/CountingService";
 import { ExportService } from "./services/ExportService";
 import { AnalysisService } from "./services/AnalysisService";
+import { ComparisonService } from "./services/ComparisonService";
 import { LocationAssignmentService } from "./services/LocationAssignmentService";
 import { NewArticleService } from "./services/NewArticleService";
 
@@ -29,6 +30,7 @@ export const countSessionService = new CountSessionService(repository);
 export const countingService = new CountingService(repository);
 export const exportService = new ExportService(repository, resultExporter);
 export const analysisService = new AnalysisService(repository);
+export const comparisonService = new ComparisonService(repository);
 export const locationAssignmentService = new LocationAssignmentService(repository);
 export const newArticleService = new NewArticleService(repository, locationAssignmentService, countingService);
 export const countingRepository = repository;

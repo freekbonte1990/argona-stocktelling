@@ -8,6 +8,7 @@ import { WithoutLocationPage } from "./ui/pages/WithoutLocationPage";
 import { CountingPage } from "./ui/pages/CountingPage";
 import { ReviewPage } from "./ui/pages/ReviewPage";
 import { AnalysisPage } from "./ui/pages/AnalysisPage";
+import { ComparisonPage } from "./ui/pages/ComparisonPage";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
@@ -23,6 +24,7 @@ type Route =
   | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
   | { screen: "review"; sessionId: string }
   | { screen: "analysis"; sessionId: string }
+  | { screen: "comparison"; sessionId: string }
   | { screen: "articles"; officeId: string }
   | { screen: "articleDetail"; officeId: string; articleId: string }
   | { screen: "settings"; officeId: string };
@@ -103,6 +105,7 @@ async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
     case "withoutLocation":
     case "review":
     case "analysis":
+    case "comparison":
       return !!(await countingRepository.getSession(route.sessionId));
     case "counting": {
       const session = await countingRepository.getSession(route.sessionId);
@@ -207,7 +210,8 @@ function RouteHeader({
       route.screen === "withoutLocation" ||
       route.screen === "counting" ||
       route.screen === "review" ||
-      route.screen === "analysis"
+      route.screen === "analysis" ||
+      route.screen === "comparison"
       ? route.sessionId
       : undefined,
   );
@@ -298,6 +302,17 @@ function RouteHeader({
     return (
       <AppHeader
         breadcrumb={`${sessionOffice?.name ?? ""} — analyse telling`}
+        onBack={() => {
+          if (!session) return;
+          onNavigate({ screen: "home", officeId: session.officeId });
+        }}
+      />
+    );
+  }
+  if (route.screen === "comparison") {
+    return (
+      <AppHeader
+        breadcrumb={`${sessionOffice?.name ?? ""} — vergelijking tellingen`}
         onBack={() => {
           if (!session) return;
           onNavigate({ screen: "home", officeId: session.officeId });
@@ -417,6 +432,18 @@ function RouteBody({
             const session = await countingRepository.getSession(route.sessionId);
             if (session) onNavigate({ screen: "articleDetail", officeId: session.officeId, articleId });
           }}
+          onOpenComparison={(sessionId) => onNavigate({ screen: "comparison", sessionId })}
+        />
+      );
+    case "comparison":
+      return (
+        <ComparisonPage
+          sessionId={route.sessionId}
+          onOpenArticle={async (articleId) => {
+            const session = await countingRepository.getSession(route.sessionId);
+            if (session) onNavigate({ screen: "articleDetail", officeId: session.officeId, articleId });
+          }}
+          onOpenAnalysis={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
         />
       );
     case "articles":

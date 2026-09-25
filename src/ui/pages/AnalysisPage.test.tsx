@@ -109,7 +109,7 @@ async function waitUntilLoaded() {
 
 describe("AnalysisPage — Analyse telling (Sprint 2, alleen-lezen historische view)", () => {
   it("opent voor een COMPLETED sessie en toont de kern-KPI's", async () => {
-    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} />);
+    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
     await waitUntilLoaded();
 
     expect(screen.getByText("Alleen-lezen")).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe("AnalysisPage — Analyse telling (Sprint 2, alleen-lezen historische v
 
   it("klikken op een productgroep filtert de detaillijst tot die groep", async () => {
     const user = userEvent.setup();
-    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} />);
+    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
     await waitUntilLoaded();
 
     const groupButton = screen.getByRole("button", { name: "Batterijen" });
@@ -140,7 +140,7 @@ describe("AnalysisPage — Analyse telling (Sprint 2, alleen-lezen historische v
 
   it("de 'Obsolete'-chip filtert de detaillijst tot obsolete artikelen", async () => {
     const user = userEvent.setup();
-    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} />);
+    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
     await waitUntilLoaded();
 
     const obsoleteChip = screen.getByRole("button", { name: "Obsolete" });
@@ -156,7 +156,7 @@ describe("AnalysisPage — Analyse telling (Sprint 2, alleen-lezen historische v
   });
 
   it("bevat NERGENS een telactie — geen tellen/bevestigen/afronden/exporteren op dit alleen-lezen scherm", async () => {
-    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} />);
+    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
     await waitUntilLoaded();
 
     expect(screen.queryByText("Telling afronden")).not.toBeInTheDocument();

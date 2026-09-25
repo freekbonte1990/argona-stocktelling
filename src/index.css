@@ -1129,6 +1129,16 @@ button {
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  /*
+   * Sprint 3-bugfix: als flex-item van een kolomgewijze `.stack`-kaart kan
+   * deze wrapper zonder expliciete `min-width: 0` de intrinsieke
+   * (min-content) breedte van de tabel erin overnemen i.p.v. te krimpen tot
+   * de beschikbare kaartbreedte — waardoor de `overflow-x: auto`-terugval
+   * zelf buitenspel gezet wordt (de kaart/pagina groeit mee i.p.v. dat de
+   * tabel intern scrollt). `min-width: 0` is hier universeel veilig: deze
+   * wrapper moet per definitie nooit breder willen zijn dan zijn ouder.
+   */
+  min-width: 0;
 }
 
 .history-table {
@@ -1543,4 +1553,71 @@ button {
   .analysis-page .summary-grid--financial {
     grid-template-columns: repeat(auto-fit, minmax(140px, 220px));
   }
+}
+
+/*
+ * Sprint 3-bugfix (visuele controle, mobiel 390px): een `.card` binnen
+ * `.analysis-page` is zelf een flex-item van de kolomgewijze `.stack`
+ * hierboven. Zonder expliciete `min-width: 0` respecteert een flex-item
+ * standaard de intrinsieke (min-content) breedte van zijn inhoud, ook al is
+ * `align-items: stretch` (het standaardgedrag) actief — bij een brede tabel
+ * (bv. de 9-koloms productgroepvergelijking of de 12-koloms detailtabel van
+ * Sprint 3) kon de `.card` daardoor breder worden dan het scherm, wat de
+ * `overflow-x: auto`-terugval van `.table-scroll` erin buitenspel zette (die
+ * kan enkel klippen als zijn OUDER al aan de beschikbare breedte gebonden
+ * is). Dit trad niet eerder op bij AnalysisPage's smallere tabellen, maar is
+ * hetzelfde onderliggende mechanisme als de eerdere `width: auto` +
+ * `auto-fit`-bug (v0.5.2) — vandaar bewust hier, en niet globaal op `.card`,
+ * om geen andere schermen te raken.
+ */
+.analysis-page .card {
+  min-width: 0;
+}
+
+/*
+ * Sprint 3 (Vergelijking tussen stocktellingen) §1: de "Analyse | Vergelijken"-
+ * modustoggle bovenaan het historische gedeelte. Bewust een klein, simpel
+ * tabbenpaar (geen nieuw generiek tab-component) — enkel hier gebruikt.
+ */
+.mode-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 4px;
+  width: fit-content;
+}
+
+.mode-toggle__button {
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  min-height: 36px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.mode-toggle__button--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* Sprint 3 §2: telling A/B-selectie — twee dropdowns naast elkaar op desktop, gestapeld op smalle schermen. */
+.comparison-session-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.comparison-session-picker__session {
+  flex: 1;
+  min-width: 220px;
+}
+
+.comparison-session-picker__arrow {
+  padding-bottom: 12px;
+  color: var(--color-text-muted);
+  font-weight: 700;
 }

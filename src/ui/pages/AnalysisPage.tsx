@@ -21,6 +21,8 @@ interface AnalysisPageProps {
   sessionId: string;
   /** Naar de artikeldetailpagina (spec §6/§11: "opent het bestaande artikeldetail/historiek"). */
   onOpenArticle: (articleId: string) => void;
+  /** Sprint 3 §1: naar de "Vergelijken"-view, met deze sessie als default telling B. */
+  onOpenComparison: (sessionId: string) => void;
 }
 
 const ARTICLE_LIST_ANCHOR_ID = "analysis-article-list";
@@ -39,7 +41,7 @@ const ARTICLE_LIST_ANCHOR_ID = "analysis-article-list";
  * scherm — dat blijft allemaal bij `ReviewPage`, dat de LOPENDE (ACTIVE)
  * sessie bedient.
  */
-export function AnalysisPage({ sessionId, onOpenArticle }: AnalysisPageProps) {
+export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: AnalysisPageProps) {
   const session = useSession(sessionId);
   const office = useOffice(session?.officeId);
 
@@ -141,6 +143,14 @@ export function AnalysisPage({ sessionId, onOpenArticle }: AnalysisPageProps) {
         {SESSION_TYPE_LABELS[header.sessionType] ?? header.sessionType}
         {session.completedAt ? ` · afgerond op ${formatDate(session.completedAt)}` : ""}
       </p>
+
+      {/* Sprint 3 §1: navigatiemodus Analyse | Vergelijken. */}
+      <div className="mode-toggle">
+        <span className="mode-toggle__button mode-toggle__button--active">Analyse</span>
+        <button type="button" className="mode-toggle__button" onClick={() => onOpenComparison(sessionId)}>
+          Vergelijken
+        </button>
+      </div>
 
       {/* KPI's (spec §2). Visuele-hiërarchiepatch (v0.5.1): drie duidelijke
           lagen, elk hun eigen rij — Kerncijfers (dominant) → Omvang/scope

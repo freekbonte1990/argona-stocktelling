@@ -56,7 +56,15 @@ export interface AnalysisArticleRow {
   physicallyCounted: boolean;
 }
 
-function toAnalysisArticleRow(snapshotRow: ArticleSnapshot): AnalysisArticleRow {
+/**
+ * Sprint 3 (Vergelijking tussen stocktellingen): geëxporteerd zodat
+ * `domain/comparison.ts` exact dezelfde, al bestaande vertaling van een
+ * bevroren `ArticleSnapshot` naar een analyse-rij kan hergebruiken (zelfde
+ * classificatie-/waardeberekening als hierboven) i.p.v. die te dupliceren.
+ * Puur een export van een reeds bestaande, ongewijzigde functie — geen
+ * enkele bestaande aanroeper/uitvoer hier verandert hierdoor.
+ */
+export function toAnalysisArticleRow(snapshotRow: ArticleSnapshot): AnalysisArticleRow {
   const { article } = snapshotRow;
   return {
     articleId: snapshotRow.articleId,
