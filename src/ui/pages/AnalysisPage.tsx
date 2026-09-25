@@ -142,18 +142,18 @@ export function AnalysisPage({ sessionId, onOpenArticle }: AnalysisPageProps) {
         {session.completedAt ? ` · afgerond op ${formatDate(session.completedAt)}` : ""}
       </p>
 
-      {/* KPI's (spec §2). Visuele-verduidelijkingsronde: drie kern-cijfers
-          (totale voorraadwaarde, fysiek geteld, netto correctie) krijgen een
-          dominante "hero"-tegel, de rest staat in kleinere, expliciet
-          benoemde ondersteunende groepen — puur presentationeel, geen enkele
-          berekening hieronder wijkt af van `kpis`/`obsolete`. */}
+      {/* KPI's (spec §2). Visuele-hiërarchiepatch (v0.5.1): drie duidelijke
+          lagen, elk hun eigen rij — Kerncijfers (dominant) → Omvang/scope
+          van de telling → Financiële correctie (compact) — puur
+          presentationeel, geen enkele waarde hieronder wijkt af van `kpis`. */}
       <div className="stack stack--tight review-summary">
         <div className="summary-group">
+          <p className="summary-group__label">Kerncijfers</p>
           <div className="summary-grid summary-grid--hero">
             <SummaryTile label="Totale voorraadwaarde" value={formatEuro(kpis.totalStockValue)} />
             <SummaryTile label="Fysiek geteld" value={kpis.physicallyCountedArticles} />
             <SummaryTile
-              label="Netto correctie (€)"
+              label="Netto correctie"
               value={formatSignedEuro(kpis.netCorrectionAmount)}
               tone={kpis.netCorrectionAmount > 0 ? "positive" : kpis.netCorrectionAmount < 0 ? "negative" : "neutral"}
             />
@@ -163,25 +163,28 @@ export function AnalysisPage({ sessionId, onOpenArticle }: AnalysisPageProps) {
         <div className="summary-group">
           <p className="summary-group__label">Omvang van de telling</p>
           <p className="screen-subtitle summary-group__hint">
-            "Artikelen in scope" moesten deze sessie geteld worden. "Overgenomen (buiten scope)" hoorde nooit bij
-            deze telling (bv. een kwartaalartikel tijdens een maandtelling) en behoudt gewoon zijn vorige waarde —
-            die waarde zit wel in de totale voorraadwaarde hierboven. "Overgenomen — niet geteld (in scope)" hoorde
-            wél bij deze telling, maar werd niet fysiek geteld bij het afronden.
+            Artikelen buiten scope worden meegenomen aan hun vorige voorraad. Niet-getelde artikelen binnen scope
+            worden apart aangeduid.
           </p>
           <div className="summary-grid">
-            <SummaryTile label="Artikelen in scope" value={kpis.articlesInScope} />
+            <SummaryTile label="In scope" value={kpis.articlesInScope} />
             <SummaryTile label="0 bevestigd" value={kpis.confirmedZeroArticles} />
-            <SummaryTile label="Overgenomen (buiten scope)" value={kpis.carriedOverArticles} />
-            <SummaryTile label="Overgenomen — niet geteld (in scope)" value={kpis.carriedOverNotCountedArticles} />
+            <SummaryTile label="Buiten scope overgenomen" value={kpis.carriedOverArticles} />
+            <SummaryTile label="Niet geteld, overgenomen" value={kpis.carriedOverNotCountedArticles} />
+            <SummaryTile label="Met verschil" value={kpis.articlesWithDifference} />
           </div>
         </div>
 
         <div className="summary-group summary-group--financial">
           <p className="summary-group__label">Financiële correctie</p>
-          <div className="summary-grid">
-            <SummaryTile label="Met verschil" value={kpis.articlesWithDifference} />
-            <SummaryTile label="Correctie + (€)" value={formatEuro(kpis.positiveCorrectionAmount)} tone="positive" />
-            <SummaryTile label="Correctie - (€)" value={formatEuro(kpis.negativeCorrectionAmount)} tone="negative" />
+          <div className="summary-grid summary-grid--financial">
+            <SummaryTile label="Correctie +" value={formatEuro(kpis.positiveCorrectionAmount)} tone="positive" />
+            <SummaryTile label="Correctie -" value={formatEuro(kpis.negativeCorrectionAmount)} tone="negative" />
+            <SummaryTile
+              label="Netto"
+              value={formatSignedEuro(kpis.netCorrectionAmount)}
+              tone={kpis.netCorrectionAmount > 0 ? "positive" : kpis.netCorrectionAmount < 0 ? "negative" : "neutral"}
+            />
           </div>
         </div>
       </div>

@@ -684,15 +684,17 @@ button {
 }
 
 /*
- * AnalysisPage KPI-verduidelijkingsronde: "totale voorraadwaarde", "fysiek
- * geteld" en "netto correctie" moeten de drie visueel dominante cijfers
- * zijn, en géén KPI-bedrag op dit scherm mag ooit naar een tweede regel
- * afbreken — in tegenstelling tot de generieke `.summary-tile__value`-regel
- * verderop in dit bestand, die elders (ReviewPage e.d.) bewust wél afbreekt
- * om overlopen in een smalle tegel te voorkomen. Alles hieronder is bewust
- * gescoped tot `.analysis-page` zodat ReviewPage en andere schermen die
- * dezelfde `.summary-tile`/`.summary-grid`-klassen hergebruiken hier niet
- * door geraakt worden — puur presentationeel, geen enkele berekening wijzigt.
+ * AnalysisPage top-zone visuele-hiërarchiepatch (v0.5.1, visual-only): drie
+ * duidelijke, gestapelde lagen — Kerncijfers (dominant) → Omvang/scope van
+ * de telling → Financiële correctie (compact) — in plaats van naast elkaar.
+ * Géén KPI-bedrag op dit scherm mag ooit naar een tweede regel afbreken —
+ * in tegenstelling tot de generieke `.summary-tile__value`-regel verderop in
+ * dit bestand, die elders (ReviewPage e.d.) bewust wél afbreekt om overlopen
+ * in een smalle tegel te voorkomen. Alles hieronder is bewust gescoped tot
+ * `.analysis-page` zodat ReviewPage en andere schermen die dezelfde
+ * `.summary-tile`/`.summary-grid`/`.review-summary`-klassen hergebruiken
+ * hier niet door geraakt worden — puur presentationeel, geen enkele
+ * berekening/waarde wijzigt hierdoor.
  */
 .analysis-page .summary-tile__value {
   white-space: nowrap;
@@ -704,28 +706,77 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
+/*
+ * De ReviewPage-desktopoptimalisatie (verderop, >=1024px) zet
+ * `.review-summary` op `flex-direction: row` zodat de KPI-groepen daar naast
+ * elkaar staan. Voor AnalysisPage willen we net het omgekeerde: Kerncijfers,
+ * Omvang/scope en Financiële correctie moeten elk hun eigen volle-breedte
+ * rij blijven, in die vaste leesvolgorde — vandaar deze override, die door
+ * de extra `.analysis-page`-klasse altijd wint (hogere specificiteit), ook
+ * al staat de ReviewPage-regel er verderop in het bestand.
+ */
+.analysis-page .review-summary {
+  flex-direction: column;
+}
+
+.analysis-page .review-summary > .summary-group {
+  flex: initial;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Kerncijfers: de drie dominante hoofd-KPI's — grotere tegel, duidelijke
+   typografische hiërarchie (kleine hoofdletter-label boven een groot,
+   vetgedrukt bedrag), gelijke hoogte via de standaard grid-stretch. */
 .analysis-page .summary-grid--hero {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--space-3);
+  align-items: stretch;
 }
 
 .analysis-page .summary-grid--hero .summary-tile {
   padding: var(--space-4);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border-soft);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .analysis-page .summary-grid--hero .summary-tile__value {
-  font-size: 1.9rem;
+  font-size: 2.1rem;
 }
 
 .analysis-page .summary-grid--hero .summary-tile__label {
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
 }
 
 .analysis-page .summary-group__hint {
   margin: 0;
+}
+
+/*
+ * Financiële correctie: bewust compact ("vermijd een groot leeg kader rond
+ * slechts enkele tegels") — de kaart krimpt tot haar inhoud (`align-self:
+ * flex-start` i.p.v. de volle breedte van de andere twee groepen) en de 3
+ * tegels krijgen een beperkte maximumbreedte i.p.v. uit te rekken over de
+ * hele resterende ruimte. Specificiteit-noot: dezelfde
+ * `.analysis-page .review-summary > .summary-group`-vorm (i.p.v. enkel
+ * `.analysis-page .summary-group--financial`) is bewust nodig — de
+ * generieke breedte-override hierboven voor alle groepen (`width: 100%`)
+ * heeft dezelfde 3-klassen-specificiteit via die child-combinator, en zonder
+ * exact dezelfde vorm zou die blijven winnen.
+ */
+.analysis-page .review-summary > .summary-group--financial {
+  align-self: flex-start;
+  width: auto;
+  max-width: min(620px, 100%);
+}
+
+.analysis-page .summary-grid--financial {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 170px));
 }
 
 .modal-overlay {
@@ -1475,5 +1526,11 @@ button {
 
   .analysis-page .summary-grid--hero {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  /* Zelfde reden als hierboven: zonder deze herbevestiging zou de generieke
+     ReviewPage-desktopregel de compacte financiële tegels weer oprekken. */
+  .analysis-page .summary-grid--financial {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 170px));
   }
 }
