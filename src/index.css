@@ -729,20 +729,20 @@ button {
    typografische hiërarchie (kleine hoofdletter-label boven een groot,
    vetgedrukt bedrag), gelijke hoogte via de standaard grid-stretch. */
 .analysis-page .summary-grid--hero {
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
   gap: var(--space-3);
   align-items: stretch;
 }
 
 .analysis-page .summary-grid--hero .summary-tile {
-  padding: var(--space-4);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
 .analysis-page .summary-grid--hero .summary-tile__value {
-  font-size: 2.1rem;
+  font-size: 1.75rem;
 }
 
 .analysis-page .summary-grid--hero .summary-tile__label {
@@ -759,24 +759,34 @@ button {
 
 /*
  * Financiële correctie: bewust compact ("vermijd een groot leeg kader rond
- * slechts enkele tegels") — de kaart krimpt tot haar inhoud (`align-self:
- * flex-start` i.p.v. de volle breedte van de andere twee groepen) en de 3
- * tegels krijgen een beperkte maximumbreedte i.p.v. uit te rekken over de
- * hele resterende ruimte. Specificiteit-noot: dezelfde
- * `.analysis-page .review-summary > .summary-group`-vorm (i.p.v. enkel
- * `.analysis-page .summary-group--financial`) is bewust nodig — de
- * generieke breedte-override hierboven voor alle groepen (`width: 100%`)
- * heeft dezelfde 3-klassen-specificiteit via die child-combinator, en zonder
- * exact dezelfde vorm zou die blijven winnen.
+ * slechts enkele tegels") — de kaart krijgt een vaste, beperkte breedte
+ * i.p.v. de volle breedte van de andere twee groepen.
+ *
+ * BUGFIX (gezien tijdens visuele review): `width: auto` + `max-width` op
+ * deze kaart, gecombineerd met `grid-template-columns: repeat(auto-fit, …)`
+ * op de tegel-grid erbinnen, gaf 1 kolom i.p.v. 3 naast elkaar. Reden: bij
+ * `width: auto` (shrink-to-fit) moet de browser eerst de intrinsieke
+ * (max-content) breedte van de kaart berekenen door haar inhoud te meten —
+ * en op dat moment is de beschikbare breedte van de grid ZELF nog
+ * onbepaald. Volgens de CSS Grid-spec valt `auto-fit` in een onbepaalde
+ * context terug op precies 1 herhaling, dus de grid berekende zichzelf als
+ * 1 smalle kolom, en de kaart kromp daarop mee. Een DEFINITIEVE `width`
+ * (via `min()`, geen `auto`/`max-width`) geeft de grid meteen een bepaalde
+ * beschikbare breedte, waardoor `auto-fit` gewoon 3 kolommen berekent.
+ *
+ * Specificiteit-noot: dezelfde `.analysis-page .review-summary > .summary-group`-
+ * vorm (i.p.v. enkel `.analysis-page .summary-group--financial`) is bewust
+ * nodig — de generieke breedte-override hierboven voor alle groepen
+ * (`width: 100%`) heeft dezelfde 3-klassen-specificiteit via die
+ * child-combinator, en zonder exact dezelfde vorm zou die blijven winnen.
  */
 .analysis-page .review-summary > .summary-group--financial {
   align-self: flex-start;
-  width: auto;
-  max-width: min(620px, 100%);
+  width: min(760px, 100%);
 }
 
 .analysis-page .summary-grid--financial {
-  grid-template-columns: repeat(auto-fit, minmax(110px, 170px));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 220px));
 }
 
 .modal-overlay {
@@ -1525,12 +1535,12 @@ button {
   }
 
   .analysis-page .summary-grid--hero {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
   }
 
   /* Zelfde reden als hierboven: zonder deze herbevestiging zou de generieke
      ReviewPage-desktopregel de compacte financiële tegels weer oprekken. */
   .analysis-page .summary-grid--financial {
-    grid-template-columns: repeat(auto-fit, minmax(110px, 170px));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 220px));
   }
 }
