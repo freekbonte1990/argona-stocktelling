@@ -8,9 +8,27 @@ import type { CountEntry, Location, LocationProgress, SessionProgress } from "./
  * regel (spec v0.2 §3) en wordt hier centraal gehouden zodat
  * `computeSessionProgress` en `domain/review.ts#computeSessionReview` exact
  * dezelfde definitie gebruiken.
+ *
+ * Uitzondering (production-pilot-readiness sprint punt 3, "Nergens
+ * aangetroffen"-stub-entry-bugfix): een `CONFIRMED_ABSENT`-entry is een
+ * uitspraak over het HELE kantoor ("dit artikel is nergens aangetroffen"),
+ * niet over één rek (zie `types.ts#ArticleCountResolution`). Een artikel dat
+ * op meerdere locaties verwacht wordt, krijgt bij sessiestart voor elk van
+ * die locaties al een niet-getelde stub-`CountEntry`
+ * (`CountSessionService#buildInitialEntries`). Zonder deze uitzondering zou
+ * zo'n artikel NOOIT "volledig geteld" kunnen worden via `confirmAbsent` —
+ * de resterende, nooit aangeraakte stub-entries op de andere locaties
+ * blokkeren dan voor altijd `entries.every(counted)`, ook al heeft de
+ * gebruiker net expliciet bevestigd dat dit artikel nergens ligt. Eén
+ * bevestigd-afwezig-entry maakt daarom het hele artikel "opgelost",
+ * ongeacht resterende stub-entries elders.
  */
 export function isArticleFullyCounted(entries: CountEntry[] | undefined): boolean {
-  return !!entries && entries.length > 0 && entries.every((entry) => entry.counted);
+  if (!entries || entries.length === 0) return false;
+  if (entries.some((entry) => entry.counted && entry.resolution === "CONFIRMED_ABSENT")) {
+    return true;
+  }
+  return entries.every((entry) => entry.counted);
 }
 
 /**

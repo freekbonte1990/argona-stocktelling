@@ -1,5 +1,5 @@
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Office } from "../../domain/types";
 
 /**
  * Eén nog niet-geïnterpreteerd, historisch tellingtabblad zoals aangetroffen
@@ -48,4 +48,14 @@ export interface StockSource {
    * als `loadHistory`.
    */
   loadHistoricalSheets?(): Promise<HistoricalSheetSnapshot[]>;
+  /**
+   * Production-pilot-readiness sprint punt 1 ("Excel portability"): geleerde
+   * `ArticleLocationAssignment`'s uit een eerder geëxporteerd bestand (sheet
+   * ARTIKEL_LOCATIES) — spec: "een volledig lege tablet/browser moet na
+   * import meteen weten waar elk artikel normaal verwacht wordt, zonder
+   * opnieuw te moeten leren". OPTIONEEL om dezelfde reden als `loadHistory`:
+   * ontbreekt de methode of de sheet, dan is er gewoon nog niets geleerd
+   * gekend uit dit bestand.
+   */
+  loadArticleLocationAssignments?(): Promise<ArticleLocationAssignment[]>;
 }

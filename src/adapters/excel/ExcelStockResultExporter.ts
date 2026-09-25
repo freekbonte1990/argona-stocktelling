@@ -7,10 +7,12 @@ import type {
 import { buildNextPreviousCounts, type ArticleReviewResult } from "../../domain/review";
 import { computeFrequencyBreakdown } from "../../domain/frequency";
 import { allLocationsInOrder } from "../../domain/locations";
+import { getStockClassification, STOCK_CLASSIFICATION_TO_RAW } from "../../domain/stockClassification";
 import type { ArticleSnapshot, StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
 import type { Article, ArticleLocationAssignment, Location } from "../../domain/types";
 import { buildExportFileName } from "../../shared/exportFileName";
-import { ARTIKEL_REQUIRED_HEADERS } from "./parseArtikel";
+import { ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER } from "./parseArtikel";
+import { ARTIKEL_LOCATIES_REQUIRED_HEADERS, ARTIKEL_LOCATIES_SHEET_NAME } from "./parseArtikelLocaties";
 import { HISTORIE_REQUIRED_HEADERS } from "./parseHistorie";
 import { buildTellingRequiredHeaders } from "./parseTelling";
 import {
@@ -87,6 +89,7 @@ export class ExcelStockResultExporter implements StockResultExporter {
     buildArtikelSheet(workbook, sortedArticles, nextPreviousCounts);
     buildConfigSheet(workbook, office, exportLocations, allArticles, newBaseDate);
     buildNieuweArtikelenSheet(workbook, allArticles, assignments, exportLocations, resultByArticleId);
+    buildArtikelLocatiesSheet(workbook, allArticles, assignments, exportLocations);
     buildHistorieSheet(workbook, historyEntries);
 
     // Alle reeds gekende, ANDERE historische tellingtabs: ongewijzigd
@@ -279,11 +282,12 @@ function buildArtikelSheet(
   nextPreviousCounts: Map<string, number | null>,
 ): void {
   const sheet = workbook.addWorksheet("ARTIKEL");
-  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10]);
+  const headers = [...ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER];
+  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10, 20]);
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
-  const header = sheet.addRow([...ARTIKEL_REQUIRED_HEADERS]);
-  styleHeaderRow(header, HEADER_FILL_BLUE, ARTIKEL_REQUIRED_HEADERS.length);
+  const header = sheet.addRow(headers);
+  styleHeaderRow(header, HEADER_FILL_BLUE, headers.length);
 
   articles.forEach((article, index) => {
     const row = sheet.addRow([
@@ -301,6 +305,11 @@ function buildArtikelSheet(
       // telling" — behalve voor artikelen die deze cyclus niet meetelden.
       nextPreviousCounts.get(article.id) ?? article.previousCount,
       index + 2, // Bronrij: nieuwe, interne rijpositie in dit geëxporteerde bestand.
+      // Sprint 2 §5/§14: "Voorraadclassificatie" — additief, altijd
+      // geëxporteerd als expliciete ACTIEF/OBSOLETE-tekst (nooit leeg), zodat
+      // een herimport op een leeg toestel exact dezelfde classificatie
+      // terugkrijgt.
+      STOCK_CLASSIFICATION_TO_RAW[getStockClassification(article)],
     ]);
     row.getCell(8).numFmt = CURRENCY_FORMAT; // Kostprijs
     row.getCell(11).numFmt = QUANTITY_FORMAT; // Vorige telling
@@ -340,6 +349,11 @@ function buildConfigSheet(
   for (const location of locations) {
     addLabelRow(`Locatie ${location.number} naam`, location.name);
     addLabelRow(`Locatie ${location.number} actief`, location.active ? "Ja" : "Nee");
+    // Production-pilot-readiness sprint punt 1 ("stabiele location identity"):
+    // de technische, interne `Location.id` — nooit tonen als iets om zelf aan
+    // te passen, enkel om bij een volgende import dezelfde locatie exact
+    // terug te herkennen, ook na hernoemen/herordenen. Zie parseConfig.ts.
+    addLabelRow(`Locatie ${location.number} ID`, location.id);
   }
   addLabelRow("Aantal artikels", breakdown.total);
   addLabelRow("Tijdelijke artikelnummers", temporaryArticleCount);
@@ -430,6 +444,63 @@ function buildNieuweArtikelenSheet(
     for (let col = 1; col <= header.length - 1; col++) {
       row.getCell(col).fill = HIGHLIGHT_FILL_YELLOW;
     }
+  }
+}
+
+/**
+ * ARTIKEL_LOCATIES (production-pilot-readiness sprint punt 1, "Excel
+ * portability"): machine-leesbare export van ALLE geleerde
+ * `ArticleLocationAssignment`'s (actief én inactief — spec: "volledig mee
+ * exporteren", zie parseArtikelLocaties.ts voor de volledige uitleg). Dit was
+ * vóór deze sprint zuiver lokale IndexedDB-kennis; een import op een nieuw
+ * toestel/browser kende daardoor nooit welke artikelen waar verwacht worden,
+ * en moest alles herleren via tellen. "Locatie ID" is de stabiele,
+ * technische `Location.id` (zie ook de nieuwe "Locatie N ID"-rijen in
+ * CONFIG hierboven) — "Locatienaam" is puur ter info voor een mens die het
+ * bestand opent, en wordt bij import genegeerd.
+ */
+function buildArtikelLocatiesSheet(
+  workbook: ExcelJS.Workbook,
+  allArticles: Article[],
+  assignments: ArticleLocationAssignment[],
+  locations: Location[],
+): void {
+  const sheet = workbook.addWorksheet(ARTIKEL_LOCATIES_SHEET_NAME);
+  const header = [...ARTIKEL_LOCATIES_REQUIRED_HEADERS];
+  setColumnWidths(sheet, [18, 20, 30, 10, 20]);
+  const headerRow = sheet.addRow(header);
+  styleHeaderRow(headerRow, HEADER_FILL_BLUE, header.length);
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const articleById = new Map(allArticles.map((a) => [a.id, a]));
+  const locationById = new Map(locations.map((l) => [l.id, l]));
+
+  // Stabiele, deterministische volgorde (nooit afhankelijk van
+  // insertievolgorde in IndexedDB) — leesbaar per artikel, dan per locatie.
+  const sorted = [...assignments].sort((a, b) => {
+    const articleCompare = (articleById.get(a.articleId)?.articleNumber ?? a.articleId).localeCompare(
+      articleById.get(b.articleId)?.articleNumber ?? b.articleId,
+      "nl",
+      { numeric: true },
+    );
+    if (articleCompare !== 0) return articleCompare;
+    return (locationById.get(a.locationId)?.number ?? 0) - (locationById.get(b.locationId)?.number ?? 0);
+  });
+
+  for (const assignment of sorted) {
+    const article = articleById.get(assignment.articleId);
+    // Een assignment zonder (meer) gekend artikel kan in theorie niet
+    // voorkomen (artikelen worden nooit verwijderd), maar defensief overslaan
+    // i.p.v. een lege/foutieve rij te schrijven.
+    if (!article) continue;
+    const location = locationById.get(assignment.locationId);
+    sheet.addRow([
+      article.articleNumber,
+      assignment.locationId,
+      location?.name ?? null,
+      assignment.active ? "Ja" : "Nee",
+      assignment.lastSeenAt,
+    ]);
   }
 }
 

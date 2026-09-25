@@ -1,9 +1,10 @@
 import * as XLSX from "xlsx";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, Location, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Location, Office } from "../../domain/types";
 import type { HistoricalSheetSnapshot, StockSource } from "../../application/ports/StockSource";
 import { slugify } from "../../shared/ids";
 import { ARTIKEL_SHEET_NAME, parseArtikelSheet } from "./parseArtikel";
+import { ARTIKEL_LOCATIES_SHEET_NAME, parseArtikelLocatiesSheet } from "./parseArtikelLocaties";
 import { CONFIG_SHEET_NAME, parseConfigSheet } from "./parseConfig";
 import { HISTORIE_SHEET_NAME, parseHistorieSheet } from "./parseHistorie";
 import { TELLING_SHEET_NAME, validateTellingSheet } from "./parseTelling";
@@ -20,6 +21,7 @@ import { ExcelValidationError } from "./excelErrors";
 const FIXED_SHEET_NAMES = new Set([
   CONFIG_SHEET_NAME,
   ARTIKEL_SHEET_NAME,
+  ARTIKEL_LOCATIES_SHEET_NAME,
   TELLING_SHEET_NAME,
   HISTORIE_SHEET_NAME,
   "NIEUWE_ARTIKELEN",
@@ -36,6 +38,7 @@ export class ExcelStockSource implements StockSource {
   private readonly articles: Article[];
   private readonly history: StockHistoryEntry[];
   private readonly historicalSheets: HistoricalSheetSnapshot[];
+  private readonly assignments: ArticleLocationAssignment[];
   readonly sourceLabel: string;
 
   constructor(
@@ -44,12 +47,14 @@ export class ExcelStockSource implements StockSource {
     sourceLabel: string,
     history: StockHistoryEntry[] = [],
     historicalSheets: HistoricalSheetSnapshot[] = [],
+    assignments: ArticleLocationAssignment[] = [],
   ) {
     this.office = office;
     this.articles = articles;
     this.sourceLabel = sourceLabel;
     this.history = history;
     this.historicalSheets = historicalSheets;
+    this.assignments = assignments;
   }
 
   async loadOffice(): Promise<Office> {
@@ -68,6 +73,16 @@ export class ExcelStockSource implements StockSource {
   /** Leeg wanneer het bronbestand geen enkel historisch, benoemd tellingtabblad bevatte. */
   async loadHistoricalSheets(): Promise<HistoricalSheetSnapshot[]> {
     return this.historicalSheets;
+  }
+
+  /**
+   * Production-pilot-readiness sprint punt 1: geleerde locatiekoppelingen uit
+   * sheet ARTIKEL_LOCATIES. Leeg wanneer het bronbestand deze sheet niet had
+   * (backward compat: ofwel een ouder bestand van vóór deze sprint, ofwel een
+   * kantoor dat nog nooit geteld werd en dus nog niets geleerd heeft).
+   */
+  async loadArticleLocationAssignments(): Promise<ArticleLocationAssignment[]> {
+    return this.assignments;
   }
 }
 
@@ -100,17 +115,25 @@ export function createExcelStockSourceFromBuffer(
   // meer. Een bestand zonder enige "Locatie N naam/actief"-rij (zou niet
   // mogen voorkomen bij een geldig sjabloon) valt terug op één locatie, zodat
   // er nooit een kantoor met nul locaties ontstaat.
-  const parsedLocations = parsedConfig.locations.length > 0 ? parsedConfig.locations : [{ name: null, active: true }];
+  const parsedLocations =
+    parsedConfig.locations.length > 0 ? parsedConfig.locations : [{ name: null, active: true, id: null }];
 
   // Sheet TELLING wordt gevalideerd (kolommen aanwezig, header op naam
   // gezocht, incl. exact evenveel LOCATIE-kolommen als CONFIG aangeeft) maar
   // de rijgegevens worden in v0.1 niet gebruikt — zie parseTelling.ts.
   validateTellingSheet(tellingRows, parsedLocations.length);
 
+  // Production-pilot-readiness sprint punt 1 ("stabiele location identity"):
+  // gebruik het bewaarde "Locatie N ID"-label wanneer aanwezig, zodat een
+  // locatie dezelfde `id` behoudt over een export/import-cyclus heen — ook
+  // na hernoemen of herordenen op het bronkantoor. Ontbreekt het label (een
+  // bestand van vóór deze sprint), dan is dit exact het oude, positionele
+  // gedrag (`${officeId}:loc-${number}`), dus geen enkele regressie voor
+  // bestaande bestanden.
   const locations: Location[] = parsedLocations.map((parsedLocation, index) => {
     const number = index + 1;
     return {
-      id: `${officeId}:loc-${number}`,
+      id: parsedLocation.id ?? `${officeId}:loc-${number}`,
       officeId,
       number,
       name: parsedLocation.name ?? `Locatie ${number}`,
@@ -133,6 +156,15 @@ export function createExcelStockSourceFromBuffer(
   const historieSheet = workbook.Sheets[HISTORIE_SHEET_NAME];
   const history = historieSheet ? parseHistorieSheet(sheetToRows(historieSheet), officeId) : [];
 
+  // Production-pilot-readiness sprint punt 1: ARTIKEL_LOCATIES is OPTIONEEL —
+  // een bestand van vóór deze sprint (of een kantoor dat nog nooit geteld
+  // werd) heeft deze sheet niet, en importeert dan gewoon zonder geleerde
+  // locatiekoppelingen (backward compat, exact het oude gedrag).
+  const artikelLocatiesSheet = workbook.Sheets[ARTIKEL_LOCATIES_SHEET_NAME];
+  const assignments = artikelLocatiesSheet
+    ? parseArtikelLocatiesSheet(sheetToRows(artikelLocatiesSheet), officeId, locations)
+    : [];
+
   // Alle overige sheets (niet in FIXED_SHEET_NAMES) zijn historische, benoemde
   // tellingtabs (bv. "2026-08 Maand") — ongewijzigd als ruwe rijen bewaard,
   // zodat een volgende export ze byte-/logisch identiek kan doorgeven.
@@ -140,7 +172,7 @@ export function createExcelStockSourceFromBuffer(
     (sheetName) => ({ sheetName, rows: sheetToRows(workbook.Sheets[sheetName]) }),
   );
 
-  return new ExcelStockSource(office, articles, sourceFileName, history, historicalSheets);
+  return new ExcelStockSource(office, articles, sourceFileName, history, historicalSheets, assignments);
 }
 
 function getSheetOrThrow(workbook: XLSX.WorkBook, sheetName: string): XLSX.WorkSheet {

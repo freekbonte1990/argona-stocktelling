@@ -138,13 +138,26 @@ concrete bron aanmaakt) wijzigen.
 **`ExcelStockResultExporter` (v0.2)** implementeert `StockResultExporter` en
 is het spiegelbeeld hiervan bij export: het schrijft de reeds berekende
 `SessionReviewSummary` (uit `domain/review.ts`) naar de gestandaardiseerde
-sheets TELLING / ARTIKEL / CONFIG / NIEUWE_ARTIKELEN, met dezelfde
-header-constantes als de parser (`ARTIKEL_REQUIRED_HEADERS`,
+sheets TELLING / ARTIKEL / CONFIG / NIEUWE_ARTIKELEN / ARTIKEL_LOCATIES, met
+dezelfde header-constantes als de parser (`ARTIKEL_REQUIRED_HEADERS`,
 `TELLING_REQUIRED_HEADERS`) zodat een geëxporteerd bestand door de eigen
 importer herkend wordt. TELLING en ARTIKEL bevatten *alle* artikelen van het
 kantoor (niet enkel de sessiescope): een kwartaalartikel dat deze maand niet
 meetelt, mag zijn "vorige telling" niet verliezen bij de volgende import
-(`domain/review.ts#buildNextPreviousCounts`). De bestandsnaam
+(`domain/review.ts#buildNextPreviousCounts`).
+
+**Excel portability (production-pilot-readiness sprint)**: `ARTIKEL_LOCATIES`
+maakt geleerde `ArticleLocationAssignment`'s machine-leesbaar herimporteerbaar
+(zie `parseArtikelLocaties.ts`) — vóór deze sprint bestond dat begrip
+uitsluitend lokaal in IndexedDB (zie `docs/DATA_MODEL.md`), waardoor een
+volledig lege repository (nieuw toestel/browser) na import niets wist over
+waar artikelen normaal verwacht worden. CONFIG kreeg daarbij een nieuwe
+"Locatie N ID"-rij per locatie: de stabiele, interne `Location.id`, die
+`ExcelStockSource.ts` bij import herkent en gebruikt in plaats van de oude,
+positionele afleiding (`${officeId}:loc-${n}`) — zo overleeft een locatie's
+identiteit hernoemen/herordenen over een export/import-cyclus heen. Beide
+zijn optioneel/backward-compatibel: een bestand van vóór deze sprint mist ze
+gewoon en valt terug op het oude gedrag. De bestandsnaam
 (`shared/exportFileName.ts#buildExportFileName`, bv.
 `"2026-09-30 - Stocktelling Lokeren.xlsx"`) is pure formattering, bewust
 buiten `domain/` gehouden. Deze adapter berekent zelf niets — enkel

@@ -86,6 +86,14 @@ locatievoortgang ("32 / 87 geteld").
 Een artikel kan aan meerdere locaties tegelijk gekoppeld zijn (bv. zowel
 Locatie 1 als Locatie 3); er is geen exclusiviteit.
 
+**Update (production-pilot-readiness sprint)**: dit is niet langer
+uitsluitend lokale IndexedDB-kennis. Sheet `ARTIKEL_LOCATIES` (zie
+`adapters/excel/parseArtikelLocaties.ts`) exporteert/herimporteert alle
+assignments (actief én inactief), gematcht op de stabiele `Location.id` (zie
+CONFIG's "Locatie N ID"-rij, `adapters/excel/parseConfig.ts`) — zo weet een
+volledig lege repository na import onmiddellijk waar elk artikel normaal
+verwacht wordt, zonder opnieuw te moeten leren via tellen.
+
 ## Voortgang — niet naïef optellen
 
 Omdat één artikel op meerdere locaties kan voorkomen, bestaat er geen

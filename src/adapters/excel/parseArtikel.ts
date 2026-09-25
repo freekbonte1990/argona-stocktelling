@@ -1,7 +1,8 @@
 import { normalizeArticleStatus, normalizeFrequency } from "../../domain/frequency";
+import { normalizeStockClassification } from "../../domain/stockClassification";
 import type { Article } from "../../domain/types";
 import { ExcelValidationError } from "./excelErrors";
-import { extractDataRows, findHeaderRow } from "./excelHeaderUtils";
+import { extractDataRows, findHeaderRow, findOptionalColumnIndex } from "./excelHeaderUtils";
 import { toNumberOrNull, toStringOrNull } from "./excelValues";
 
 export const ARTIKEL_SHEET_NAME = "ARTIKEL";
@@ -22,6 +23,16 @@ export const ARTIKEL_REQUIRED_HEADERS = [
 ] as const;
 
 /**
+ * Sprint 2 (Historical Count Analysis) §5/§14: "Voorraadclassificatie"
+ * (ACTIVE/OBSOLETE) is een OPTIONELE kolom in ARTIKEL — een bestand van
+ * vóór deze sprint kent ze niet, en moet probleemloos blijven importeren
+ * (backward compat, exact zoals ARTIKEL_LOCATIES/"Locatie N ID" hiervoor).
+ * Bewust NIET in `ARTIKEL_REQUIRED_HEADERS`: die lijst gooit een fout zodra
+ * één van de kolommen ontbreekt, wat deze optionele kolom nooit mag doen.
+ */
+export const STOCK_CLASSIFICATION_HEADER = "Voorraadclassificatie";
+
+/**
  * Leest sheet ARTIKEL in en zet elke rij om naar een domein-Article.
  * Tijdelijke artikelnummers (bv. "TMP-DAM-0001") zijn gewoon geldige,
  * niet-lege strings en worden niet geweigerd.
@@ -32,7 +43,16 @@ export function parseArtikelSheet(rows: unknown[][], officeId: string): Article[
     [...ARTIKEL_REQUIRED_HEADERS],
     ARTIKEL_SHEET_NAME,
   );
-  const dataRows = extractDataRows(rows, headerRowIndex, columnIndexByName);
+  const stockClassificationColIndex = findOptionalColumnIndex(
+    rows,
+    headerRowIndex,
+    STOCK_CLASSIFICATION_HEADER,
+  );
+  const columnIndexByNameWithOptional =
+    stockClassificationColIndex !== null
+      ? { ...columnIndexByName, [STOCK_CLASSIFICATION_HEADER]: stockClassificationColIndex }
+      : columnIndexByName;
+  const dataRows = extractDataRows(rows, headerRowIndex, columnIndexByNameWithOptional);
 
   return dataRows.map((row, index) => buildArticle(row, officeId, headerRowIndex + 2 + index));
 }
@@ -70,5 +90,10 @@ function buildArticle(
     status: normalizeArticleStatus(rawStatus),
     previousCount: toNumberOrNull(row["Vorige telling"]),
     sourceRow: sourceRow ?? excelRowNumber,
+    // Sprint 2 §14: ontbreekt de kolom (bestand van vóór deze sprint), dan
+    // is `row[STOCK_CLASSIFICATION_HEADER]` altijd `undefined` (nooit
+    // meegelezen door extractDataRows) -> `toStringOrNull` geeft `null` ->
+    // veilige default ACTIVE, exact zoals spec §14 vraagt.
+    stockClassification: normalizeStockClassification(toStringOrNull(row[STOCK_CLASSIFICATION_HEADER])),
   };
 }

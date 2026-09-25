@@ -155,6 +155,51 @@ describe("CountingPage — labels en visueel onderscheid (mobile/tablet UX-fix)"
   });
 });
 
+describe("CountingPage — 'Nog nergens geteld' respecteert stub-entry-semantiek (production-pilot-readiness sprint punt 3)", () => {
+  it("BUGFIX: een artikel met enkel een niet-getelde stub-entry (verwacht op een andere locatie, nog nooit geteld) verschijnt wél onder 'Nog nergens geteld'", async () => {
+    const user = userEvent.setup();
+    // M2 wordt op Rek 2 "verwacht" (geleerde assignment) maar heeft daar enkel
+    // een niet-getelde stub-entry — exact zoals CountSessionService#
+    // buildInitialEntries die bij sessiestart aanmaakt, nooit effectief geteld.
+    await countingRepository.saveArticleLocationAssignment({
+      id: `office-1:${articleM2.id}:${office.locations[1].id}`,
+      officeId: "office-1",
+      articleId: articleM2.id,
+      locationId: office.locations[1].id,
+      active: true,
+      lastSeenAt: new Date().toISOString(),
+    });
+    await countingRepository.saveCountEntry({
+      id: `${session.id}:${articleM2.id}:${office.locations[1].id}`,
+      sessionId: session.id,
+      articleId: articleM2.id,
+      locationId: office.locations[1].id,
+      quantity: null,
+      counted: false,
+      countedAt: null,
+      note: null,
+      resolution: "COUNTED",
+    });
+
+    // Bekijk Rek 2 (waar M2 verwacht wordt — `knownAtLocation`/`defaultPool`
+    // bevat hier dus M2). M1 heeft geen enkele verwachting/entry op Rek 2 en
+    // zit hier sowieso al buiten de pool, los van het filter.
+    render(<CountingPage sessionId={session.id} locationId={office.locations[1].id} />);
+    await user.click(await screen.findByRole("button", { name: /Filters/ }));
+    await user.selectOptions(screen.getByLabelText("Weergave"), "NOT_COUNTED_ANYWHERE");
+    await user.click(screen.getByRole("button", { name: "Toepassen" }));
+
+    // M2: nooit ergens effectief geteld (enkel een stub) -> hoort hier wél te
+    // verschijnen. Vóór de fix verdween M2 hier, omdat de loutere aanwezigheid
+    // van de stub-entry al als "heeft hier al een entry" telde.
+    await waitFor(() => {
+      expect(screen.getByText("Nooit geteld artikel")).toBeInTheDocument();
+    });
+    // M1: al effectief geteld op Rek 1 (beforeEach) -> hoort hier NIET te staan.
+    expect(screen.queryByText("Sigen BAT 8")).not.toBeInTheDocument();
+  });
+});
+
 describe("CountingPage — '+ Nieuw artikel gevonden' (v0.2.1 correctieronde §3B)", () => {
   it("maakt een nieuw artikel aan, koppelt de huidige locatie en telt het meteen — verschijnt in Review", async () => {
     const user = userEvent.setup();

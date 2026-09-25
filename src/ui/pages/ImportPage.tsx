@@ -5,6 +5,21 @@ import { BigButton } from "../components/BigButton";
 import { SummaryTile } from "../components/SummaryTile";
 import { formatDate } from "../../shared/format";
 
+/**
+ * Formatteert een `StockHistoryEntry.countDate` ("YYYY-MM-DD", zie
+ * `domain/stockSnapshot.ts#isoDateFromLocalDate") naar "DD/MM/YYYY" —
+ * BEWUST zonder via `new Date(string)` te gaan (zoals `shared/format.ts#
+ * formatDate` doet): een datum-only ISO-string wordt door JS als UTC
+ * geïnterpreteerd, en de lokale getters die `formatDate` daarna gebruikt
+ * kunnen in een tijdzone vóór UTC een dag verschuiven (exact het patroon dat
+ * `excelValues.ts#toIsoDateString` elders al documenteert). Een simpele
+ * stringsplit heeft dat risico niet.
+ */
+function formatCountDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : isoDate;
+}
+
 interface ImportPageProps {
   onImported: (officeId: string) => void;
   /** Terugknop tonen (v.a. het tweede kantoor: dit is dan geen verplicht startscherm meer). */
@@ -126,6 +141,29 @@ export function ImportPage({ onImported, onCancel }: ImportPageProps) {
         <p className="screen-subtitle">
           {summary.totalArticles.toLocaleString("nl-BE")} artikelen geïmporteerd
         </p>
+        {/*
+          Production-pilot-readiness sprint punt 4 ("Importcontrole"): compacte
+          bevestiging met minimaal kantoor (titel hierboven), bronbestand,
+          aantal artikelen (subtitel hierboven), aantal actieve locaties en de
+          laatste gekende historische telling — zodat de gebruiker meteen kan
+          zien dat de import het juiste, volledige kantoor herstelde, vóór hij
+          verdergaat naar een echte telling. Bewust hergebruik van de
+          bestaande summary-tile/stack-opmaak, geen nieuw schermontwerp.
+        */}
+        <div className="stack stack--tight">
+          <p style={{ margin: 0 }}>
+            <strong>Bronbestand:</strong> {summary.sourceFileName}
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong>Actieve locaties:</strong> {summary.activeLocationCount}
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong>Laatste historische telling:</strong>{" "}
+            {summary.lastHistoricalCount
+              ? `${summary.lastHistoricalCount.sessionName} (${formatCountDate(summary.lastHistoricalCount.countDate)})`
+              : "geen bekend"}
+          </p>
+        </div>
         <BigButton onClick={() => onImported(summary.office.id)}>Verder</BigButton>
       </div>
     );

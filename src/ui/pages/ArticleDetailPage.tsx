@@ -2,7 +2,8 @@ import { useState } from "react";
 import { activeLocationsInOrder } from "../../domain/locations";
 import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
 import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
-import type { ArticleCountFrequency } from "../../domain/types";
+import { getStockClassification, STOCK_CLASSIFICATION_LABELS } from "../../domain/stockClassification";
+import type { ArticleCountFrequency, StockClassification } from "../../domain/types";
 import { countingRepository } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { SimpleLineChart } from "../components/SimpleLineChart";
@@ -93,6 +94,11 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   // zoals omschrijving/productgroep/leverancier.
   const [draftCountPeriod, setDraftCountPeriod] = useState<ArticleCountFrequency>("MONTHLY");
   const [draftStatusRaw, setDraftStatusRaw] = useState<string>(ARTICLE_STATUS_OPTIONS[0].raw);
+  // Sprint 2 (Historical Count Analysis) §5: voorraadclassificatie
+  // (ACTIVE/OBSOLETE) — een APARTE as t.o.v. Status hierboven, zie
+  // domain/stockClassification.ts. Zelfde inline-bewerkmodus als de andere
+  // velden op deze kaart.
+  const [draftStockClassification, setDraftStockClassification] = useState<StockClassification>("ACTIVE");
   const [savingGeneral, setSavingGeneral] = useState(false);
 
   const article = articles.find((a) => a.id === articleId);
@@ -110,6 +116,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     setDraftCostPrice(article.costPrice !== null ? String(article.costPrice) : "");
     setDraftCountPeriod(article.countPeriod);
     setDraftStatusRaw(matchArticleStatusOption(article.rawStatus, article.status).raw);
+    setDraftStockClassification(getStockClassification(article));
     setEditingGeneral(true);
   }
 
@@ -142,6 +149,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
           rawCountPeriod: FREQUENCY_TO_RAW[draftCountPeriod],
           status: statusOption.status,
           rawStatus: statusOption.raw,
+          stockClassification: draftStockClassification,
         },
       ]);
       setEditingGeneral(false);
@@ -280,6 +288,21 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                 ))}
               </select>
             </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Voorraadclassificatie</span>
+              <select
+                className="search-input"
+                style={{ width: "auto" }}
+                value={draftStockClassification}
+                onChange={(e) => setDraftStockClassification(e.target.value as StockClassification)}
+              >
+                {(Object.keys(STOCK_CLASSIFICATION_LABELS) as StockClassification[]).map((classification) => (
+                  <option key={classification} value={classification}>
+                    {STOCK_CLASSIFICATION_LABELS[classification]}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="stack stack--row">
               <BigButton variant="primary" style={{ width: "auto" }} disabled={savingGeneral} onClick={saveGeneral}>
                 {savingGeneral ? "Bezig..." : "Opslaan"}
@@ -323,6 +346,12 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
               <span className="article-detail-field__label">Status</span>
               <span className="article-detail-field__value">
                 {matchArticleStatusOption(article.rawStatus, article.status).label}
+              </span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Voorraadclassificatie</span>
+              <span className="article-detail-field__value">
+                {STOCK_CLASSIFICATION_LABELS[getStockClassification(article)]}
               </span>
             </div>
           </>

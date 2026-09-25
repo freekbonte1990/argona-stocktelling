@@ -126,14 +126,21 @@ export function CountingPage({ sessionId, locationId, focusArticleId }: Counting
   }, [entriesAtLocation]);
 
   /**
-   * Alle entries van dit artikel binnen deze sessie, ONGEACHT locatie — nodig
-   * voor het filter "Nog nergens geteld" (spec §2), dat over de hele sessie
-   * gaat, niet enkel deze locatie (anders zou een artikel dat al op een
-   * ándere locatie geteld is hier verkeerdelijk als "nog te doen" verschijnen).
+   * Artikel-ID's die ergens binnen deze sessie al effectief GETELD zijn
+   * (ongeacht locatie) — nodig voor het filter "Nog nergens geteld" (spec
+   * §2), dat over de hele sessie gaat, niet enkel deze locatie (anders zou
+   * een artikel dat al op een ándere locatie geteld is hier verkeerdelijk
+   * als "nog te doen" verschijnen).
+   *
+   * BUGFIX (production-pilot-readiness sprint punt 3, dezelfde stub-entry-
+   * semantiek als `domain/review.ts#ArticleReviewResult.hasAnyEntry`): een
+   * nog niet-getelde stub-`CountEntry` (vast aangemaakt bij sessiestart voor
+   * elke verwachte locatie) mag hier niet meetellen als "al geteld" — enkel
+   * `counted: true`-entries tellen.
    */
   const hasAnyEntryAnywhere = useMemo(() => {
     const ids = new Set<string>();
-    for (const entry of entries) ids.add(entry.articleId);
+    for (const entry of entries) if (entry.counted) ids.add(entry.articleId);
     return ids;
   }, [entries]);
 

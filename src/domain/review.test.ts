@@ -487,6 +487,119 @@ describe("nergens aangetroffen (v0.2.1 §5)", () => {
   });
 });
 
+describe("Nergens aangetroffen — stub-entry-semantiek (production-pilot-readiness sprint punt 3)", () => {
+  const allCompletedStatuses = locations.map((l) => makeLocationStatus(l.id));
+
+  it("BUGFIX: een artikel met enkel niet-getelde stub-entries (verwacht op locaties, nog nooit geteld) staat wél in notFoundAnywhere", () => {
+    const article = makeArticle("A1");
+    // Stub-entries zoals CountSessionService#buildInitialEntries die bij
+    // sessiestart aanmaakt voor elke verwachte (geleerde) locatie — nog geen
+    // enkele ervan is effectief geteld.
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: null, counted: false }),
+      makeEntry("office-1:A1", "office-1:loc-2", { quantity: null, counted: false }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allCompletedStatuses,
+    );
+    const result = review.results[0];
+    expect(result.hasAnyEntry).toBe(false);
+    expect(review.notFoundAnywhere.map((r) => r.articleId)).toEqual(["office-1:A1"]);
+  });
+
+  it("fysiek geteld op minstens één locatie: verdwijnt uit notFoundAnywhere, ook met resterende niet-getelde stub-entries elders", () => {
+    const article = makeArticle("A1");
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 4, counted: true }),
+      makeEntry("office-1:A1", "office-1:loc-2", { quantity: null, counted: false }), // nog niet geteld, andere locatie
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allCompletedStatuses,
+    );
+    const result = review.results[0];
+    expect(result.hasAnyEntry).toBe(true);
+    expect(review.notFoundAnywhere).toHaveLength(0);
+    // Nog niet VOLLEDIG geteld (loc-2 staat nog open) — dat is een apart,
+    // correct onderscheid: niet "nergens aangetroffen", maar ook nog niet af.
+    expect(result.fullyCounted).toBe(false);
+  });
+
+  it("expliciet 0 bevestigd (CONFIRMED_ABSENT) lost het artikel volledig op, ook met resterende niet-getelde stub-entries op andere locaties", () => {
+    const article = makeArticle("A1", { previousCount: 4 });
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: null, counted: false }), // nooit aangeraakte stub
+      makeEntry("office-1:A1", "office-1:loc-2", { quantity: null, counted: false }), // nooit aangeraakte stub
+      makeEntry("office-1:A1", null, { quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      entries,
+      allCompletedStatuses,
+    );
+    const result = review.results[0];
+    expect(result.hasAnyEntry).toBe(true);
+    expect(result.confirmedAbsent).toBe(true);
+    expect(result.fullyCounted).toBe(true);
+    expect(result.newTotalCount).toBe(0);
+    expect(review.notFoundAnywhere).toHaveLength(0);
+    expect(review.notCountedArticles).toBe(0);
+    expect(isSessionReadyToComplete(review)).toBe(true);
+  });
+
+  it("null (geen enkele entry) blijft gewoon niet-geteld — geen regressie", () => {
+    const article = makeArticle("A1");
+    const review = computeSessionReview(
+      makeSession(["office-1:A1"]),
+      [article],
+      locations,
+      [],
+      allCompletedStatuses,
+    );
+    const result = review.results[0];
+    expect(result.hasAnyEntry).toBe(false);
+    expect(result.fullyCounted).toBe(false);
+    expect(result.newTotalCount).toBeNull();
+    expect(review.notFoundAnywhere.map((r) => r.articleId)).toEqual(["office-1:A1"]);
+  });
+
+  it("multi-location: geteld op één van meerdere verwachte locaties + stub-entries elders wordt correct behandeld over het hele resultaat", () => {
+    const foundSomewhere = makeArticle("A1");
+    const nowhereYet = makeArticle("A2");
+    const confirmedAbsentArticle = makeArticle("A3");
+    const entries = [
+      makeEntry("office-1:A1", "office-1:loc-1", { quantity: 2, counted: true }),
+      makeEntry("office-1:A1", "office-1:loc-2", { quantity: null, counted: false }),
+      makeEntry("office-1:A2", "office-1:loc-1", { quantity: null, counted: false }),
+      makeEntry("office-1:A2", "office-1:loc-3", { quantity: null, counted: false }),
+      makeEntry("office-1:A3", "office-1:loc-1", { quantity: null, counted: false }),
+      makeEntry("office-1:A3", null, { quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    const review = computeSessionReview(
+      makeSession(["office-1:A1", "office-1:A2", "office-1:A3"]),
+      [foundSomewhere, nowhereYet, confirmedAbsentArticle],
+      locations,
+      entries,
+      allCompletedStatuses,
+    );
+    expect(review.notFoundAnywhere.map((r) => r.articleId)).toEqual(["office-1:A2"]);
+    const a1 = review.results.find((r) => r.articleId === "office-1:A1")!;
+    const a3 = review.results.find((r) => r.articleId === "office-1:A3")!;
+    expect(a1.hasAnyEntry).toBe(true);
+    expect(a1.fullyCounted).toBe(false); // loc-2 nog open
+    expect(a3.fullyCounted).toBe(true); // CONFIRMED_ABSENT lost de resterende stub op
+  });
+});
+
 describe("computeSessionArticleTotals", () => {
   it("somt enkel counted-entries per artikel op", () => {
     const entries = [

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { computeSessionProgress } from "../../domain/progress";
+import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import { BigButton } from "../components/BigButton";
 import {
   useActiveSession,
@@ -19,7 +20,7 @@ interface HomePageProps {
   onOpenSettings: () => void;
   onSwitchOffice: (officeId: string) => void;
   onImportNewOffice: () => void;
-  /** Naar het (read-only) reviewscherm van een afgeronde telling. */
+  /** Naar de (alleen-lezen) "Analyse telling" van een afgeronde telling (Sprint 2). */
   onOpenReview: (sessionId: string) => void;
   /** Annuleert de meegegeven (ACTIVE) sessie — sessielogica-fix. */
   onCancelSession: (sessionId: string) => Promise<void>;
@@ -187,7 +188,22 @@ export function HomePage({
                   className="session-history-item"
                   onClick={() => onOpenReview(s.id)}
                 >
-                  <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
+                  {/*
+                    Sprint 2 §12: naast het type ("Maandtelling") ook meteen de
+                    concrete maand/kwartaal/jaar (`sessionSnapshotName`, bv.
+                    "2026-09 Maand") — dezelfde naamgeving als het bevroren
+                    tellingtabblad en de nieuwe "Analyse telling"-titel, zodat
+                    twee tellingen van hetzelfde type onderling meteen te
+                    onderscheiden zijn zonder eerst te moeten doorklikken.
+                    Puur additief: het bestaande "Maandtelling"-tekstknooppunt
+                    blijft ongewijzigd zijn eigen element.
+                  */}
+                  <span className="stack stack--tight" style={{ gap: 2 }}>
+                    <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
+                    <span className="screen-subtitle" style={{ margin: 0 }}>
+                      {sessionSnapshotName(s)}
+                    </span>
+                  </span>
                   <span className="screen-subtitle" style={{ margin: 0 }}>
                     {s.completedAt ? formatDate(s.completedAt) : ""}
                   </span>

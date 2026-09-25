@@ -1,7 +1,8 @@
 import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain/frequency";
+import { activeLocationsInOrder, mergeArticleLocationAssignments } from "../../domain/locations";
 import { mergeHistoryEntries } from "../../domain/stockSnapshot";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Office } from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
 import type { HistoricalSheetSnapshot, StockSource } from "../ports/StockSource";
 
@@ -34,6 +35,25 @@ export interface ImportPreview {
    */
   historyEntries: StockHistoryEntry[];
   historicalSheets: HistoricalSheetSnapshot[];
+  /**
+   * Production-pilot-readiness sprint punt 1 ("Excel portability"): geleerde
+   * `ArticleLocationAssignment`'s uit sheet ARTIKEL_LOCATIES — leeg wanneer de
+   * bron dit niet ondersteunt (`StockSource.loadArticleLocationAssignments`
+   * is optioneel) of het bestand deze sheet niet had (backward compat, een
+   * bestand van vóór deze sprint).
+   */
+  assignments: ArticleLocationAssignment[];
+}
+
+/**
+ * Production-pilot-readiness sprint punt 4 ("Importcontrole"): een compacte
+ * samenvatting van wat de import hersteld/geleerd heeft, voor onmiddellijke
+ * feedback ná het importeren — `null` waar dat niet van toepassing/gekend is
+ * (bv. een kantoor zonder enige historische telling).
+ */
+export interface LastHistoricalCountSummary {
+  sessionName: string;
+  countDate: string;
 }
 
 export interface ImportSummary {
@@ -41,6 +61,10 @@ export interface ImportSummary {
   totalArticles: number;
   breakdown: FrequencyBreakdown;
   sourceFileName: string;
+  /** Aantal ACTIEVE locaties van dit kantoor ná import (spec punt 4). */
+  activeLocationCount: number;
+  /** Meest recente historische telling die nu voor dit kantoor gekend is, indien beschikbaar (spec punt 4). */
+  lastHistoricalCount: LastHistoricalCountSummary | null;
 }
 
 /**
@@ -64,11 +88,13 @@ export class ImportService {
   async prepareImport(source: StockSource): Promise<ImportPreview> {
     const office = await source.loadOffice();
     const articles = await source.loadArticles(office);
-    // Beide optioneel (zie StockSource) — een bron/bestand zonder rollend
-    // archief geeft hier gewoon niets terug, nooit een fout.
-    const [historyEntries, historicalSheets] = await Promise.all([
+    // Alle drie optioneel (zie StockSource) — een bron/bestand zonder rollend
+    // archief resp. zonder geleerde locatiekoppelingen geeft hier gewoon
+    // niets terug, nooit een fout.
+    const [historyEntries, historicalSheets, assignments] = await Promise.all([
       source.loadHistory?.() ?? Promise.resolve([]),
       source.loadHistoricalSheets?.() ?? Promise.resolve([]),
+      source.loadArticleLocationAssignments?.() ?? Promise.resolve([]),
     ]);
 
     const existingOffice = await this.repository.getOffice(office.id);
@@ -96,6 +122,7 @@ export class ImportService {
       existing,
       historyEntries,
       historicalSheets,
+      assignments,
     };
   }
 
@@ -142,17 +169,43 @@ export class ImportService {
         });
       }
     }
+    let mergedHistory = await this.repository.getStockHistoryEntries(office.id);
     if (preview.historyEntries.length > 0) {
-      const existingHistory = await this.repository.getStockHistoryEntries(office.id);
-      const merged = mergeHistoryEntries(existingHistory, preview.historyEntries);
-      await this.repository.saveStockHistoryEntries(office.id, merged);
+      mergedHistory = mergeHistoryEntries(mergedHistory, preview.historyEntries);
+      await this.repository.saveStockHistoryEntries(office.id, mergedHistory);
     }
+
+    // Production-pilot-readiness sprint punt 1 ("Excel portability"): geleerde
+    // locatiekoppelingen uit ARTIKEL_LOCATIES additief samenvoegen met wat dit
+    // toestel eventueel al lokaal wist (zie `mergeArticleLocationAssignments`
+    // — een volledig lege/verse repository heeft hier simpelweg nog niets
+    // lokaal, dus het geïmporteerde bestand bepaalt dan alles).
+    if (preview.assignments.length > 0) {
+      const existingAssignments = await this.repository.getArticleLocationAssignments(office.id);
+      const merged = mergeArticleLocationAssignments(existingAssignments, preview.assignments);
+      await this.repository.saveArticleLocationAssignments(merged);
+    }
+
+    // Production-pilot-readiness sprint punt 4 ("Importcontrole"): compacte
+    // bevestiging na import — de meest recente historische telling (indien
+    // gekend) en het aantal actieve locaties, zodat de gebruiker meteen kan
+    // zien dat de import het juiste, volledige kantoor herstelde.
+    const lastHistoricalCount =
+      mergedHistory.length > 0
+        ? mergedHistory.reduce((latest, entry) =>
+            entry.countDate.localeCompare(latest.countDate) > 0 ? entry : latest,
+          )
+        : null;
 
     return {
       office,
       totalArticles: preview.totalArticles,
       breakdown: preview.breakdown,
       sourceFileName: preview.sourceLabel,
+      activeLocationCount: activeLocationsInOrder(office).length,
+      lastHistoricalCount: lastHistoricalCount
+        ? { sessionName: lastHistoricalCount.sessionName, countDate: lastHistoricalCount.countDate }
+        : null,
     };
   }
 }

@@ -159,3 +159,35 @@ export function sessionLocations(
     .filter((l) => frozen.has(l.id))
     .sort((a, b) => a.number - b.number);
 }
+
+/**
+ * Production-pilot-readiness sprint punt 1 ("Excel portability"): voegt
+ * geïmporteerde `ArticleLocationAssignment`'s (sheet ARTIKEL_LOCATIES) samen
+ * met de reeds lokaal gekende koppelingen, zonder kennis te vernietigen in
+ * beide richtingen — zelfde additieve merge-geest als
+ * `stockSnapshot.ts#mergeHistoryEntries`, maar met `lastSeenAt` als scheids-
+ * rechter i.p.v. altijd "incoming wint": een assignment die ontbreekt aan
+ * één kant blijft gewoon bestaan; bestaat ze aan BEIDE kanten (zelfde `id` —
+ * dezelfde (kantoor, artikel, locatie)-combinatie), dan wint de nieuwste
+ * `lastSeenAt`. Dit voorkomt dat het herimporteren van een oudere export op
+ * een toestel dat intussen zelf verder geteld/geleerd heeft, die nieuwere
+ * lokale kennis stilzwijgend terugdraait — voor de hoofdscenario (een
+ * volledig lege, verse repository) is er sowieso geen bestaande kennis om
+ * mee te concurreren, dus wint de import daar altijd.
+ */
+export function mergeArticleLocationAssignments(
+  existing: ArticleLocationAssignment[],
+  incoming: ArticleLocationAssignment[],
+): ArticleLocationAssignment[] {
+  const byId = new Map<string, ArticleLocationAssignment>();
+  for (const assignment of existing) {
+    byId.set(assignment.id, assignment);
+  }
+  for (const assignment of incoming) {
+    const current = byId.get(assignment.id);
+    if (!current || assignment.lastSeenAt >= current.lastSeenAt) {
+      byId.set(assignment.id, assignment);
+    }
+  }
+  return Array.from(byId.values());
+}

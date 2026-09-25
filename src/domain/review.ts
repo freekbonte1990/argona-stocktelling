@@ -75,7 +75,20 @@ export interface ArticleReviewResult {
    * dus ook in de Excel-export terechtkomen).
    */
   isManualAddition: boolean;
-  /** True zolang dit artikel deze sessie nog geen ENKELE entry heeft (nergens geteld, ook niet bevestigd afwezig). */
+  /**
+   * True zodra dit artikel deze sessie ergens al effectief OPGELOST is
+   * (fysiek geteld op minstens één locatie, of expliciet bevestigd afwezig)
+   * — nergens geteld, ook niet bevestigd afwezig, geeft `false`.
+   *
+   * BUGFIX (production-pilot-readiness sprint punt 3, "stub-entry-semantiek"):
+   * dit keek voorheen enkel naar `entriesForArticle.length > 0`, dus een
+   * nog niet-getelde stub-`CountEntry` (bij sessiestart vast aangemaakt voor
+   * elke verwachte locatie, zie `CountSessionService#buildInitialEntries`)
+   * telde al mee als "heeft een entry" — waardoor zo'n artikel NOOIT in
+   * `notFoundAnywhere` verscheen, ook al was het nog geen seconde fysiek
+   * geteld. Een niet-getelde locatie-entry mag nooit betekenen dat een
+   * artikel fysiek aangetroffen is — enkel een `counted: true`-entry telt.
+   */
   hasAnyEntry: boolean;
   /** True wanneer dit artikel expliciet bevestigd is als "niet aanwezig — voorraad 0" (spec v0.2.1 §5). */
   confirmedAbsent: boolean;
@@ -211,7 +224,7 @@ function buildArticleReviewResult(
     differenceAmount,
     note,
     isManualAddition,
-    hasAnyEntry: entriesForArticle.length > 0,
+    hasAnyEntry: entriesForArticle.some((entry) => entry.counted),
     confirmedAbsent: entriesForArticle.some((e) => e.resolution === "CONFIRMED_ABSENT"),
     flaggedForControl: note !== null,
   };

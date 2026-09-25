@@ -52,6 +52,20 @@ export type ArticleCountFrequency =
 export type CountSessionType = "MONTHLY" | "QUARTERLY" | "YEARLY" | "FULL";
 
 /**
+ * Voorraadclassificatie (Sprint 2 — Historical Count Analysis): actief vs.
+ * obsolete stock, voor voorraadwaarde-analyse. Dit is een APARTE as t.o.v.
+ * `ArticleActiveStatus` hieronder (die gaat over telbaarheid/sessiescope,
+ * zie `frequency.ts#normalizeArticleStatus` — een artikel met status
+ * "OBSOLETE - PANEEL"/"OBSOLETE - ROOD" is daar gewoon INACTIVE, wat iets
+ * anders is dan de classificatie hier). Een artikel kan dus ACTIEF/telbaar
+ * én OBSOLETE (stockClassification) tegelijk zijn, of net andersom.
+ * Enkel MINIMALE waarden deze sprint (spec): geen SLOW_MOVING — dat komt
+ * pas later, berekend uit echte eBuddy-bewegingsdata (zie
+ * `domain/stockClassification.ts`).
+ */
+export type StockClassification = "ACTIVE" | "OBSOLETE";
+
+/**
  * CANCELLED (sessielogica-fix): een bewust geannuleerde sessie — nooit een
  * officiële telling. Blokkeert geen nieuwe sessie meer (enkel ACTIVE doet
  * dat, zie CountingRepository#getActiveSession) en telt nergens mee als
@@ -100,6 +114,18 @@ export interface Article {
    * Ontbrekend/`undefined` en `null` betekenen hetzelfde: geen opmerking.
    */
   comment?: string | null;
+  /**
+   * Voorraadclassificatie voor voorraadwaarde-analyse (Sprint 2). BEWUST
+   * optioneel (`?`), net als `comment` hierboven: een gewone Excel-import
+   * (of een bestaand `Article`-object van vóór deze sprint) kent dit veld
+   * nog niet — ontbrekend/`undefined` betekent altijd "ACTIVE" (nooit een
+   * harde default die alle bestaande `Article`-objectliteralen in de
+   * codebase/tests zou moeten aanpassen). Zie
+   * `domain/stockClassification.ts#getStockClassification` voor de enige
+   * correcte manier om dit veld te lezen — nooit rechtstreeks
+   * `article.stockClassification` vergelijken.
+   */
+  stockClassification?: StockClassification;
 }
 
 export interface CountSession {

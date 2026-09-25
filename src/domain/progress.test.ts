@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSessionProgress } from "./progress";
+import { computeSessionProgress, isArticleFullyCounted } from "./progress";
 import type { CountEntry, Location } from "./types";
 
 const locations: Location[] = [1, 2, 3, 4, 5].map((n) => ({
@@ -77,5 +77,45 @@ describe("computeSessionProgress — artikel op meerdere locaties (niet naïef o
     expect(progress.totalLocationEntries).toBe(2);
     expect(progress.totalUniqueArticles).toBe(1);
     expect(progress.completedUniqueArticles).toBe(1);
+  });
+});
+
+describe("isArticleFullyCounted — CONFIRMED_ABSENT lost resterende stub-entries op (production-pilot-readiness sprint punt 3)", () => {
+  it("geen entries -> niet volledig geteld", () => {
+    expect(isArticleFullyCounted(undefined)).toBe(false);
+    expect(isArticleFullyCounted([])).toBe(false);
+  });
+
+  it("enkel niet-getelde stub-entries -> niet volledig geteld", () => {
+    const entries = [
+      entry({ id: "e1", locationId: "loc-1", quantity: null, counted: false }),
+      entry({ id: "e2", locationId: "loc-2", quantity: null, counted: false }),
+    ];
+    expect(isArticleFullyCounted(entries)).toBe(false);
+  });
+
+  it("alle entries counted:true -> volledig geteld (geen regressie)", () => {
+    const entries = [
+      entry({ id: "e1", locationId: "loc-1", quantity: 3, counted: true }),
+      entry({ id: "e2", locationId: "loc-2", quantity: 1, counted: true }),
+    ];
+    expect(isArticleFullyCounted(entries)).toBe(true);
+  });
+
+  it("een CONFIRMED_ABSENT-entry maakt het artikel volledig geteld, ook met resterende niet-getelde stub-entries op andere locaties", () => {
+    const entries = [
+      entry({ id: "e1", locationId: "loc-1", quantity: null, counted: false }),
+      entry({ id: "e2", locationId: "loc-2", quantity: null, counted: false }),
+      entry({ id: "e3", locationId: null, quantity: 0, counted: true, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    expect(isArticleFullyCounted(entries)).toBe(true);
+  });
+
+  it("een CONFIRMED_ABSENT-entry die zelf niet counted is (zou niet mogen voorkomen) telt niet als opgelost", () => {
+    const entries = [
+      entry({ id: "e1", locationId: "loc-1", quantity: null, counted: false }),
+      entry({ id: "e2", locationId: null, quantity: null, counted: false, resolution: "CONFIRMED_ABSENT" }),
+    ];
+    expect(isArticleFullyCounted(entries)).toBe(false);
   });
 });

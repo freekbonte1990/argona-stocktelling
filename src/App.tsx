@@ -7,6 +7,7 @@ import { LocationOverviewPage } from "./ui/pages/LocationOverviewPage";
 import { WithoutLocationPage } from "./ui/pages/WithoutLocationPage";
 import { CountingPage } from "./ui/pages/CountingPage";
 import { ReviewPage } from "./ui/pages/ReviewPage";
+import { AnalysisPage } from "./ui/pages/AnalysisPage";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
@@ -21,6 +22,7 @@ type Route =
   | { screen: "withoutLocation"; sessionId: string }
   | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
   | { screen: "review"; sessionId: string }
+  | { screen: "analysis"; sessionId: string }
   | { screen: "articles"; officeId: string }
   | { screen: "articleDetail"; officeId: string; articleId: string }
   | { screen: "settings"; officeId: string };
@@ -100,6 +102,7 @@ async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
     case "locationOverview":
     case "withoutLocation":
     case "review":
+    case "analysis":
       return !!(await countingRepository.getSession(route.sessionId));
     case "counting": {
       const session = await countingRepository.getSession(route.sessionId);
@@ -203,7 +206,8 @@ function RouteHeader({
     route.screen === "locationOverview" ||
       route.screen === "withoutLocation" ||
       route.screen === "counting" ||
-      route.screen === "review"
+      route.screen === "review" ||
+      route.screen === "analysis"
       ? route.sessionId
       : undefined,
   );
@@ -290,6 +294,17 @@ function RouteHeader({
       />
     );
   }
+  if (route.screen === "analysis") {
+    return (
+      <AppHeader
+        breadcrumb={`${sessionOffice?.name ?? ""} — analyse telling`}
+        onBack={() => {
+          if (!session) return;
+          onNavigate({ screen: "home", officeId: session.officeId });
+        }}
+      />
+    );
+  }
   // counting
   // Mobile/tablet UX-fix: CountingPage toonde voorheen ZELF ook nog een
   // eigen "<kantoor> > <locatie>"-titel (dubbele weergave) — dat is er nu
@@ -340,7 +355,7 @@ function RouteBody({
             onNavigate({ screen: "home", officeId });
           }}
           onImportNewOffice={() => onNavigate({ screen: "import", fromOfficeId: route.officeId })}
-          onOpenReview={(sessionId) => onNavigate({ screen: "review", sessionId })}
+          onOpenReview={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
           onCancelSession={(sessionId) => countSessionService.cancelSession(sessionId)}
         />
       );
@@ -392,6 +407,16 @@ function RouteBody({
           onOpenLocation={(locationId) =>
             onNavigate({ screen: "counting", sessionId: route.sessionId, locationId })
           }
+        />
+      );
+    case "analysis":
+      return (
+        <AnalysisPage
+          sessionId={route.sessionId}
+          onOpenArticle={async (articleId) => {
+            const session = await countingRepository.getSession(route.sessionId);
+            if (session) onNavigate({ screen: "articleDetail", officeId: session.officeId, articleId });
+          }}
         />
       );
     case "articles":

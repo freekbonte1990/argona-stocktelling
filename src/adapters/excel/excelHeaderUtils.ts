@@ -50,6 +50,27 @@ function normalizeHeaderCell(cell: unknown): string {
 }
 
 /**
+ * Sprint 2 (Historical Count Analysis) §14: vindt een OPTIONELE kolom (bv.
+ * "Voorraadclassificatie" in ARTIKEL) op naam in de reeds gevonden
+ * headerrij — in tegenstelling tot `findHeaderRow` gooit dit NOOIT een
+ * fout wanneer de kolom ontbreekt (een bestand van vóór deze sprint kent ze
+ * gewoon niet), maar geeft dan `null` terug. De aanroeper voegt de
+ * gevonden index (indien niet `null`) toe aan `columnIndexByName` vóór
+ * `extractDataRows`, zodat die kolom net als een verplichte kolom wordt
+ * meegelezen wanneer aanwezig, en anders overal `null` blijft opleveren.
+ */
+export function findOptionalColumnIndex(
+  rows: unknown[][],
+  headerRowIndex: number,
+  columnName: string,
+): number | null {
+  const row = rows[headerRowIndex] ?? [];
+  const normalized = columnName.trim().toLowerCase();
+  const index = row.findIndex((cell) => normalizeHeaderCell(cell) === normalized);
+  return index >= 0 ? index : null;
+}
+
+/**
  * Leest alle datarijen na de headerrij, tot en met de eerste volledig lege rij
  * (of het einde van de sheet). Geeft per rij een record terug, gesleuteld op
  * de kolomnamen uit `columnIndexByName`.
