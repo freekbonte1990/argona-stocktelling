@@ -1,4 +1,6 @@
 import type { SessionReviewSummary } from "./review";
+import { PRODUCT_CATEGORY_FALLBACK } from "./productCategory";
+import type { ArticleCategoryResolution } from "./productCategory";
 import { getStockClassification } from "./stockClassification";
 import type { ArticleSnapshot, ArticleSnapshotStatus, StockSnapshot } from "./stockSnapshot";
 import type { CountSessionType, Location, StockClassification } from "./types";
@@ -38,7 +40,12 @@ export interface AnalysisArticleRow {
   articleId: string;
   articleNumber: string;
   description: string;
+  /** Sprint 3.2 §2: "Bronproductgroep" — bevroren op het moment van de snapshot, puur audit/naslag. Nooit meer gebruikt voor groepering/analyse. */
   productGroup: string | null;
+  /** Sprint 3.2 §11 (kritiek): de HUIDIGE, canonieke "Productgamma"-id — geresolveerd t.o.v. de LEVENDE artikelstam op het moment dat deze analyse opgebouwd wordt, nooit bevroren. `null` = niet ingedeeld. */
+  productCategoryId: string | null;
+  /** Weergavenaam van `productCategoryId`, met fallback `PRODUCT_CATEGORY_FALLBACK` — dit is het veld waarop gegroepeerd/gefilterd wordt. */
+  productCategory: string;
   classification: StockClassification;
   unit: string | null;
   /** "Vorige telling" op het moment van deze snapshot. */
@@ -64,13 +71,19 @@ export interface AnalysisArticleRow {
  * Puur een export van een reeds bestaande, ongewijzigde functie — geen
  * enkele bestaande aanroeper/uitvoer hier verandert hierdoor.
  */
-export function toAnalysisArticleRow(snapshotRow: ArticleSnapshot): AnalysisArticleRow {
+export function toAnalysisArticleRow(
+  snapshotRow: ArticleSnapshot,
+  categoryResolution: Map<string, ArticleCategoryResolution>,
+): AnalysisArticleRow {
   const { article } = snapshotRow;
+  const resolution = categoryResolution.get(snapshotRow.articleId);
   return {
     articleId: snapshotRow.articleId,
     articleNumber: article.articleNumber,
     description: article.description,
     productGroup: article.productGroup,
+    productCategoryId: resolution?.categoryId ?? null,
+    productCategory: resolution?.categoryName ?? PRODUCT_CATEGORY_FALLBACK,
     classification: getStockClassification(article),
     unit: article.unit,
     previousCount: snapshotRow.previousCount,
@@ -86,12 +99,6 @@ export function toAnalysisArticleRow(snapshotRow: ArticleSnapshot): AnalysisArti
 
 function percentOf(part: number, total: number): number {
   return total > 0 ? (part / total) * 100 : 0;
-}
-
-const PRODUCT_GROUP_FALLBACK = "(geen productgroep)";
-
-function groupLabel(productGroup: string | null): string {
-  return productGroup ?? PRODUCT_GROUP_FALLBACK;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,12 +176,13 @@ function computeKpis(rows: AnalysisArticleRow[], review: SessionReviewSummary): 
 }
 
 // ---------------------------------------------------------------------------
-// Voorraadwaarde per productgroep (spec §4)
+// Voorraadwaarde per productgamma (spec §4, sinds Sprint 3.2 §11: canoniek,
+// retroactief — nooit meer de bevroren bronproductgroep)
 // ---------------------------------------------------------------------------
 
-export interface ProductGroupAnalysisRow {
-  /** Weergavenaam — `null`-groep wordt getoond als "(geen productgroep)", nooit een lege string. */
-  productGroup: string;
+export interface ProductCategoryAnalysisRow {
+  /** Weergavenaam van de HUIDIGE canonieke Productgamma — "niet ingedeeld" wordt getoond als `PRODUCT_CATEGORY_FALLBACK`, nooit een lege string. */
+  productCategory: string;
   articleCount: number;
   totalUnits: number;
   stockValue: number;
@@ -185,17 +193,17 @@ export interface ProductGroupAnalysisRow {
 }
 
 /** Standaard sortering (spec §4): hoogste voorraadwaarde eerst. */
-export function buildProductGroupAnalysis(
+export function buildProductCategoryAnalysis(
   rows: AnalysisArticleRow[],
   totalStockValue: number,
-): ProductGroupAnalysisRow[] {
-  const byGroup = new Map<string, ProductGroupAnalysisRow>();
+): ProductCategoryAnalysisRow[] {
+  const byGroup = new Map<string, ProductCategoryAnalysisRow>();
   for (const row of rows) {
-    const label = groupLabel(row.productGroup);
+    const label = row.productCategory;
     let entry = byGroup.get(label);
     if (!entry) {
       entry = {
-        productGroup: label,
+        productCategory: label,
         articleCount: 0,
         totalUnits: 0,
         stockValue: 0,
@@ -226,8 +234,8 @@ export function buildProductGroupAnalysis(
 // Obsolete stock (spec §5-6)
 // ---------------------------------------------------------------------------
 
-export interface ObsoleteProductGroupRow {
-  productGroup: string;
+export interface ObsoleteProductCategoryRow {
+  productCategory: string;
   articleCount: number;
   totalUnits: number;
   obsoleteValue: number;
@@ -237,7 +245,10 @@ export interface ObsoleteArticleRow {
   articleId: string;
   articleNumber: string;
   description: string;
+  /** Bronproductgroep (bevroren, audit) — zie `AnalysisArticleRow.productGroup`. */
   productGroup: string | null;
+  /** Huidige canonieke Productgamma (weergavenaam). */
+  productCategory: string;
   quantity: number | null;
   costPrice: number | null;
   stockValue: number | null;
@@ -248,7 +259,7 @@ export interface ObsoleteAnalysis {
   percentOfTotalStockValue: number;
   obsoleteArticleCount: number;
   obsoleteTotalUnits: number;
-  byProductGroup: ObsoleteProductGroupRow[];
+  byProductCategory: ObsoleteProductCategoryRow[];
   /** Sortering (spec §6): hoogste obsolete waarde eerst. */
   articles: ObsoleteArticleRow[];
 }
@@ -261,12 +272,12 @@ export function buildObsoleteAnalysis(
   const totalObsoleteValue = obsoleteRows.reduce((sum, row) => sum + (row.stockValue ?? 0), 0);
   const obsoleteTotalUnits = obsoleteRows.reduce((sum, row) => sum + (row.finalQuantity ?? 0), 0);
 
-  const byGroup = new Map<string, ObsoleteProductGroupRow>();
+  const byGroup = new Map<string, ObsoleteProductCategoryRow>();
   for (const row of obsoleteRows) {
-    const label = groupLabel(row.productGroup);
+    const label = row.productCategory;
     let entry = byGroup.get(label);
     if (!entry) {
-      entry = { productGroup: label, articleCount: 0, totalUnits: 0, obsoleteValue: 0 };
+      entry = { productCategory: label, articleCount: 0, totalUnits: 0, obsoleteValue: 0 };
       byGroup.set(label, entry);
     }
     entry.articleCount += 1;
@@ -280,6 +291,7 @@ export function buildObsoleteAnalysis(
       articleNumber: row.articleNumber,
       description: row.description,
       productGroup: row.productGroup,
+      productCategory: row.productCategory,
       quantity: row.finalQuantity,
       costPrice: row.costPrice,
       stockValue: row.stockValue,
@@ -291,7 +303,7 @@ export function buildObsoleteAnalysis(
     percentOfTotalStockValue: percentOf(totalObsoleteValue, totalStockValue),
     obsoleteArticleCount: obsoleteRows.length,
     obsoleteTotalUnits,
-    byProductGroup: Array.from(byGroup.values()).sort((a, b) => b.obsoleteValue - a.obsoleteValue),
+    byProductCategory: Array.from(byGroup.values()).sort((a, b) => b.obsoleteValue - a.obsoleteValue),
     articles,
   };
 }
@@ -530,7 +542,8 @@ export type AnalysisCountingStateFilter = "ALL" | "PHYSICALLY_COUNTED" | "CARRIE
 
 export interface AnalysisArticleFilters {
   search: string;
-  productGroup: string | null;
+  /** Filtert op de HUIDIGE canonieke Productgamma-weergavenaam (spec §11, sinds Sprint 3.2: nooit meer de bevroren bronproductgroep). */
+  productCategory: string | null;
   classification: StockClassification | null;
   onlyWithDifference: boolean;
   countingState: AnalysisCountingStateFilter;
@@ -538,7 +551,7 @@ export interface AnalysisArticleFilters {
 
 export const DEFAULT_ANALYSIS_ARTICLE_FILTERS: AnalysisArticleFilters = {
   search: "",
-  productGroup: null,
+  productCategory: null,
   classification: null,
   onlyWithDifference: false,
   countingState: "ALL",
@@ -550,7 +563,7 @@ export function filterAnalysisArticles(
 ): AnalysisArticleRow[] {
   const term = filters.search.trim().toLowerCase();
   return rows.filter((row) => {
-    if (filters.productGroup !== null && groupLabel(row.productGroup) !== filters.productGroup) return false;
+    if (filters.productCategory !== null && row.productCategory !== filters.productCategory) return false;
     if (filters.classification !== null && row.classification !== filters.classification) return false;
     if (filters.onlyWithDifference && (row.differenceQuantity === null || row.differenceQuantity === 0)) {
       return false;
@@ -577,7 +590,7 @@ export type AnalysisArticleSortMode =
   | "CORRECTION_AMOUNT_DESC";
 
 export const ANALYSIS_ARTICLE_SORT_MODE_LABELS: Record<AnalysisArticleSortMode, string> = {
-  GROUP_THEN_DESCRIPTION: "Productgroep → Omschrijving",
+  GROUP_THEN_DESCRIPTION: "Productgamma → Omschrijving",
   STOCK_VALUE_DESC: "Voorraadwaarde (hoog → laag)",
   CORRECTION_AMOUNT_DESC: "Correctie € (hoog → laag)",
 };
@@ -590,7 +603,7 @@ export function sortAnalysisArticles(
   switch (mode) {
     case "GROUP_THEN_DESCRIPTION":
       return sorted.sort((a, b) => {
-        const groupCompare = groupLabel(a.productGroup).localeCompare(groupLabel(b.productGroup), "nl");
+        const groupCompare = a.productCategory.localeCompare(b.productCategory, "nl");
         if (groupCompare !== 0) return groupCompare;
         return a.description.localeCompare(b.description, "nl");
       });
@@ -617,7 +630,8 @@ export interface SessionAnalysisHeader {
 export interface SessionAnalysis {
   header: SessionAnalysisHeader;
   kpis: SessionAnalysisKpis;
-  productGroups: ProductGroupAnalysisRow[];
+  /** Sinds Sprint 3.2 §11: gegroepeerd op de HUIDIGE canonieke Productgamma, retroactief — niet meer op de bevroren bronproductgroep. */
+  productCategories: ProductCategoryAnalysisRow[];
   obsolete: ObsoleteAnalysis;
   countingQuality: CountingQualityAnalysis;
   deviations: DeviationAnalysis;
@@ -642,10 +656,11 @@ export function buildSessionAnalysis(
   snapshot: StockSnapshot,
   review: SessionReviewSummary,
   locations: Location[],
+  categoryResolution: Map<string, ArticleCategoryResolution>,
 ): SessionAnalysis {
-  const articles = snapshot.articles.map(toAnalysisArticleRow);
+  const articles = snapshot.articles.map((row) => toAnalysisArticleRow(row, categoryResolution));
   const kpis = computeKpis(articles, review);
-  const productGroups = buildProductGroupAnalysis(articles, kpis.totalStockValue);
+  const productCategories = buildProductCategoryAnalysis(articles, kpis.totalStockValue);
   const obsolete = buildObsoleteAnalysis(articles, kpis.totalStockValue);
   const countingQuality = buildCountingQuality(kpis, review);
   const deviations = buildDeviationAnalysis(articles);
@@ -660,7 +675,7 @@ export function buildSessionAnalysis(
       snapshotDate: snapshot.snapshotDate,
     },
     kpis,
-    productGroups,
+    productCategories,
     obsolete,
     countingQuality,
     deviations,

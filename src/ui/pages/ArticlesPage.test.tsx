@@ -57,7 +57,7 @@ const articleA2 = makeArticle({ articleNumber: "A2", description: "Beta artikel"
 const articleA3 = makeArticle({ articleNumber: "A3", description: "Gamma artikel", productGroup: "ANDERE" });
 
 beforeEach(async () => {
-  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState]) {
+  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState, db.productCategories]) {
     await table.clear();
   }
   await countingRepository.saveOffice(office);
@@ -126,7 +126,13 @@ describe("ArticlesPage — compacte toolbar (v0.2.1 correctieronde §1)", () => 
       await waitUntilLoaded();
 
       let modal = await openFilters(user);
-      await user.selectOptions(within(modal).getByLabelText("Productgroep"), "ANDERE");
+      // De productgamma-select vult zich pas nadat de eenmalige migratie
+      // (spec §4, uit de bestaande `productGroup`-waarden) via de reactieve
+      // liveQuery is doorgekomen — expliciet wachten tot de optie bestaat.
+      await waitFor(() => {
+        expect(within(modal).getByText("ANDERE")).toBeInTheDocument();
+      });
+      await user.selectOptions(within(modal).getByLabelText("Productgamma"), "ANDERE");
       // Modal blijft open (geen auto-close per keuze) — expliciet sluiten via "Toepassen".
       await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
 
@@ -135,14 +141,14 @@ describe("ArticlesPage — compacte toolbar (v0.2.1 correctieronde §1)", () => 
       expect(screen.queryByText("Alfa artikel")).not.toBeInTheDocument();
 
       // Actieve filter is ook zichtbaar/snel wisbaar als chip buiten de modal.
-      const removableChip = screen.getByText("Productgroep: ANDERE").closest(".location-chip") as HTMLElement;
+      const removableChip = screen.getByText("Productgamma: ANDERE").closest(".location-chip") as HTMLElement;
       await user.click(within(removableChip).getByRole("button"));
       expect(screen.getByText("Alfa artikel")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
 
-      // Meerdere filters combineren: productgroep + "Geen locatie".
+      // Meerdere filters combineren: productgamma + "Geen locatie".
       modal = await openFilters(user);
-      await user.selectOptions(within(modal).getByLabelText("Productgroep"), "GROEP");
+      await user.selectOptions(within(modal).getByLabelText("Productgamma"), "GROEP");
       await user.selectOptions(within(modal).getByLabelText("Locatie"), "Geen locatie");
       await user.click(within(modal).getByRole("button", { name: "Toepassen" }));
 
@@ -268,7 +274,14 @@ describe("ArticlesPage — '+ Nieuw artikel' (v0.2.1 correctieronde §3A)", () =
     const modal = screen.getByText("Nieuw artikel").closest(".modal-card") as HTMLElement;
 
     await user.type(within(modal).getByLabelText("Omschrijving *"), "Onderweg gekocht onderdeel");
-    await user.type(within(modal).getByLabelText("Productgroep *"), "Nieuw");
+    // Sprint 3.2 §10: "Productgroep" (vrije tekst) is vervangen door een
+    // verplichte Productgamma-dropdown — de opties vullen zich pas nadat de
+    // eenmalige migratie (uit de bestaande `productGroup`-waarden) via de
+    // reactieve liveQuery is doorgekomen.
+    await waitFor(() => {
+      expect(within(modal).getByText("GROEP")).toBeInTheDocument();
+    });
+    await user.selectOptions(within(modal).getByLabelText("Productgamma *"), "GROEP");
     await user.type(within(modal).getByLabelText("Eenheid *"), "stuk");
     await user.click(within(modal).getByRole("button", { name: "Rek 1" }));
     await user.click(within(modal).getByRole("button", { name: "Artikel aanmaken" }));

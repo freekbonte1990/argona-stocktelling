@@ -8,9 +8,22 @@ import {
   DEFAULT_ANALYSIS_ARTICLE_FILTERS,
   type AnalysisArticleRow,
 } from "./analysis";
+import { PRODUCT_CATEGORY_FALLBACK, type ArticleCategoryResolution } from "./productCategory";
 import { computeSessionReview } from "./review";
 import { buildSessionSnapshot } from "./stockSnapshot";
 import type { Article, CountEntry, CountSession, Location } from "./types";
+
+/** Testhelper (Sprint 3.2 §12): bouwt een expliciete `articleId -> categorie`-resolutiemap, zoals de applicatielaag die normaal uit de levende `Article[]`/`ProductCategory[]` opbouwt — hier rechtstreeks opgegeven, zodat elke test expliciet blijft over WELKE canonieke categorie elk artikel resolveert. Een artikel zonder vermelding resolveert naar `PRODUCT_CATEGORY_FALLBACK` (niet ingedeeld), exact zoals in de echte applicatielaag. */
+function resolution(byArticleId: Record<string, string | null>): Map<string, ArticleCategoryResolution> {
+  const map = new Map<string, ArticleCategoryResolution>();
+  for (const [articleId, categoryName] of Object.entries(byArticleId)) {
+    map.set(articleId, {
+      categoryId: categoryName ? `cat:${categoryName}` : null,
+      categoryName: categoryName ?? PRODUCT_CATEGORY_FALLBACK,
+    });
+  }
+  return map;
+}
 
 /**
  * Sprint 2 — Historical Count Analysis. Zelfde fixture-stijl als
@@ -79,10 +92,15 @@ function makeSession(overrides: Partial<CountSession> = {}): CountSession {
 }
 
 /** Bouwt de volledige, echte pijplijn (review -> snapshot -> analyse) uit ruwe fixtures. */
-function analyze(articles: Article[], entries: CountEntry[], session: CountSession) {
+function analyze(
+  articles: Article[],
+  entries: CountEntry[],
+  session: CountSession,
+  categoryResolution: Map<string, ArticleCategoryResolution> = new Map(),
+) {
   const review = computeSessionReview(session, articles, locations, entries);
   const snapshot = buildSessionSnapshot(session, articles, review);
-  return buildSessionAnalysis(snapshot, review, locations);
+  return buildSessionAnalysis(snapshot, review, locations, categoryResolution);
 }
 
 describe("buildSessionAnalysis — KPI's en voorraadwaarde (spec §2/§3)", () => {
@@ -144,60 +162,64 @@ describe("buildSessionAnalysis — KPI's en voorraadwaarde (spec §2/§3)", () =
   });
 });
 
-describe("buildSessionAnalysis — voorraadwaarde per productgroep (spec §4)", () => {
-  it("groepeert per productgroep, sorteert op hoogste voorraadwaarde eerst, en berekent het percentage van het totaal", () => {
-    const a1 = makeArticle("A1", { productGroup: "Batterijen", costPrice: 10, previousCount: 0 });
-    const a2 = makeArticle("A2", { productGroup: "Batterijen", costPrice: 5, previousCount: 0 });
-    const a3 = makeArticle("A3", { productGroup: "Zonnepanelen", costPrice: 100, previousCount: 0 });
+describe("buildSessionAnalysis — voorraadwaarde per productgamma (spec §4, sinds Sprint 3.2 §11: canoniek/retroactief)", () => {
+  it("groepeert per productgamma, sorteert op hoogste voorraadwaarde eerst, en berekent het percentage van het totaal", () => {
+    const a1 = makeArticle("A1", { costPrice: 10, previousCount: 0 });
+    const a2 = makeArticle("A2", { costPrice: 5, previousCount: 0 });
+    const a3 = makeArticle("A3", { costPrice: 100, previousCount: 0 });
     const session = makeSession({ articleIds: ["office:A1", "office:A2", "office:A3"] });
     const entries: CountEntry[] = [
       makeEntry("office:A1", "office:loc-1", { quantity: 10, counted: true }), // 100
       makeEntry("office:A2", "office:loc-1", { quantity: 4, counted: true }), // 20
       makeEntry("office:A3", "office:loc-1", { quantity: 2, counted: true }), // 200
     ];
+    const categoryResolution = resolution({
+      "office:A1": "Batterijen",
+      "office:A2": "Batterijen",
+      "office:A3": "Zonnepanelen",
+    });
 
-    const analysis = analyze([a1, a2, a3], entries, session);
+    const analysis = analyze([a1, a2, a3], entries, session, categoryResolution);
 
     expect(analysis.kpis.totalStockValue).toBe(320);
-    expect(analysis.productGroups.map((g) => g.productGroup)).toEqual(["Zonnepanelen", "Batterijen"]);
-    const zonnepanelen = analysis.productGroups.find((g) => g.productGroup === "Zonnepanelen")!;
+    expect(analysis.productCategories.map((g) => g.productCategory)).toEqual(["Zonnepanelen", "Batterijen"]);
+    const zonnepanelen = analysis.productCategories.find((g) => g.productCategory === "Zonnepanelen")!;
     expect(zonnepanelen.articleCount).toBe(1);
     expect(zonnepanelen.stockValue).toBe(200);
     expect(zonnepanelen.percentOfTotalStockValue).toBeCloseTo(62.5, 5);
-    const batterijen = analysis.productGroups.find((g) => g.productGroup === "Batterijen")!;
+    const batterijen = analysis.productCategories.find((g) => g.productCategory === "Batterijen")!;
     expect(batterijen.articleCount).toBe(2);
     expect(batterijen.stockValue).toBe(120);
     expect(batterijen.totalUnits).toBe(14);
   });
 
-  it("een artikel zonder productgroep valt onder een expliciete, nooit-lege groepslabel", () => {
-    const article = makeArticle("A1", { productGroup: null, costPrice: 1, previousCount: 0 });
+  it("een artikel zonder canonieke productgamma-toewijzing valt onder een expliciete, nooit-lege fallback (nooit de bevroren bronproductgroep)", () => {
+    const article = makeArticle("A1", { productGroup: "Oude Groep", costPrice: 1, previousCount: 0 });
     const session = makeSession({ articleIds: ["office:A1"] });
     const entries: CountEntry[] = [makeEntry("office:A1", "office:loc-1", { quantity: 1, counted: true })];
 
+    // Bewust GEEN categoryResolution voor dit artikel meegegeven — ondanks de
+    // bevroren bronproductgroep "Oude Groep" moet dit als niet-ingedeeld tonen.
     const analysis = analyze([article], entries, session);
 
-    expect(analysis.productGroups).toHaveLength(1);
-    expect(analysis.productGroups[0].productGroup).toBe("(geen productgroep)");
+    expect(analysis.productCategories).toHaveLength(1);
+    expect(analysis.productCategories[0].productCategory).toBe(PRODUCT_CATEGORY_FALLBACK);
   });
 });
 
 describe("buildSessionAnalysis — obsolete voorraad (spec §5-6)", () => {
   it("berekent obsolete totalen/percentage/breakdown enkel voor OBSOLETE-geclassificeerde artikelen", () => {
     const active = makeArticle("A1", {
-      productGroup: "G1",
       costPrice: 10,
       previousCount: 0,
       stockClassification: "ACTIVE",
     });
     const obsoleteCheap = makeArticle("A2", {
-      productGroup: "G1",
       costPrice: 5,
       previousCount: 0,
       stockClassification: "OBSOLETE",
     });
     const obsoleteExpensive = makeArticle("A3", {
-      productGroup: "G2",
       costPrice: 50,
       previousCount: 0,
       stockClassification: "OBSOLETE",
@@ -208,8 +230,9 @@ describe("buildSessionAnalysis — obsolete voorraad (spec §5-6)", () => {
       makeEntry("office:A2", "office:loc-1", { quantity: 4, counted: true }), // 20 (OBSOLETE)
       makeEntry("office:A3", "office:loc-1", { quantity: 2, counted: true }), // 100 (OBSOLETE)
     ];
+    const categoryResolution = resolution({ "office:A1": "G1", "office:A2": "G1", "office:A3": "G2" });
 
-    const analysis = analyze([active, obsoleteCheap, obsoleteExpensive], entries, session);
+    const analysis = analyze([active, obsoleteCheap, obsoleteExpensive], entries, session, categoryResolution);
 
     expect(analysis.kpis.totalStockValue).toBe(220);
     expect(analysis.obsolete.totalObsoleteValue).toBe(120);
@@ -218,7 +241,7 @@ describe("buildSessionAnalysis — obsolete voorraad (spec §5-6)", () => {
     expect(analysis.obsolete.obsoleteTotalUnits).toBe(6);
     // Sortering: hoogste obsolete waarde eerst.
     expect(analysis.obsolete.articles.map((a) => a.articleId)).toEqual(["office:A3", "office:A2"]);
-    expect(analysis.obsolete.byProductGroup).toHaveLength(2);
+    expect(analysis.obsolete.byProductCategory).toHaveLength(2);
   });
 
   it("een artikel zonder expliciete `stockClassification` (legacy, van vóór deze sprint) telt veilig als ACTIVE", () => {
@@ -295,6 +318,8 @@ describe("buildSessionAnalysis — grootste afwijkingen (spec §8)", () => {
       articleNumber: `A${i}`,
       description: `Artikel ${i}`,
       productGroup: null,
+      productCategoryId: null,
+      productCategory: PRODUCT_CATEGORY_FALLBACK,
       classification: "ACTIVE",
       unit: null,
       previousCount: 0,
@@ -381,7 +406,8 @@ describe("buildSessionAnalysis — historische onveranderlijkheid (spec §13/§1
 
     const review = computeSessionReview(session, [article], locations, entries);
     const snapshot = buildSessionSnapshot(session, [article], review);
-    const analysisBefore = buildSessionAnalysis(snapshot, review, locations);
+    const categoryResolution = resolution({ "office:A1": "Oud" });
+    const analysisBefore = buildSessionAnalysis(snapshot, review, locations, categoryResolution);
 
     // Simuleer een latere, immutabele bewerking (exact zoals ArticleDetailPage
     // dat doet: een NIEUW object via spread, nooit een mutatie van het
@@ -391,11 +417,13 @@ describe("buildSessionAnalysis — historische onveranderlijkheid (spec §13/§1
     expect(laterEdit.costPrice).toBe(999); // enkel om te bevestigen dat de "latere editie" zelf wél wijzigde...
 
     // ...maar een analyse herbouwd uit de ORIGINELE, ongewijzigde snapshot
-    // blijft exact hetzelfde, ongeacht wat er met `laterEdit` gebeurt.
-    const analysisAfter = buildSessionAnalysis(snapshot, review, locations);
+    // blijft exact hetzelfde, ongeacht wat er met `laterEdit` gebeurt (en
+    // ongeacht een LEVENDE herclassificatie — die raakt enkel toekomstige
+    // resoluties, nooit deze reeds bevroren snapshot/review-invoer).
+    const analysisAfter = buildSessionAnalysis(snapshot, review, locations, categoryResolution);
     expect(analysisAfter).toEqual(analysisBefore);
     expect(analysisAfter.kpis.totalStockValue).toBe(50);
-    expect(analysisAfter.productGroups[0].productGroup).toBe("Oud");
+    expect(analysisAfter.productCategories[0].productCategory).toBe("Oud");
     expect(analysisAfter.obsolete.obsoleteArticleCount).toBe(0);
   });
 });
@@ -407,6 +435,8 @@ describe("filterAnalysisArticles / sortAnalysisArticles (spec §11)", () => {
       articleNumber: "A1",
       description: "Zonnepaneel 300W",
       productGroup: "Zonnepanelen",
+      productCategoryId: "cat:Zonnepanelen",
+      productCategory: "Zonnepanelen",
       classification: "ACTIVE",
       unit: null,
       previousCount: 5,
@@ -423,6 +453,8 @@ describe("filterAnalysisArticles / sortAnalysisArticles (spec §11)", () => {
       articleNumber: "A2",
       description: "Batterij 5kWh",
       productGroup: "Batterijen",
+      productCategoryId: "cat:Batterijen",
+      productCategory: "Batterijen",
       classification: "OBSOLETE",
       unit: null,
       previousCount: 2,
@@ -436,10 +468,10 @@ describe("filterAnalysisArticles / sortAnalysisArticles (spec §11)", () => {
     },
   ];
 
-  it("filtert op productgroep, classificatie, verschil en telstatus", () => {
-    expect(filterAnalysisArticles(rows, { ...DEFAULT_ANALYSIS_ARTICLE_FILTERS, productGroup: "Batterijen" })).toEqual([
-      rows[1],
-    ]);
+  it("filtert op productgamma, classificatie, verschil en telstatus", () => {
+    expect(
+      filterAnalysisArticles(rows, { ...DEFAULT_ANALYSIS_ARTICLE_FILTERS, productCategory: "Batterijen" }),
+    ).toEqual([rows[1]]);
     expect(
       filterAnalysisArticles(rows, { ...DEFAULT_ANALYSIS_ARTICLE_FILTERS, classification: "OBSOLETE" }),
     ).toEqual([rows[1]]);

@@ -1,5 +1,5 @@
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Office, ProductCategory } from "../../domain/types";
 
 /**
  * Eén nog niet-geïnterpreteerd, historisch tellingtabblad zoals aangetroffen
@@ -58,4 +58,14 @@ export interface StockSource {
    * gekend uit dit bestand.
    */
   loadArticleLocationAssignments?(): Promise<ArticleLocationAssignment[]>;
+  /**
+   * Sprint 3.2 §14 (Excel portability): de bedrijfsbrede/globale
+   * "Productgamma"-lijst uit een eerder geëxporteerd bestand (sheet
+   * PRODUCTGAMMAS) — spec: "een volledig lege database moet na import exact
+   * dezelfde category IDs/names/order/active-states/article assignments
+   * terugkrijgen". OPTIONEEL om dezelfde reden als `loadArticleLocationAssignments`:
+   * ontbreekt de methode of de sheet (bestand van vóór Sprint 3.2), dan zijn
+   * er gewoon nog geen geïmporteerde Productgamma's uit dit bestand.
+   */
+  loadProductCategories?(): Promise<ProductCategory[]>;
 }

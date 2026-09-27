@@ -1,3 +1,4 @@
+import { PRODUCT_CATEGORY_FALLBACK } from "./productCategory";
 import type { Article, ArticleActiveStatus, ArticleCountFrequency } from "./types";
 
 /**
@@ -20,7 +21,7 @@ export type ArticleListSortMode =
   | "PREVIOUS_COUNT";
 
 export const ARTICLE_LIST_SORT_MODE_LABELS: Record<ArticleListSortMode, string> = {
-  GROUP_THEN_DESCRIPTION: "Productgroep → Omschrijving",
+  GROUP_THEN_DESCRIPTION: "Productgamma → Omschrijving",
   DESCRIPTION_ASC: "Omschrijving A-Z",
   DESCRIPTION_DESC: "Omschrijving Z-A",
   ARTICLE_NUMBER: "Artikelnummer",
@@ -52,11 +53,23 @@ export const ARTICLE_STATUS_FILTER_LABELS: Record<ArticleActiveStatus, string> =
 /** Standaard sortering van het Artikels-overzicht (spec §5): Productgroep → Omschrijving. */
 export const DEFAULT_ARTICLE_LIST_SORT_MODE: ArticleListSortMode = "GROUP_THEN_DESCRIPTION";
 
-export function sortArticlesForList(articles: Article[], mode: ArticleListSortMode): Article[] {
+/**
+ * `categoryNameById`: Sprint 3.2 §9 — nodig om `GROUP_THEN_DESCRIPTION` op de
+ * HUIDIGE canonieke Productgamma-naam te sorteren (niet meer op de bevroren
+ * bronproductgroep) — optioneel/leeg toegestaan zodat bestaande aanroepers
+ * die dit nog niet meegeven gewoon op `PRODUCT_CATEGORY_FALLBACK` sorteren.
+ */
+export function sortArticlesForList(
+  articles: Article[],
+  mode: ArticleListSortMode,
+  categoryNameById: Map<string, string> = new Map(),
+): Article[] {
+  const categoryLabel = (article: Article): string =>
+    (article.categoryId && categoryNameById.get(article.categoryId)) || PRODUCT_CATEGORY_FALLBACK;
   return [...articles].sort((a, b) => {
     switch (mode) {
       case "GROUP_THEN_DESCRIPTION": {
-        const groupCompare = (a.productGroup ?? "").localeCompare(b.productGroup ?? "", "nl");
+        const groupCompare = categoryLabel(a).localeCompare(categoryLabel(b), "nl");
         if (groupCompare !== 0) return groupCompare;
         return a.description.localeCompare(b.description, "nl");
       }
@@ -88,9 +101,16 @@ export function sortArticlesForList(articles: Article[], mode: ArticleListSortMo
 /** "ALL" = geen locatiefilter, "NONE" = nog geen enkele actieve locatie, of een specifiek locatie-ID. */
 export type ArticleLocationFilterValue = "ALL" | "NONE" | string;
 
+/**
+ * "ALL" = geen productgamma-filter, "UNCLASSIFIED" = expliciet enkel
+ * niet-ingedeelde artikelen (spec §9: "mag niet verborgen worden — voorzie
+ * een expliciet filter"), of een specifiek `ProductCategory.id`.
+ */
+export type ArticleCategoryFilterValue = "ALL" | "UNCLASSIFIED" | string;
+
 export interface ArticleListFilters {
   search: string;
-  productGroup: string | null;
+  category: ArticleCategoryFilterValue;
   countPeriod: ArticleCountFrequency | null;
   status: ArticleActiveStatus | null;
   location: ArticleLocationFilterValue;
@@ -98,7 +118,7 @@ export interface ArticleListFilters {
 
 export const DEFAULT_ARTICLE_LIST_FILTERS: ArticleListFilters = {
   search: "",
-  productGroup: null,
+  category: "ALL",
   countPeriod: null,
   status: null,
   location: "ALL",
@@ -113,7 +133,7 @@ export const DEFAULT_ARTICLE_LIST_FILTERS: ArticleListFilters = {
  */
 export function countActiveArticleListFilters(filters: ArticleListFilters): number {
   let count = 0;
-  if (filters.productGroup !== null) count += 1;
+  if (filters.category !== "ALL") count += 1;
   if (filters.countPeriod !== null) count += 1;
   if (filters.status !== null) count += 1;
   if (filters.location !== "ALL") count += 1;
@@ -133,7 +153,11 @@ export function filterArticlesForList(
 ): Article[] {
   const term = filters.search.trim().toLowerCase();
   return articles.filter((article) => {
-    if (filters.productGroup && article.productGroup !== filters.productGroup) return false;
+    if (filters.category === "UNCLASSIFIED") {
+      if (article.categoryId) return false;
+    } else if (filters.category !== "ALL") {
+      if (article.categoryId !== filters.category) return false;
+    }
     if (filters.countPeriod && article.countPeriod !== filters.countPeriod) return false;
     if (filters.status && article.status !== filters.status) return false;
 

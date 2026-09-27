@@ -75,6 +75,7 @@ beforeEach(async () => {
     db.importMeta,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
     db.historicalSheets,
     db.stockHistoryEntries,
     db.finalizedSessionResults,

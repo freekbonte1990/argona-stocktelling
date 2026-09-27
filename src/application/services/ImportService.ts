@@ -2,7 +2,7 @@ import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain
 import { activeLocationsInOrder, mergeArticleLocationAssignments } from "../../domain/locations";
 import { mergeHistoryEntries } from "../../domain/stockSnapshot";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Office, ProductCategory } from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
 import type { HistoricalSheetSnapshot, StockSource } from "../ports/StockSource";
 
@@ -43,6 +43,14 @@ export interface ImportPreview {
    * bestand van vóór deze sprint).
    */
   assignments: ArticleLocationAssignment[];
+  /**
+   * Sprint 3.2 §14 (Excel portability): de bedrijfsbrede/globale
+   * Productgamma-lijst uit sheet PRODUCTGAMMAS — leeg wanneer de bron dit
+   * niet ondersteunt (`StockSource.loadProductCategories` is optioneel) of
+   * het bestand deze sheet niet had (backward compat, een bestand van vóór
+   * Sprint 3.2).
+   */
+  categories: ProductCategory[];
 }
 
 /**
@@ -91,10 +99,11 @@ export class ImportService {
     // Alle drie optioneel (zie StockSource) — een bron/bestand zonder rollend
     // archief resp. zonder geleerde locatiekoppelingen geeft hier gewoon
     // niets terug, nooit een fout.
-    const [historyEntries, historicalSheets, assignments] = await Promise.all([
+    const [historyEntries, historicalSheets, assignments, categories] = await Promise.all([
       source.loadHistory?.() ?? Promise.resolve([]),
       source.loadHistoricalSheets?.() ?? Promise.resolve([]),
       source.loadArticleLocationAssignments?.() ?? Promise.resolve([]),
+      source.loadProductCategories?.() ?? Promise.resolve([]),
     ]);
 
     const existingOffice = await this.repository.getOffice(office.id);
@@ -123,6 +132,7 @@ export class ImportService {
       historyEntries,
       historicalSheets,
       assignments,
+      categories,
     };
   }
 
@@ -184,6 +194,25 @@ export class ImportService {
       const existingAssignments = await this.repository.getArticleLocationAssignments(office.id);
       const merged = mergeArticleLocationAssignments(existingAssignments, preview.assignments);
       await this.repository.saveArticleLocationAssignments(merged);
+    }
+
+    // Sprint 3.2 §14 (Excel portability): de globale Productgamma-lijst
+    // additief samenvoegen — zelfde precedent als de historische tabs/
+    // ArticleLocationAssignments hierboven ("existing-wins-on-ID-conflict"):
+    // een categorie-ID die dit toestel al lokaal kent (mogelijk intussen
+    // hernoemd/heringedeeld/gedeactiveerd door de gebruiker) wordt NOOIT
+    // overschreven door de import — enkel categorie-ID's die dit toestel nog
+    // niet kende, worden toegevoegd. Dat garandeert zowel de "volledig lege
+    // database" fresh-repository-scenario (alles komt gewoon binnen, er is
+    // nog niets lokaal) als de "opnieuw importeren op een reeds bewerkt
+    // toestel"-scenario (lokale beheeracties blijven behouden).
+    if (preview.categories.length > 0) {
+      const existingCategories = await this.repository.getProductCategories();
+      const existingCategoryIds = new Set(existingCategories.map((c) => c.id));
+      const newCategories = preview.categories.filter((c) => !existingCategoryIds.has(c.id));
+      if (newCategories.length > 0) {
+        await this.repository.saveProductCategories(newCategories);
+      }
     }
 
     // Production-pilot-readiness sprint punt 4 ("Importcontrole"): compacte

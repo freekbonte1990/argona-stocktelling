@@ -9,11 +9,12 @@ import { computeFrequencyBreakdown } from "../../domain/frequency";
 import { allLocationsInOrder } from "../../domain/locations";
 import { getStockClassification, STOCK_CLASSIFICATION_TO_RAW } from "../../domain/stockClassification";
 import type { ArticleSnapshot, StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, Location } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Location, ProductCategory } from "../../domain/types";
 import { buildExportFileName } from "../../shared/exportFileName";
-import { ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER } from "./parseArtikel";
+import { ARTIKEL_REQUIRED_HEADERS, CATEGORY_ID_HEADER, STOCK_CLASSIFICATION_HEADER } from "./parseArtikel";
 import { ARTIKEL_LOCATIES_REQUIRED_HEADERS, ARTIKEL_LOCATIES_SHEET_NAME } from "./parseArtikelLocaties";
 import { HISTORIE_REQUIRED_HEADERS } from "./parseHistorie";
+import { PRODUCTGAMMAS_REQUIRED_HEADERS, PRODUCTGAMMAS_SHEET_NAME } from "./parseProductGammas";
 import { buildTellingRequiredHeaders } from "./parseTelling";
 import {
   CURRENCY_DIFF_FORMAT,
@@ -65,7 +66,7 @@ import {
  */
 export class ExcelStockResultExporter implements StockResultExporter {
   async exportResults(input: StockResultExportInput): Promise<ExportedFile> {
-    const { office, session, review, allArticles, assignments, snapshot, historicalSheets, historyEntries } =
+    const { office, session, review, allArticles, assignments, categories, snapshot, historicalSheets, historyEntries } =
       input;
     const resultByArticleId = new Map(review.results.map((r) => [r.articleId, r]));
     const nextPreviousCounts = buildNextPreviousCounts(allArticles, review.results);
@@ -91,6 +92,7 @@ export class ExcelStockResultExporter implements StockResultExporter {
     buildNieuweArtikelenSheet(workbook, allArticles, assignments, exportLocations, resultByArticleId);
     buildArtikelLocatiesSheet(workbook, allArticles, assignments, exportLocations);
     buildHistorieSheet(workbook, historyEntries);
+    buildProductGammasSheet(workbook, categories);
 
     // Alle reeds gekende, ANDERE historische tellingtabs: ongewijzigd
     // doorgeven. `historicalSheets` bevat per constructie nooit een tab met
@@ -282,8 +284,8 @@ function buildArtikelSheet(
   nextPreviousCounts: Map<string, number | null>,
 ): void {
   const sheet = workbook.addWorksheet("ARTIKEL");
-  const headers = [...ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER];
-  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10, 20]);
+  const headers = [...ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER, CATEGORY_ID_HEADER];
+  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10, 20, 24]);
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   const header = sheet.addRow(headers);
@@ -310,6 +312,14 @@ function buildArtikelSheet(
       // een herimport op een leeg toestel exact dezelfde classificatie
       // terugkrijgt.
       STOCK_CLASSIFICATION_TO_RAW[getStockClassification(article)],
+      // Sprint 3.2 §14: "Productgamma ID" — de stabiele, globale
+      // `ProductCategory.id` (of `null` voor "niet ingedeeld"). Een artikel
+      // dat nog nooit geclassificeerd werd (`categoryId === undefined`)
+      // exporteert hier ook gewoon `null` — het onderscheid
+      // undefined/null bestaat uitsluitend om bij IMPORT een oud bestand
+      // zonder deze kolom te herkennen (zie parseArtikel.ts), niet om apart
+      // te exporteren.
+      article.categoryId ?? null,
     ]);
     row.getCell(8).numFmt = CURRENCY_FORMAT; // Kostprijs
     row.getCell(11).numFmt = QUANTITY_FORMAT; // Vorige telling
@@ -501,6 +511,32 @@ function buildArtikelLocatiesSheet(
       assignment.active ? "Ja" : "Nee",
       assignment.lastSeenAt,
     ]);
+  }
+}
+
+/**
+ * PRODUCTGAMMAS (Sprint 3.2 §14, "Excel portability"): machine-leesbare
+ * export van de VOLLEDIGE, bedrijfsbrede/globale Productgamma-lijst (zie
+ * `ProductCategory`/parseProductGammas.ts) — exact hetzelfde precedent als
+ * ARTIKEL_LOCATIES hierboven. "Productgamma ID" is de stabiele, globale
+ * `ProductCategory.id`; de koppeling artikel -> categorie zelf staat in
+ * ARTIKEL's "Productgamma ID"-kolom (zie `buildArtikelSheet`), niet hier.
+ *
+ * Volgorde: naar `sortOrder` (de door de gebruiker gekozen weergavevolgorde
+ * in Instellingen), niet naar insertievolgorde — zodat een export altijd
+ * dezelfde, deterministische volgorde toont als de UI.
+ */
+function buildProductGammasSheet(workbook: ExcelJS.Workbook, categories: ProductCategory[]): void {
+  const sheet = workbook.addWorksheet(PRODUCTGAMMAS_SHEET_NAME);
+  const header = [...PRODUCTGAMMAS_REQUIRED_HEADERS];
+  setColumnWidths(sheet, [24, 30, 12, 10]);
+  const headerRow = sheet.addRow(header);
+  styleHeaderRow(headerRow, HEADER_FILL_BLUE, header.length);
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  for (const category of sorted) {
+    sheet.addRow([category.id, category.name, category.sortOrder, category.active ? "Ja" : "Nee"]);
   }
 }
 

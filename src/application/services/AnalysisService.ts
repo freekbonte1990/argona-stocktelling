@@ -3,6 +3,7 @@ import type { SessionAnalysis } from "../../domain/analysis";
 import { computeSessionReview } from "../../domain/review";
 import { buildSessionSnapshot } from "../../domain/stockSnapshot";
 import type { CountingRepository } from "../ports/CountingRepository";
+import type { ProductCategoryService } from "./ProductCategoryService";
 
 /** Gegooid door `getSessionAnalysis` voor een sessie die niet (meer) bestaat. */
 export class SessionNotFoundError extends Error {
@@ -49,9 +50,11 @@ export class SessionNotAnalyzableError extends Error {
  */
 export class AnalysisService {
   private readonly repository: CountingRepository;
+  private readonly productCategoryService: ProductCategoryService;
 
-  constructor(repository: CountingRepository) {
+  constructor(repository: CountingRepository, productCategoryService: ProductCategoryService) {
     this.repository = repository;
+    this.productCategoryService = productCategoryService;
   }
 
   async getSessionAnalysis(sessionId: string): Promise<SessionAnalysis> {
@@ -71,8 +74,16 @@ export class AnalysisService {
       throw new Error(`Kantoor ${session.officeId} niet gevonden.`);
     }
 
+    // Sprint 3.2 §11/§12: de canonieke Productgamma-resolutie wordt HIER, in
+    // de application-laag, opgebouwd uit de HUIDIGE levende artikelstam —
+    // nooit binnen `domain/analysis.ts` zelf (die blijft puur en leest enkel
+    // wat expliciet wordt meegegeven). Dit garandeert dat een reclassificatie
+    // van vandaag retroactief doorwerkt in ELKE historische analyse, ook van
+    // een sessie die allang bevroren is.
+    const categoryResolution = await this.productCategoryService.buildCategoryResolution(session.officeId);
+
     if (finalized) {
-      return buildSessionAnalysis(finalized.snapshot, finalized.review, office.locations);
+      return buildSessionAnalysis(finalized.snapshot, finalized.review, office.locations, categoryResolution);
     }
 
     // Legacy-terugvalpad (zie ExportService voor hetzelfde patroon): een
@@ -89,6 +100,6 @@ export class AnalysisService {
     ]);
     const review = computeSessionReview(session, articles, office.locations, entries, locationStatuses);
     const snapshot = buildSessionSnapshot(session, articles, review);
-    return buildSessionAnalysis(snapshot, review, office.locations);
+    return buildSessionAnalysis(snapshot, review, office.locations, categoryResolution);
   }
 }

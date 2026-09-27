@@ -1,12 +1,13 @@
 import * as XLSX from "xlsx";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, Location, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, Location, Office, ProductCategory } from "../../domain/types";
 import type { HistoricalSheetSnapshot, StockSource } from "../../application/ports/StockSource";
 import { slugify } from "../../shared/ids";
 import { ARTIKEL_SHEET_NAME, parseArtikelSheet } from "./parseArtikel";
 import { ARTIKEL_LOCATIES_SHEET_NAME, parseArtikelLocatiesSheet } from "./parseArtikelLocaties";
 import { CONFIG_SHEET_NAME, parseConfigSheet } from "./parseConfig";
 import { HISTORIE_SHEET_NAME, parseHistorieSheet } from "./parseHistorie";
+import { PRODUCTGAMMAS_SHEET_NAME, parseProductGammasSheet } from "./parseProductGammas";
 import { TELLING_SHEET_NAME, validateTellingSheet } from "./parseTelling";
 import { ExcelValidationError } from "./excelErrors";
 
@@ -24,6 +25,7 @@ const FIXED_SHEET_NAMES = new Set([
   ARTIKEL_LOCATIES_SHEET_NAME,
   TELLING_SHEET_NAME,
   HISTORIE_SHEET_NAME,
+  PRODUCTGAMMAS_SHEET_NAME,
   "NIEUWE_ARTIKELEN",
 ]);
 
@@ -39,6 +41,7 @@ export class ExcelStockSource implements StockSource {
   private readonly history: StockHistoryEntry[];
   private readonly historicalSheets: HistoricalSheetSnapshot[];
   private readonly assignments: ArticleLocationAssignment[];
+  private readonly categories: ProductCategory[];
   readonly sourceLabel: string;
 
   constructor(
@@ -48,6 +51,7 @@ export class ExcelStockSource implements StockSource {
     history: StockHistoryEntry[] = [],
     historicalSheets: HistoricalSheetSnapshot[] = [],
     assignments: ArticleLocationAssignment[] = [],
+    categories: ProductCategory[] = [],
   ) {
     this.office = office;
     this.articles = articles;
@@ -55,6 +59,7 @@ export class ExcelStockSource implements StockSource {
     this.history = history;
     this.historicalSheets = historicalSheets;
     this.assignments = assignments;
+    this.categories = categories;
   }
 
   async loadOffice(): Promise<Office> {
@@ -83,6 +88,15 @@ export class ExcelStockSource implements StockSource {
    */
   async loadArticleLocationAssignments(): Promise<ArticleLocationAssignment[]> {
     return this.assignments;
+  }
+
+  /**
+   * Sprint 3.2 §14: de globale Productgamma-lijst uit sheet PRODUCTGAMMAS.
+   * Leeg wanneer het bronbestand deze sheet niet had (backward compat: een
+   * bestand van vóór Sprint 3.2, of een kantoor dat nog nooit gemigreerd is).
+   */
+  async loadProductCategories(): Promise<ProductCategory[]> {
+    return this.categories;
   }
 }
 
@@ -165,6 +179,13 @@ export function createExcelStockSourceFromBuffer(
     ? parseArtikelLocatiesSheet(sheetToRows(artikelLocatiesSheet), officeId, locations)
     : [];
 
+  // Sprint 3.2 §14: PRODUCTGAMMAS is OPTIONEEL — een bestand van vóór deze
+  // sprint (of een kantoor dat nog nooit gemigreerd is) heeft deze sheet
+  // niet, en importeert dan gewoon zonder globale Productgamma's uit dit
+  // bestand (backward compat, exact hetzelfde patroon als ARTIKEL_LOCATIES).
+  const productGammasSheet = workbook.Sheets[PRODUCTGAMMAS_SHEET_NAME];
+  const categories = productGammasSheet ? parseProductGammasSheet(sheetToRows(productGammasSheet)) : [];
+
   // Alle overige sheets (niet in FIXED_SHEET_NAMES) zijn historische, benoemde
   // tellingtabs (bv. "2026-08 Maand") — ongewijzigd als ruwe rijen bewaard,
   // zodat een volgende export ze byte-/logisch identiek kan doorgeven.
@@ -172,7 +193,15 @@ export function createExcelStockSourceFromBuffer(
     (sheetName) => ({ sheetName, rows: sheetToRows(workbook.Sheets[sheetName]) }),
   );
 
-  return new ExcelStockSource(office, articles, sourceFileName, history, historicalSheets, assignments);
+  return new ExcelStockSource(
+    office,
+    articles,
+    sourceFileName,
+    history,
+    historicalSheets,
+    assignments,
+    categories,
+  );
 }
 
 function getSheetOrThrow(workbook: XLSX.WorkBook, sheetName: string): XLSX.WorkSheet {

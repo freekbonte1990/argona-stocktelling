@@ -1,16 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_ARTICLE_LIST_FILTERS,
   DEFAULT_ARTICLE_LIST_SORT_MODE,
   ARTICLE_LIST_SORT_MODE_LABELS,
   filterArticlesForList,
   sortArticlesForList,
+  type ArticleCategoryFilterValue,
   type ArticleListSortMode,
 } from "../../domain/articleListing";
 import { activeLocationsInOrder } from "../../domain/locations";
+import { activeProductCategoriesInOrder, allProductCategoriesInOrder, categoriesById } from "../../domain/productCategory";
 import { articlesWithoutLocation } from "../../domain/withoutLocation";
+import { productCategoryService } from "../../application/container";
 import { ArticleBulkList } from "../components/ArticleBulkList";
-import { useArticles, useAssignments, useOffice, useSession } from "../hooks/useLiveData";
+import { useArticles, useAssignments, useOffice, useProductCategories, useSession } from "../hooks/useLiveData";
 
 interface WithoutLocationPageProps {
   sessionId: string;
@@ -40,32 +43,45 @@ export function WithoutLocationPage({ sessionId, onOpenArticle }: WithoutLocatio
   const assignments = useAssignments(session?.officeId) ?? [];
 
   const [search, setSearch] = useState("");
-  const [productGroup, setProductGroup] = useState<string | null>(null);
+  const [category, setCategory] = useState<ArticleCategoryFilterValue>("ALL");
   const [sortMode, setSortMode] = useState<ArticleListSortMode>(DEFAULT_ARTICLE_LIST_SORT_MODE);
+
+  useEffect(() => {
+    if (session?.officeId) void productCategoryService.listCategories(session.officeId);
+  }, [session?.officeId]);
+  const allCategories = allProductCategoriesInOrder(useProductCategories() ?? []);
+  const activeCategories = activeProductCategoriesInOrder(allCategories);
+  const categoryByIdMap = categoriesById(allCategories);
+  const categoryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of allCategories) map.set(c.id, c.name);
+    return map;
+  }, [allCategories]);
 
   const withoutLocation = useMemo(() => {
     if (!session) return [];
     return articlesWithoutLocation(officeArticles, session, assignments);
   }, [officeArticles, session, assignments]);
 
-  const productGroups = useMemo(() => {
-    const groups = new Set<string>();
+  // Sprint 3.2 §9: dit filter werkt sinds Sprint 3.2 op de canonieke
+  // Productgamma (nooit meer de bevroren bronproductgroep) — enkel de
+  // productgamma's die effectief in deze werklijst voorkomen.
+  const categoriesInList = useMemo(() => {
+    const ids = new Set<string>();
     for (const article of withoutLocation) {
-      if (article.productGroup) groups.add(article.productGroup);
+      if (article.categoryId) ids.add(article.categoryId);
     }
-    return Array.from(groups).sort((a, b) => a.localeCompare(b, "nl"));
-  }, [withoutLocation]);
+    return activeCategories.filter((c) => ids.has(c.id));
+  }, [withoutLocation, activeCategories]);
 
   const filtered = useMemo(
-    () =>
-      filterArticlesForList(
-        withoutLocation,
-        { ...DEFAULT_ARTICLE_LIST_FILTERS, search, productGroup },
-        new Map(),
-      ),
-    [withoutLocation, search, productGroup],
+    () => filterArticlesForList(withoutLocation, { ...DEFAULT_ARTICLE_LIST_FILTERS, search, category }, new Map()),
+    [withoutLocation, search, category],
   );
-  const sorted = useMemo(() => sortArticlesForList(filtered, sortMode), [filtered, sortMode]);
+  const sorted = useMemo(
+    () => sortArticlesForList(filtered, sortMode, categoryNameById),
+    [filtered, sortMode, categoryNameById],
+  );
 
   const activeLocations = useMemo(() => (office ? activeLocationsInOrder(office) : []), [office]);
   const locationById = useMemo(
@@ -107,23 +123,23 @@ export function WithoutLocationPage({ sessionId, onOpenArticle }: WithoutLocatio
         </select>
       </div>
 
-      {productGroups.length > 0 && (
+      {categoriesInList.length > 0 && (
         <div className="filter-row">
           <button
             type="button"
-            className={`chip ${productGroup === null ? "chip--active" : ""}`}
-            onClick={() => setProductGroup(null)}
+            className={`chip ${category === "ALL" ? "chip--active" : ""}`}
+            onClick={() => setCategory("ALL")}
           >
-            Alle productgroepen
+            Alle productgamma's
           </button>
-          {productGroups.map((group) => (
+          {categoriesInList.map((c) => (
             <button
-              key={group}
+              key={c.id}
               type="button"
-              className={`chip ${productGroup === group ? "chip--active" : ""}`}
-              onClick={() => setProductGroup(group)}
+              className={`chip ${category === c.id ? "chip--active" : ""}`}
+              onClick={() => setCategory(c.id)}
             >
-              {group}
+              {c.name}
             </button>
           ))}
         </div>
@@ -135,6 +151,8 @@ export function WithoutLocationPage({ sessionId, onOpenArticle }: WithoutLocatio
         activeLocations={activeLocations}
         locationById={locationById}
         locationIdsByArticle={new Map()}
+        activeCategories={activeCategories}
+        categoriesById={categoryByIdMap}
         onOpenArticle={(articleId) => onOpenArticle(office.id, articleId)}
       />
     </div>

@@ -7,6 +7,7 @@ import type {
   CountSession,
   LocationSessionStatus,
   Office,
+  ProductCategory,
 } from "../../domain/types";
 
 /** Metadata over de laatste import van een kantoor (voor traceerbaarheid op een sessie). */
@@ -85,6 +86,15 @@ export interface CountingRepository {
 
   saveArticles(articles: Article[]): Promise<void>;
   getArticles(officeId: string): Promise<Article[]>;
+  /**
+   * Sprint 3.2.1-architectuurfix: alle artikelen van ALLE kantoren samen.
+   * Nodig omdat `ProductCategory` nu bedrijfsbreed/globaal is — of een
+   * categorie nog "in gebruik" is (spec §6, `canHardDeleteProductCategory`/
+   * `mergeCategories`) moet dus over alle kantoren heen gecontroleerd worden,
+   * niet enkel binnen het momenteel geselecteerde kantoor. Zelfde precedent
+   * als `getAllOffices()` hierboven.
+   */
+  getAllArticles(): Promise<Article[]>;
 
   createSession(session: CountSession): Promise<void>;
   getSession(sessionId: string): Promise<CountSession | undefined>;
@@ -178,4 +188,23 @@ export interface CountingRepository {
    */
   saveStockHistoryEntries(officeId: string, entries: StockHistoryEntry[]): Promise<void>;
   getStockHistoryEntries(officeId: string): Promise<StockHistoryEntry[]>;
+
+  /**
+   * Sprint 3.2 — Dynamic Product Categories: bulk-upsert, zelfde patroon als
+   * `saveArticles`. `ProductCategoryService` is de enige aanroeper — geen UI-
+   * scherm schrijft hier rechtstreeks naartoe.
+   *
+   * Sprint 3.2.1-architectuurfix: `ProductCategory` is bedrijfsbreed/globaal
+   * (geen `officeId` meer) — `getProductCategories` leest daarom ALTIJD de
+   * volledige, gedeelde lijst, ongeacht welk kantoor actief is.
+   */
+  saveProductCategories(categories: ProductCategory[]): Promise<void>;
+  getProductCategories(): Promise<ProductCategory[]>;
+  /**
+   * Hard verwijderen van een NOOIT-gebruikte categorie (spec §6) — de
+   * aanroeper (`ProductCategoryService`/`domain/productCategory.ts#
+   * canHardDeleteProductCategory`) garandeert vooraf dat ze niet meer aan
+   * enig artikel toegewezen is.
+   */
+  deleteProductCategory(categoryId: string): Promise<void>;
 }

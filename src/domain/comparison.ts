@@ -1,5 +1,6 @@
 import { toAnalysisArticleRow } from "./analysis";
 import type { AnalysisArticleRow } from "./analysis";
+import type { ArticleCategoryResolution } from "./productCategory";
 import type { ArticleSnapshotStatus, StockSnapshot } from "./stockSnapshot";
 import type { CountSessionType, StockClassification } from "./types";
 
@@ -68,11 +69,6 @@ export interface ReliableHistoryEntry {
 
 /** Businessregel-constante (spec §9): "3" als benoemde, aanpasbare drempel — nooit een magisch getal in de code. */
 export const CONSECUTIVE_UNCHANGED_OBSOLETE_CANDIDATE_THRESHOLD = 3;
-
-const PRODUCT_GROUP_FALLBACK = "(geen productgroep)";
-function groupLabel(productGroup: string | null): string {
-  return productGroup ?? PRODUCT_GROUP_FALLBACK;
-}
 
 function percentOf(part: number, total: number): number {
   return total > 0 ? (part / total) * 100 : 0;
@@ -159,7 +155,11 @@ export interface ArticleComparisonRow {
   articleId: string;
   articleNumber: string;
   description: string;
+  /** Bronproductgroep (bevroren, audit) — bevoorrecht de meest recente (B) kant, zie `buildArticleComparisonRows`. */
   productGroup: string | null;
+  /** Sprint 3.2 §12: de HUIDIGE canonieke Productgamma-id — retroactief, identiek voor A en B (zelfde artikel-id, zelfde huidige toewijzing). */
+  productCategoryId: string | null;
+  productCategory: string;
   unit: string | null;
   presentInA: boolean;
   presentInB: boolean;
@@ -305,6 +305,8 @@ function buildArticleComparisonRows(
       articleNumber: display.articleNumber,
       description: display.description,
       productGroup: display.productGroup,
+      productCategoryId: display.productCategoryId,
+      productCategory: display.productCategory,
       unit: display.unit,
       presentInA,
       presentInB,
@@ -425,8 +427,8 @@ function buildKpis(rowsA: AnalysisArticleRow[], rowsB: AnalysisArticleRow[]): Co
 // Productgroepvergelijking (spec §5)
 // ---------------------------------------------------------------------------
 
-export interface ProductGroupComparisonRow {
-  productGroup: string;
+export interface ProductCategoryComparisonRow {
+  productCategory: string;
   valueA: number;
   valueB: number;
   valueDifference: number;
@@ -437,11 +439,16 @@ export interface ProductGroupComparisonRow {
   articleCountB: number;
 }
 
-/** Standaard sortering (spec §5): grootste absolute verandering in voorraadwaarde eerst. Geen productgroepen hardcoded — puur afgeleid uit de data. */
-function buildProductGroupComparison(
+/**
+ * Standaard sortering (spec §5): grootste absolute verandering in
+ * voorraadwaarde eerst. Sinds Sprint 3.2 §12: gegroepeerd op de HUIDIGE
+ * canonieke Productgamma (retroactief, voor zowel A als B) — geen
+ * productgamma's hardcoded, puur afgeleid uit de data.
+ */
+function buildProductCategoryComparison(
   rowsA: AnalysisArticleRow[],
   rowsB: AnalysisArticleRow[],
-): ProductGroupComparisonRow[] {
+): ProductCategoryComparisonRow[] {
   interface Accumulator {
     valueA: number;
     valueB: number;
@@ -460,20 +467,20 @@ function buildProductGroupComparison(
     return entry;
   }
   for (const row of rowsA) {
-    const entry = ensure(groupLabel(row.productGroup));
+    const entry = ensure(row.productCategory);
     entry.valueA += row.stockValue ?? 0;
     entry.articleCountA += 1;
     if (row.classification === "OBSOLETE") entry.obsoleteValueA += row.stockValue ?? 0;
   }
   for (const row of rowsB) {
-    const entry = ensure(groupLabel(row.productGroup));
+    const entry = ensure(row.productCategory);
     entry.valueB += row.stockValue ?? 0;
     entry.articleCountB += 1;
     if (row.classification === "OBSOLETE") entry.obsoleteValueB += row.stockValue ?? 0;
   }
   return Array.from(byGroup.entries())
-    .map(([productGroup, entry]) => ({
-      productGroup,
+    .map(([productCategory, entry]) => ({
+      productCategory,
       valueA: entry.valueA,
       valueB: entry.valueB,
       valueDifference: entry.valueB - entry.valueA,
@@ -498,6 +505,9 @@ export interface MoverRow {
   articleNumber: string;
   description: string;
   productGroup: string | null;
+  /** Sprint 3.2 §12: de HUIDIGE canonieke Productgamma — retroactief, zelfde bron als `ArticleComparisonRow.productCategory`. */
+  productCategoryId: string | null;
+  productCategory: string;
   quantityA: number | null;
   quantityB: number | null;
   costPriceA: number | null;
@@ -533,6 +543,8 @@ function toMoverRow(row: ArticleComparisonRow): MoverRow {
     articleNumber: row.articleNumber,
     description: row.description,
     productGroup: row.productGroup,
+    productCategoryId: row.productCategoryId,
+    productCategory: row.productCategory,
     quantityA: row.quantityA,
     quantityB: row.quantityB,
     costPriceA: row.costPriceA,
@@ -580,6 +592,9 @@ export interface PriceMoverRow {
   articleNumber: string;
   description: string;
   productGroup: string | null;
+  /** Sprint 3.2 §12: de HUIDIGE canonieke Productgamma — retroactief, zelfde bron als `ArticleComparisonRow.productCategory`. */
+  productCategoryId: string | null;
+  productCategory: string;
   costPriceA: number;
   costPriceB: number;
   priceDifferencePerUnit: number;
@@ -600,6 +615,8 @@ function toPriceMoverRow(row: ArticleComparisonRow): PriceMoverRow {
     articleNumber: row.articleNumber,
     description: row.description,
     productGroup: row.productGroup,
+    productCategoryId: row.productCategoryId,
+    productCategory: row.productCategory,
     costPriceA: row.costPriceA as number,
     costPriceB: row.costPriceB as number,
     priceDifferencePerUnit: row.priceDifferencePerUnit as number,
@@ -817,7 +834,8 @@ export type ComparisonStateFilter =
 
 export interface ArticleComparisonFilters {
   search: string;
-  productGroup: string | null;
+  /** Filtert op de HUIDIGE canonieke Productgamma-weergavenaam (sinds Sprint 3.2 §12: niet meer de bevroren bronproductgroep). */
+  productCategory: string | null;
   /** Filtert op classificatie in B (de "huidige" telling) — zelfde conventie als spec §9's "huidige classificatie". */
   classification: StockClassification | null;
   state: ComparisonStateFilter;
@@ -825,7 +843,7 @@ export interface ArticleComparisonFilters {
 
 export const DEFAULT_ARTICLE_COMPARISON_FILTERS: ArticleComparisonFilters = {
   search: "",
-  productGroup: null,
+  productCategory: null,
   classification: null,
   state: "ALL",
 };
@@ -836,7 +854,7 @@ export function filterArticleComparisonRows(
 ): ArticleComparisonRow[] {
   const term = filters.search.trim().toLowerCase();
   return rows.filter((row) => {
-    if (filters.productGroup !== null && groupLabel(row.productGroup) !== filters.productGroup) return false;
+    if (filters.productCategory !== null && row.productCategory !== filters.productCategory) return false;
     if (filters.classification !== null && row.classificationB !== filters.classification) return false;
     switch (filters.state) {
       case "CHANGED":
@@ -871,7 +889,7 @@ export type ArticleComparisonSortMode = "VALUE_DIFF_DESC" | "STOCK_VALUE_B_DESC"
 export const ARTICLE_COMPARISON_SORT_MODE_LABELS: Record<ArticleComparisonSortMode, string> = {
   VALUE_DIFF_DESC: "Grootste waardeverschil",
   STOCK_VALUE_B_DESC: "Hoogste huidige voorraadwaarde",
-  PRODUCT_GROUP: "Productgroep",
+  PRODUCT_GROUP: "Productgamma",
   DESCRIPTION: "Omschrijving",
 };
 
@@ -887,7 +905,7 @@ export function sortArticleComparisonRows(
       return sorted.sort((a, b) => (b.stockValueB ?? -Infinity) - (a.stockValueB ?? -Infinity));
     case "PRODUCT_GROUP":
       return sorted.sort((a, b) => {
-        const groupCompare = groupLabel(a.productGroup).localeCompare(groupLabel(b.productGroup), "nl");
+        const groupCompare = a.productCategory.localeCompare(b.productCategory, "nl");
         if (groupCompare !== 0) return groupCompare;
         return a.description.localeCompare(b.description, "nl");
       });
@@ -912,7 +930,8 @@ export interface SessionComparison {
   headerA: SessionComparisonHeader;
   headerB: SessionComparisonHeader;
   kpis: ComparisonKpis;
-  productGroups: ProductGroupComparisonRow[];
+  /** Sinds Sprint 3.2 §12: gegroepeerd op de HUIDIGE canonieke Productgamma, retroactief voor zowel A als B. */
+  productCategories: ProductCategoryComparisonRow[];
   movers: MoversAnalysis;
   /** Sprint 3.1 §6: aparte "Grootste prijsstijgingen/dalingen", gesorteerd op financieel prijseffect op de huidige stock. */
   priceMovers: PriceMoversAnalysis;
@@ -932,18 +951,28 @@ export interface SessionComparison {
  * MOET beginnen bij B zelf (index 0) en nieuwste-eerst geordend zijn; zie
  * `ReliableHistoryEntry` hierboven. Puur — leest niets, schrijft niets.
  */
+/**
+ * `categoryResolution`: expliciete resolutie `articleId -> huidige
+ * Productgamma` (spec §12: "geef een resolutiemap door als expliciete
+ * input, lees geen levende Article-data in de pure vergelijkingsfunctie") —
+ * opgebouwd door de application-laag (`ComparisonService`) uit de HUIDIGE
+ * artikelstam, nooit hier zelf gelezen. Zelfde map geldt voor A en B: een
+ * reclassificatie vandaag werkt dus retroactief door in BEIDE kanten van de
+ * vergelijking, zonder dat snapshot A of B zelf gewijzigd wordt.
+ */
 export function buildSessionComparison(
   inputA: ComparisonSnapshotInput,
   inputB: ComparisonSnapshotInput,
   historyNewestFirstFromB: ReliableHistoryEntry[],
+  categoryResolution: Map<string, ArticleCategoryResolution>,
 ): SessionComparison {
-  const rowsAList = inputA.snapshot.articles.map(toAnalysisArticleRow);
-  const rowsBList = inputB.snapshot.articles.map(toAnalysisArticleRow);
+  const rowsAList = inputA.snapshot.articles.map((row) => toAnalysisArticleRow(row, categoryResolution));
+  const rowsBList = inputB.snapshot.articles.map((row) => toAnalysisArticleRow(row, categoryResolution));
   const rowsAById = new Map(rowsAList.map((r) => [r.articleId, r]));
   const rowsBById = new Map(rowsBList.map((r) => [r.articleId, r]));
 
   const kpis = buildKpis(rowsAList, rowsBList);
-  const productGroups = buildProductGroupComparison(rowsAList, rowsBList);
+  const productCategories = buildProductCategoryComparison(rowsAList, rowsBList);
 
   // Memoiseer per artikel binnen deze ene opbouw (spec §15: geen zware
   // volledige historiekberekening per render/filteractie — dit bestand
@@ -985,7 +1014,7 @@ export function buildSessionComparison(
       completedAt: inputB.completedAt,
     },
     kpis,
-    productGroups,
+    productCategories,
     movers,
     priceMovers,
     unchanged,

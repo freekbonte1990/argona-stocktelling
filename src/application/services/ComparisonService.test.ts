@@ -8,6 +8,7 @@ import {
 import { CountSessionService } from "./CountSessionService";
 import { CountingService } from "./CountingService";
 import { InMemoryCountingRepository } from "./InMemoryCountingRepository";
+import { ProductCategoryService } from "./ProductCategoryService";
 import type { Article, Office } from "../../domain/types";
 
 /**
@@ -64,7 +65,7 @@ describe("ComparisonService", () => {
     repository = new InMemoryCountingRepository();
     sessionService = new CountSessionService(repository);
     countingService = new CountingService(repository);
-    comparisonService = new ComparisonService(repository);
+    comparisonService = new ComparisonService(repository, new ProductCategoryService(repository));
     await repository.saveOffice(office);
     await repository.saveOffice(office2);
     await repository.saveArticles([makeArticle({ articleNumber: "A1", costPrice: 10 })]);
@@ -167,5 +168,31 @@ describe("ComparisonService", () => {
     expect(after.kpis.stockValue.valueA).toBe(40);
     expect(after.kpis.stockValue.valueB).toBe(90);
     expect(after.articles[0].classificationB).toBe("ACTIVE");
+  });
+
+  it("een latere canonieke Productgamma-herclassificatie werkt WEL retroactief door in een reeds vastgelegde vergelijking (spec §11/§12)", async () => {
+    const sessionA = await completeSession(4);
+    const sessionB = await completeSession(9);
+
+    const before = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    // A1 heeft al `productGroup: "GROEP"` -> de eenmalige migratie (spec §4)
+    // heeft dit bij deze EERSTE aanroep al gebootstrapt tot een canonieke
+    // "GROEP"-categorie.
+    expect(before.articles[0].productCategory).toBe("GROEP");
+
+    const productCategoryService = new ProductCategoryService(repository);
+    // `addCategory` geeft de VOLLEDIGE lijst terug (incl. de reeds
+    // gemigreerde "GROEP"-categorie) — expliciet op naam opzoeken.
+    const batterijen = (await productCategoryService.addCategory("office-1", "Batterijen")).find(
+      (c) => c.name === "Batterijen",
+    )!;
+    await productCategoryService.assignArticles("office-1", ["office-1:A1"], batterijen.id);
+
+    const after = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    expect(after.articles[0].productCategory).toBe("Batterijen");
+    expect(after.articles[0].productCategoryId).toBe(batterijen.id);
+    // Bevroren hoeveelheid/waarde blijven exact ongewijzigd — enkel de groepering verandert.
+    expect(after.kpis.stockValue.valueA).toBe(before.kpis.stockValue.valueA);
+    expect(after.kpis.stockValue.valueB).toBe(before.kpis.stockValue.valueB);
   });
 });

@@ -54,7 +54,7 @@ const articleA1 = makeArticle({ articleNumber: "A1" });
 const articleA2 = makeArticle({ articleNumber: "A2" });
 
 beforeEach(async () => {
-  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState]) {
+  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState, db.productCategories]) {
     await table.clear();
   }
   await countingRepository.saveOffice(office);

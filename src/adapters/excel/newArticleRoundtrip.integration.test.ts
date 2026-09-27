@@ -8,6 +8,7 @@ import { ImportService } from "../../application/services/ImportService";
 import { InMemoryCountingRepository } from "../../application/services/InMemoryCountingRepository";
 import { LocationAssignmentService } from "../../application/services/LocationAssignmentService";
 import { NewArticleService } from "../../application/services/NewArticleService";
+import { ProductCategoryService } from "../../application/services/ProductCategoryService";
 import type { Article, Office } from "../../domain/types";
 
 /**
@@ -25,7 +26,13 @@ describe("Export/herimport-roundtrip van een nieuw (tijdelijk) artikel", () => {
     const sessionService = new CountSessionService(repository);
     const countingService = new CountingService(repository);
     const locationAssignmentService = new LocationAssignmentService(repository);
-    const newArticleService = new NewArticleService(repository, locationAssignmentService, countingService);
+    const productCategoryService = new ProductCategoryService(repository);
+    const newArticleService = new NewArticleService(
+      repository,
+      locationAssignmentService,
+      countingService,
+      productCategoryService,
+    );
     const exportService = new ExportService(repository, new ExcelStockResultExporter());
     const importService = new ImportService(repository);
 
@@ -67,9 +74,15 @@ describe("Export/herimport-roundtrip van een nieuw (tijdelijk) artikel", () => {
       quantity: 5,
     });
 
+    // `addCategory` geeft de VOLLEDIGE lijst terug (incl. reeds bestaande,
+    // eventueel via migratie gebootstrapte categorieën) — de nieuwe staat
+    // achteraan, dus expliciet op naam opzoeken i.p.v. het eerste element aannemen.
+    const nieuweCategorie = (await productCategoryService.addCategory("damme", "Nieuw")).find(
+      (c) => c.name === "Nieuw",
+    )!;
     const newArticle = await newArticleService.createArticleFoundDuringCounting(session, "damme:loc-2", {
       description: "Onderweg gevonden onderdeel",
-      productGroup: "Nieuw",
+      categoryId: nieuweCategorie.id,
       unit: "stuk",
       countPeriod: "MONTHLY",
       quantity: 6,

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ARTICLE_LIST_SORT_MODE_LABELS,
   ARTICLE_STATUS_FILTER_LABELS,
@@ -8,16 +8,19 @@ import {
   countActiveArticleListFilters,
   filterArticlesForList,
   sortArticlesForList,
+  type ArticleCategoryFilterValue,
   type ArticleListFilters,
   type ArticleListSortMode,
   type ArticleLocationFilterValue,
 } from "../../domain/articleListing";
 import { activeLocationsInOrder } from "../../domain/locations";
+import { activeProductCategoriesInOrder, allProductCategoriesInOrder, categoriesById } from "../../domain/productCategory";
 import type { ArticleActiveStatus, ArticleCountFrequency } from "../../domain/types";
+import { productCategoryService } from "../../application/container";
 import { ArticleBulkList } from "../components/ArticleBulkList";
 import { BigButton } from "../components/BigButton";
 import { NewArticleModal } from "../components/NewArticleModal";
-import { useArticles, useAssignments, useOffice } from "../hooks/useLiveData";
+import { useArticles, useAssignments, useOffice, useProductCategories } from "../hooks/useLiveData";
 
 interface ArticlesPageProps {
   officeId: string;
@@ -37,6 +40,14 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
   const articles = useArticles(officeId) ?? [];
   const office = useOffice(officeId);
   const assignments = useAssignments(officeId) ?? [];
+
+  // Sprint 3.2 §9: idempotente migratie-trigger + reactieve productgamma-lijst.
+  useEffect(() => {
+    void productCategoryService.listCategories(officeId);
+  }, [officeId]);
+  const allCategories = allProductCategoriesInOrder(useProductCategories() ?? []);
+  const activeCategories = activeProductCategoriesInOrder(allCategories);
+  const categoryByIdMap = categoriesById(allCategories);
 
   const [filters, setFilters] = useState<ArticleListFilters>(DEFAULT_ARTICLE_LIST_FILTERS);
   const [sortMode, setSortMode] = useState<ArticleListSortMode>(DEFAULT_ARTICLE_LIST_SORT_MODE);
@@ -64,19 +75,20 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
     return map;
   }, [assignments]);
 
-  const productGroups = useMemo(() => {
-    const groups = new Set<string>();
-    for (const article of articles) {
-      if (article.productGroup) groups.add(article.productGroup);
-    }
-    return Array.from(groups).sort((a, b) => a.localeCompare(b, "nl"));
-  }, [articles]);
+  const categoryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const category of allCategories) map.set(category.id, category.name);
+    return map;
+  }, [allCategories]);
 
   const filtered = useMemo(
     () => filterArticlesForList(articles, filters, locationIdsByArticle),
     [articles, filters, locationIdsByArticle],
   );
-  const sorted = useMemo(() => sortArticlesForList(filtered, sortMode), [filtered, sortMode]);
+  const sorted = useMemo(
+    () => sortArticlesForList(filtered, sortMode, categoryNameById),
+    [filtered, sortMode, categoryNameById],
+  );
 
   const activeFilterCount = countActiveArticleListFilters(filters);
 
@@ -134,10 +146,12 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
 
       {activeFilterCount > 0 && (
         <div className="filter-row">
-          {filters.productGroup && (
+          {filters.category !== "ALL" && (
             <RemovableChip
-              label={`Productgroep: ${filters.productGroup}`}
-              onRemove={() => setFilters((prev) => ({ ...prev, productGroup: null }))}
+              label={`Productgamma: ${
+                filters.category === "UNCLASSIFIED" ? "Niet ingedeeld" : categoryNameById.get(filters.category) ?? filters.category
+              }`}
+              onRemove={() => setFilters((prev) => ({ ...prev, category: "ALL" }))}
             />
           )}
           {filters.countPeriod && (
@@ -167,6 +181,8 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
         activeLocations={activeLocations}
         locationById={locationById}
         locationIdsByArticle={locationIdsByArticle}
+        activeCategories={activeCategories}
+        categoriesById={categoryByIdMap}
         onOpenArticle={onOpenArticle}
       />
 
@@ -184,25 +200,26 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
             <p style={{ margin: 0, fontWeight: 700 }}>Filters</p>
 
             <div className="stack">
-              {productGroups.length > 0 && (
-                <label className="filter-field">
-                  <span className="filter-field__label">Productgroep</span>
-                  <select
-                    className="search-input"
-                    value={filters.productGroup ?? ""}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, productGroup: e.target.value || null }))
-                    }
-                  >
-                    <option value="">Alle productgroepen</option>
-                    {productGroups.map((group) => (
-                      <option key={group} value={group}>
-                        {group}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <label className="filter-field">
+                <span className="filter-field__label">Productgamma</span>
+                <select
+                  className="search-input"
+                  value={filters.category}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, category: e.target.value as ArticleCategoryFilterValue }))
+                  }
+                >
+                  <option value="ALL">Alle productgamma's</option>
+                  {/* Spec §9: expliciet filter voor niet-ingedeelde artikelen — nooit verborgen. */}
+                  <option value="UNCLASSIFIED">Niet ingedeeld</option>
+                  {allCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                      {!category.active ? " (inactief)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <label className="filter-field">
                 <span className="filter-field__label">Telfrequentie</span>

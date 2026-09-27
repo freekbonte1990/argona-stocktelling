@@ -4,6 +4,7 @@ import { CountingService } from "./CountingService";
 import { LocationAssignmentService } from "./LocationAssignmentService";
 import { NewArticleService } from "./NewArticleService";
 import { InMemoryCountingRepository } from "./InMemoryCountingRepository";
+import { ProductCategoryService } from "./ProductCategoryService";
 import { ActiveSessionExportError, CancelledSessionExportError, ExportService } from "./ExportService";
 import { SessionNotEditableError } from "../errors";
 import { InvalidQuantityError } from "../../domain/quantityValidation";
@@ -72,20 +73,33 @@ describe("Data-integriteit-sprint", () => {
   let sessionService: CountSessionService;
   let countingService: CountingService;
   let locationAssignmentService: LocationAssignmentService;
+  let productCategoryService: ProductCategoryService;
   let newArticleService: NewArticleService;
   let exporter: FakeExporter;
   let exportService: ExportService;
+  let groepCategoryId: string;
 
   beforeEach(async () => {
     repository = new InMemoryCountingRepository();
     sessionService = new CountSessionService(repository);
     countingService = new CountingService(repository);
     locationAssignmentService = new LocationAssignmentService(repository);
-    newArticleService = new NewArticleService(repository, locationAssignmentService, countingService);
+    productCategoryService = new ProductCategoryService(repository);
+    newArticleService = new NewArticleService(
+      repository,
+      locationAssignmentService,
+      countingService,
+      productCategoryService,
+    );
     exporter = new FakeExporter();
     exportService = new ExportService(repository, exporter);
     await repository.saveOffice(office);
     await repository.saveArticles([makeArticle({ articleNumber: "M1" }), makeArticle({ articleNumber: "M2" })]);
+    // De fixture-artikelen hebben al `productGroup: "GROEP"` -> de eenmalige
+    // migratie (spec §4) bootstrapt hier automatisch al een "GROEP"-categorie;
+    // deze hergebruiken i.p.v. een duplicaat aan te maken (DuplicateCategoryNameError).
+    const categories = await productCategoryService.listCategories("office-1");
+    groepCategoryId = categories.find((c) => c.name === "GROEP")!.id;
   });
 
   async function completeReadySession(): Promise<string> {
@@ -151,7 +165,7 @@ describe("Data-integriteit-sprint", () => {
       await expect(
         newArticleService.createArticleFoundDuringCounting(completed, "office-1:loc-1", {
           description: "Gevonden na afronden",
-          productGroup: "GROEP",
+          categoryId: groepCategoryId,
           unit: "stuk",
           countPeriod: "MONTHLY",
           quantity: 1,
@@ -439,7 +453,7 @@ describe("Data-integriteit-sprint", () => {
       await expect(
         newArticleService.createArticleFoundDuringCounting(session, "office-1:loc-1", {
           description: "Nieuw gevonden",
-          productGroup: "GROEP",
+          categoryId: groepCategoryId,
           unit: "stuk",
           countPeriod: "MONTHLY",
           quantity: -3,

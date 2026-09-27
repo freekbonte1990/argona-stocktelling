@@ -76,6 +76,7 @@ beforeEach(async () => {
     db.importMeta,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
   ]) {
     await table.clear();
   }
@@ -214,7 +215,10 @@ describe("CountingPage — '+ Nieuw artikel gevonden' (v0.2.1 correctieronde §3
     expect(within(modal).getByText(/Rek 1/)).toBeInTheDocument();
 
     await user.type(within(modal).getByLabelText("Omschrijving *"), "Onverwacht onderdeel");
-    await user.type(within(modal).getByLabelText("Productgroep *"), "Nieuw");
+    await waitFor(() => {
+      expect(within(modal).getByText("GROEP")).toBeInTheDocument();
+    });
+    await user.selectOptions(within(modal).getByLabelText("Productgamma *"), "GROEP");
     await user.type(within(modal).getByLabelText("Eenheid *"), "stuk");
     await user.type(within(modal).getByLabelText("Getelde hoeveelheid *"), "4");
     await user.click(within(modal).getByRole("button", { name: "Opslaan en tellen" }));
@@ -259,7 +263,10 @@ describe("CountingPage — '+ Nieuw artikel gevonden' (v0.2.1 correctieronde §3
     const modal = screen.getByText("Nieuw artikel gevonden").closest(".modal-card") as HTMLElement;
 
     await user.type(within(modal).getByLabelText("Omschrijving *"), "Leeg gevonden onderdeel");
-    await user.type(within(modal).getByLabelText("Productgroep *"), "Nieuw");
+    await waitFor(() => {
+      expect(within(modal).getByText("GROEP")).toBeInTheDocument();
+    });
+    await user.selectOptions(within(modal).getByLabelText("Productgamma *"), "GROEP");
     await user.type(within(modal).getByLabelText("Eenheid *"), "stuk");
     await user.type(within(modal).getByLabelText("Getelde hoeveelheid *"), "0");
     await user.click(within(modal).getByRole("button", { name: "Opslaan en tellen" }));
@@ -414,6 +421,7 @@ describe("CountingPage — 'Bestaand artikel opzoeken' doorzoekt écht het hele 
       db.importMeta,
       db.appState,
       db.locationSessionStatuses,
+      db.productCategories,
     ]) {
       await table.clear();
     }

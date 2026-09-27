@@ -50,6 +50,7 @@ beforeEach(async () => {
     db.assignments,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
     db.finalizedSessionResults,
   ]) {
     await table.clear();
@@ -77,7 +78,7 @@ describe("ArticleDetailPage — bewerken van Algemeen (aanvulling)", () => {
     expect(screen.getByText("€ 12,50")).toBeInTheDocument();
   });
 
-  it("laat omschrijving/productgroep/leverancier/kostprijs bewerken en bewaart dat in de repository", async () => {
+  it("laat omschrijving/leverancier/kostprijs bewerken en bewaart dat in de repository, maar laat Bronproductgroep ongewijzigd (bevroren bron-/auditinformatie)", async () => {
     const user = userEvent.setup();
     render(<ArticleDetailPage officeId="office-1" articleId="office-1:A1" />);
     await waitUntilLoaded();
@@ -88,9 +89,13 @@ describe("ArticleDetailPage — bewerken van Algemeen (aanvulling)", () => {
     await user.clear(descriptionInput);
     await user.type(descriptionInput, "Nieuwe omschrijving");
 
-    const productGroupInput = screen.getByDisplayValue("OUDE GROEP");
-    await user.clear(productGroupInput);
-    await user.type(productGroupInput, "NIEUWE GROEP");
+    // Sprint 3.2.1-architectuurfix: "Bronproductgroep" is in edit-modus nu
+    // een puur read-only weergaveveld (geen `<input>` meer) — het historische
+    // bronveld mag nooit via deze vrije-tekst-UI wijzigen. Enkel de
+    // "Productgamma"-dropdown ernaast is de editable management-classificatie.
+    const productGroupField = screen.getByText("Bronproductgroep").closest(".article-detail-field") as HTMLElement;
+    expect(within(productGroupField).getByText("OUDE GROEP")).toBeInTheDocument();
+    expect(within(productGroupField).queryByRole("textbox")).not.toBeInTheDocument();
 
     const supplierInput = screen.getByDisplayValue("Oude leverancier");
     await user.clear(supplierInput);
@@ -105,13 +110,21 @@ describe("ArticleDetailPage — bewerken van Algemeen (aanvulling)", () => {
     await waitFor(() => {
       expect(within(algemeenCard()).getByText("Nieuwe omschrijving")).toBeInTheDocument();
     });
-    expect(within(algemeenCard()).getByText("NIEUWE GROEP")).toBeInTheDocument();
+    // Sprint 3.2.1: de eenmalige migratiebootstrap creëerde hier een
+    // Productgamma "OUDE GROEP" uit dezelfde bronwaarde — de leesweergave
+    // toont die naam dus op TWEE plekken (Productgamma én Bronproductgroep).
+    // Scopen tot het Bronproductgroep-veld i.p.v. `getByText` op de hele
+    // kaart om die twee te onderscheiden (zelfde reden als in edit-modus).
+    const productGroupFieldAfterSave = screen
+      .getByText("Bronproductgroep")
+      .closest(".article-detail-field") as HTMLElement;
+    expect(within(productGroupFieldAfterSave).getByText("OUDE GROEP")).toBeInTheDocument();
     expect(within(algemeenCard()).getByText("Nieuwe leverancier")).toBeInTheDocument();
     expect(within(algemeenCard()).getByText("€ 15,75")).toBeInTheDocument();
 
     const [saved] = await countingRepository.getArticles("office-1");
     expect(saved.description).toBe("Nieuwe omschrijving");
-    expect(saved.productGroup).toBe("NIEUWE GROEP");
+    expect(saved.productGroup).toBe("OUDE GROEP");
     expect(saved.supplier).toBe("Nieuwe leverancier");
     expect(saved.costPrice).toBe(15.75);
     // Ongemoeide velden blijven exact zoals voorheen.

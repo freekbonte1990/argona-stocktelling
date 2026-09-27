@@ -115,8 +115,8 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
     if (sort) setSortMode(sort);
     scrollToArticleList();
   }
-  function filterByProductGroup(group: string) {
-    applyFilter({ productGroup: group });
+  function filterByProductCategory(category: string) {
+    applyFilter({ productCategory: category });
   }
   function filterByClassification(classification: StockClassification) {
     applyFilter({ classification }, "STOCK_VALUE_DESC");
@@ -128,7 +128,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
     applyFilter({ countingState: "CARRIED_OVER" });
   }
 
-  const { header, kpis, productGroups, obsolete, countingQuality, deviations, locations, attentionPoints } =
+  const { header, kpis, productCategories, obsolete, countingQuality, deviations, locations, attentionPoints } =
     analysis;
 
   return (
@@ -229,14 +229,14 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
         </div>
       )}
 
-      {/* Voorraadwaarde per productgroep (spec §4). */}
+      {/* Voorraadwaarde per productgamma (spec §4, sinds Sprint 3.2 §11: canoniek, retroactief). */}
       <div className="card stack">
-        <h2 style={{ margin: 0 }}>Voorraadwaarde per productgroep</h2>
+        <h2 style={{ margin: 0 }}>Voorraadwaarde per productgamma</h2>
         <div className="table-scroll">
           <table className="history-table">
             <thead>
               <tr>
-                <th>Productgroep</th>
+                <th>Productgamma</th>
                 <th>Artikelen</th>
                 <th>Stuks</th>
                 <th>Voorraadwaarde</th>
@@ -247,23 +247,27 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
               </tr>
             </thead>
             <tbody>
-              {productGroups.map((group) => (
-                <tr key={group.productGroup}>
+              {productCategories.map((category) => (
+                <tr key={category.productCategory}>
                   <td>
-                    <button type="button" className="text-link-button" onClick={() => filterByProductGroup(group.productGroup)}>
-                      {group.productGroup}
+                    <button
+                      type="button"
+                      className="text-link-button"
+                      onClick={() => filterByProductCategory(category.productCategory)}
+                    >
+                      {category.productCategory}
                     </button>
                   </td>
-                  <td>{group.articleCount}</td>
-                  <td>{formatCount(group.totalUnits)}</td>
-                  <td>{formatEuro(group.stockValue)}</td>
-                  <td>{formatEuro(group.positiveCorrectionAmount)}</td>
-                  <td>{formatEuro(group.negativeCorrectionAmount)}</td>
-                  <td>{formatSignedEuro(group.netCorrectionAmount)}</td>
-                  <td>{group.percentOfTotalStockValue.toFixed(1)}%</td>
+                  <td>{category.articleCount}</td>
+                  <td>{formatCount(category.totalUnits)}</td>
+                  <td>{formatEuro(category.stockValue)}</td>
+                  <td>{formatEuro(category.positiveCorrectionAmount)}</td>
+                  <td>{formatEuro(category.negativeCorrectionAmount)}</td>
+                  <td>{formatSignedEuro(category.netCorrectionAmount)}</td>
+                  <td>{category.percentOfTotalStockValue.toFixed(1)}%</td>
                 </tr>
               ))}
-              {productGroups.length === 0 && (
+              {productCategories.length === 0 && (
                 <tr>
                   <td colSpan={8} className="empty-state">
                     Geen artikelen.
@@ -296,21 +300,21 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
               <SummaryTile label="Aantal artikelen" value={obsolete.obsoleteArticleCount} />
               <SummaryTile label="Aantal stuks" value={formatCount(obsolete.obsoleteTotalUnits)} />
             </div>
-            {obsolete.byProductGroup.length > 0 && (
+            {obsolete.byProductCategory.length > 0 && (
               <div className="table-scroll">
                 <table className="history-table">
                   <thead>
                     <tr>
-                      <th>Productgroep</th>
+                      <th>Productgamma</th>
                       <th>Artikelen</th>
                       <th>Stuks</th>
                       <th>Obsolete waarde</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {obsolete.byProductGroup.map((row) => (
-                      <tr key={row.productGroup}>
-                        <td>{row.productGroup}</td>
+                    {obsolete.byProductCategory.map((row) => (
+                      <tr key={row.productCategory}>
+                        <td>{row.productCategory}</td>
                         <td>{row.articleCount}</td>
                         <td>{formatCount(row.totalUnits)}</td>
                         <td>{formatEuro(row.obsoleteValue)}</td>
@@ -325,7 +329,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
                 <thead>
                   <tr>
                     <th>Artikel</th>
-                    <th>Productgroep</th>
+                    <th>Productgamma</th>
                     <th>Aantal</th>
                     <th>Kostprijs</th>
                     <th>Totale waarde</th>
@@ -343,7 +347,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
                           {article.articleNumber} — {article.description}
                         </button>
                       </td>
-                      <td>{article.productGroup ?? "—"}</td>
+                      <td>{article.productCategory}</td>
                       <td>{formatCount(article.quantity)}</td>
                       <td>{formatEuro(article.costPrice)}</td>
                       <td>{formatEuro(article.stockValue)}</td>
@@ -470,7 +474,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
         <div className="filter-row">
           <button
             type="button"
-            className={`chip ${filters.classification === null && filters.countingState === "ALL" && !filters.onlyWithDifference && filters.productGroup === null ? "chip--active" : ""}`}
+            className={`chip ${filters.classification === null && filters.countingState === "ALL" && !filters.onlyWithDifference && filters.productCategory === null ? "chip--active" : ""}`}
             onClick={() => setFilters(DEFAULT_ANALYSIS_ARTICLE_FILTERS)}
           >
             Alles
@@ -521,14 +525,14 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
               {STOCK_CLASSIFICATION_LABELS[classification]}
             </button>
           ))}
-          {filters.productGroup !== null && (
+          {filters.productCategory !== null && (
             <span className="chip chip--active location-chip">
-              <span>Productgroep: {filters.productGroup}</span>
+              <span>Productgamma: {filters.productCategory}</span>
               <button
                 type="button"
                 className="location-chip__remove"
-                aria-label="Productgroepfilter wissen"
-                onClick={() => setFilters((prev) => ({ ...prev, productGroup: null }))}
+                aria-label="Productgammafilter wissen"
+                onClick={() => setFilters((prev) => ({ ...prev, productCategory: null }))}
               >
                 ×
               </button>
@@ -540,7 +544,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
             <thead>
               <tr>
                 <th>Artikel</th>
-                <th>Productgroep</th>
+                <th>Productgamma</th>
                 <th>Classificatie</th>
                 <th>Vorige telling</th>
                 <th>Eindsnapshot</th>
@@ -559,7 +563,7 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
                       {row.articleNumber} — {row.description}
                     </button>
                   </td>
-                  <td>{row.productGroup ?? "—"}</td>
+                  <td>{row.productCategory ?? "—"}</td>
                   <td>{STOCK_CLASSIFICATION_LABELS[row.classification]}</td>
                   <td>{formatCount(row.previousCount)}</td>
                   <td>{formatCount(row.finalQuantity)}</td>

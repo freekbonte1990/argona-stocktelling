@@ -34,6 +34,17 @@ export function useArticles(officeId: string | undefined) {
   );
 }
 
+/**
+ * Sprint 3.2.1-architectuurfix: ALLE artikelen, over alle kantoren heen.
+ * Nodig voor de globale Productgamma-beheer-UI (SettingsPage): "aantal
+ * toegewezen artikelen"/"kan verwijderd worden" voor een bedrijfsbrede
+ * categorie moet over alle kantoren gecontroleerd worden, niet enkel het
+ * momenteel geselecteerde kantoor.
+ */
+export function useAllArticles() {
+  return useLiveQuery(() => db.articles.toArray(), [], []);
+}
+
 export function useActiveSession(officeId: string | undefined) {
   return useLiveQuery(
     () =>
@@ -66,6 +77,23 @@ export function useAssignments(officeId: string | undefined) {
     [officeId],
     [],
   );
+}
+
+/**
+ * Sprint 3.2 — "Productgamma's": reactieve lijst, ONGESORTEERD (sorteer met
+ * `allProductCategoriesInOrder`/`activeProductCategoriesInOrder` uit
+ * `domain/productCategory.ts` op het gebruikspunt). Puur een reactieve READ —
+ * de eenmalige, per-kantoor migratie (bootstrap uit bestaande `productGroup`-
+ * waarden, spec §4) loopt via `productCategoryService.listCategories`, dat
+ * elk scherm dat categorieën nodig heeft één keer (in een effect) aanroept.
+ *
+ * Sprint 3.2.1-architectuurfix: `ProductCategory` is nu bedrijfsbreed/globaal
+ * (geen `officeId` meer, zie domain/types.ts) — deze hook leest daarom ALTIJD
+ * de volledige, gedeelde lijst, ongeacht welk kantoor actief is. Geen
+ * parameter meer nodig.
+ */
+export function useProductCategories() {
+  return useLiveQuery(() => db.productCategories.toArray(), [], []);
 }
 
 /** Welk kantoor laatst geselecteerd was (multi-kantoor — overleeft een refresh). */

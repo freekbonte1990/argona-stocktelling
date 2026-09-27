@@ -1,6 +1,6 @@
 import type { SessionReviewSummary } from "../../domain/review";
 import type { StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, CountSession, Office } from "../../domain/types";
+import type { Article, ArticleLocationAssignment, CountSession, Office, ProductCategory } from "../../domain/types";
 import type { HistoricalSheetSnapshot } from "./StockSource";
 
 /**
@@ -23,6 +23,14 @@ export interface StockResultExportInput {
    * artikel te tonen.
    */
   assignments: ArticleLocationAssignment[];
+  /**
+   * Sprint 3.2 §14 (Excel portability): de VOLLEDIGE, bedrijfsbrede/globale
+   * Productgamma-lijst (niet enkel de categorieën die dit kantoor gebruikt)
+   * — wordt ongewijzigd als sheet PRODUCTGAMMAS teruggeschreven, zodat een
+   * export vanuit eender welk kantoor altijd de volledige, gedeelde lijst
+   * meeneemt (spec: "exact dezelfde category IDs/names/order/active-states").
+   */
+  categories: ProductCategory[];
   /**
    * Rollend stockarchief (nieuw): de volledige voorraad-snapshot van DEZE
    * sessie, waaruit de exporter het nieuwe, benoemde tellingtabblad opbouwt

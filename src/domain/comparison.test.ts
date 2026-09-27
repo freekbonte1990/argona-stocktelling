@@ -10,8 +10,21 @@ import {
   type ComparisonSnapshotInput,
   type ReliableHistoryEntry,
 } from "./comparison";
+import { PRODUCT_CATEGORY_FALLBACK, type ArticleCategoryResolution } from "./productCategory";
 import type { ArticleSnapshot, ArticleSnapshotStatus, StockSnapshot } from "./stockSnapshot";
 import type { Article } from "./types";
+
+/** Testhelper (Sprint 3.2 §12), zelfde patroon als analysis.test.ts: expliciete `articleId -> categorie`-resolutiemap. */
+function resolution(byArticleId: Record<string, string | null>): Map<string, ArticleCategoryResolution> {
+  const map = new Map<string, ArticleCategoryResolution>();
+  for (const [articleId, categoryName] of Object.entries(byArticleId)) {
+    map.set(articleId, {
+      categoryId: categoryName ? `cat:${categoryName}` : null,
+      categoryName: categoryName ?? PRODUCT_CATEGORY_FALLBACK,
+    });
+  }
+  return map;
+}
 
 /**
  * Sprint 3 — Vergelijking tussen stocktellingen. Zelfde fixture-filosofie als
@@ -92,9 +105,9 @@ function historyWithOnlyB(inputB: ComparisonSnapshotInput): ReliableHistoryEntry
 }
 
 describe("Waarde (spec §16 'Waarde')", () => {
-  it("berekent totale stockwaarde A/B, delta €, delta % en productgroeptotalen correct", () => {
-    const a1 = makeArticle("A1", { productGroup: "G1", costPrice: 2 });
-    const a2 = makeArticle("A2", { productGroup: "G2", costPrice: 10, stockClassification: "OBSOLETE" });
+  it("berekent totale stockwaarde A/B, delta €, delta % en productgammatotalen correct (Sprint 3.2 §12: canoniek/retroactief)", () => {
+    const a1 = makeArticle("A1", { costPrice: 2 });
+    const a2 = makeArticle("A2", { costPrice: 10, stockClassification: "OBSOLETE" });
 
     const snapA = makeSnapshot("s-a", "2026-08 Maand", [
       makeRow(a1, { quantity: 10 }), // 20
@@ -106,8 +119,9 @@ describe("Waarde (spec §16 'Waarde')", () => {
     ]);
     const inputA = makeInput("s-a", "2026-08 Maand", snapA);
     const inputB = makeInput("s-b", "2026-09 Maand", snapB);
+    const categoryResolution = resolution({ "office:A1": "G1", "office:A2": "G2" });
 
-    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), categoryResolution);
 
     expect(comparison.kpis.stockValue.valueA).toBe(70);
     expect(comparison.kpis.stockValue.valueB).toBe(80);
@@ -118,14 +132,14 @@ describe("Waarde (spec §16 'Waarde')", () => {
     expect(comparison.kpis.obsolete.valueB).toBe(50);
     expect(comparison.kpis.obsolete.differenceAmount).toBe(0);
 
-    const g1 = comparison.productGroups.find((g) => g.productGroup === "G1");
-    const g2 = comparison.productGroups.find((g) => g.productGroup === "G2");
+    const g1 = comparison.productCategories.find((g) => g.productCategory === "G1");
+    const g2 = comparison.productCategories.find((g) => g.productCategory === "G2");
     expect(g1?.valueA).toBe(20);
     expect(g1?.valueB).toBe(30);
     expect(g1?.valueDifference).toBe(10);
     expect(g2?.valueDifference).toBe(0);
     // Default sortering: grootste absolute verandering eerst.
-    expect(comparison.productGroups[0].productGroup).toBe("G1");
+    expect(comparison.productCategories[0].productCategory).toBe("G1");
   });
 
   it("differencePercent is null wanneer de basiswaarde (A) 0 is — nooit fictief 0% of Infinity", () => {
@@ -135,7 +149,7 @@ describe("Waarde (spec §16 'Waarde')", () => {
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
 
-    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
     expect(comparison.kpis.stockValue.valueA).toBe(0);
     expect(comparison.kpis.stockValue.differencePercent).toBeNull();
   });
@@ -156,7 +170,7 @@ describe("Artikelmatching (spec §16 'Artikelmatching')", () => {
   ]);
   const inputA = makeInput("s-a", "A", snapA);
   const inputB = makeInput("s-b", "B", snapB);
-  const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+  const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
   const byNumber = new Map(comparison.articles.map((r) => [r.articleNumber, r]));
 
   it("artikel aanwezig in beide snapshots wordt correct als 'beide gekend' herkend", () => {
@@ -189,7 +203,7 @@ describe("Artikelmatching (spec §16 'Artikelmatching')", () => {
     const snapB2 = makeSnapshot("s-b2", "B2", [makeRow(zero, { quantity: 5 })]);
     const inputA2 = makeInput("s-a2", "A2", snapA2);
     const inputB2 = makeInput("s-b2", "B2", snapB2);
-    const cmp = buildSessionComparison(inputA2, inputB2, historyWithOnlyB(inputB2));
+    const cmp = buildSessionComparison(inputA2, inputB2, historyWithOnlyB(inputB2), new Map());
     const row = cmp.articles.find((r) => r.articleNumber === "ZERO")!;
     expect(row.quantityA).toBe(0); // gekende 0, geen `null`
     expect(row.isFromZero).toBe(true);
@@ -204,7 +218,7 @@ describe("Ongewijzigd (spec §16 'Ongewijzigd' / spec §7)", () => {
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 6 })]);
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
-    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
     const row = cmp.articles[0];
     expect(row.quantityUnchanged).toBe(true);
     expect(row.quantityChanged).toBe(false);
@@ -217,7 +231,7 @@ describe("Ongewijzigd (spec §16 'Ongewijzigd' / spec §7)", () => {
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 6, costPrice: 9 })]);
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
-    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
     const row = cmp.articles[0];
     expect(row.quantityUnchanged).toBe(true);
     expect(row.valueDifference).toBe(6 * 9 - 6 * 4); // 30 — waardewijziging blijft zichtbaar
@@ -230,7 +244,7 @@ describe("Ongewijzigd (spec §16 'Ongewijzigd' / spec §7)", () => {
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 9 })]);
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
-    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    const cmp = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
     const row = cmp.articles[0];
     expect(row.quantityChanged).toBe(true);
     expect(row.quantityUnchanged).toBe(false);
@@ -300,7 +314,7 @@ describe("Kandidaten voor obsolete-review (spec §16 'Obsolete kandidaten' / spe
       sessionName: `h${i}`,
       articlesById: new Map([[art.id, { totalCount: quantityB, status: "GETELD" as ArticleSnapshotStatus }]]),
     }));
-    return buildSessionComparison(inputA, inputB, history);
+    return buildSessionComparison(inputA, inputB, history, new Map());
   }
 
   it("ACTIVE + quantity > 0 + ≥3 opeenvolgende ongewijzigde tellingen → kandidaat", () => {
@@ -339,7 +353,7 @@ describe("Kandidaten voor obsolete-review (spec §16 'Obsolete kandidaten' / spe
     const snapB = makeSnapshot("s-b", "B", [makeRow(art, { quantity: 4 })]);
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
-    buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB));
+    buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map());
     expect(art).toEqual(before);
   });
 });
@@ -352,7 +366,7 @@ describe("Classificatie-overgangen (spec §16 'Classificatie' / spec §10)", () 
     const snapB = makeSnapshot("s-b", "B", [makeRow(artB, { quantity: 3 })]);
     const inputA = makeInput("s-a", "A", snapA);
     const inputB = makeInput("s-b", "B", snapB);
-    return buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB)).articles[0];
+    return buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), new Map()).articles[0];
   }
 
   it("ACTIVE → OBSOLETE: nieuw obsolete", () => {
@@ -380,7 +394,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1", { costPrice: 10 });
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 4, costPrice: 10 })]); // 40
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 7, costPrice: 10 })]); // 70
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.priceDifferencePerUnit).toBe(0);
     expect(row.pricePercentChange).toBe(0);
@@ -393,7 +407,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1");
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: 10 })]); // 50
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 5, costPrice: 12 })]); // 60
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.priceDifferencePerUnit).toBe(2);
     expect(row.pricePercentChange).toBeCloseTo(20, 5);
@@ -407,7 +421,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1");
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 10, costPrice: 100 })]);
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 12, costPrice: 110 })]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.quantityEffect).toBe(200); // (12-10)*100
     expect(row.priceEffect).toBe(120); // 12*(110-100)
@@ -419,7 +433,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1");
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 10, costPrice: 20 })]);
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 10, costPrice: 15 })]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.priceDifferencePerUnit).toBe(-5);
     expect(row.priceEffect).toBe(-50);
@@ -432,7 +446,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1", { costPrice: 8 });
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 6, costPrice: 8 })]);
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 6, costPrice: 8 })]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.quantityEffect).toBe(0);
     expect(row.priceEffect).toBe(0);
@@ -443,7 +457,7 @@ describe("Kostprijsevolutie — prijsverschil en hoeveelheids-/prijseffect-ontbi
     const a1 = makeArticle("A1");
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: null })]);
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 8, costPrice: 12 })]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.costPriceA).toBeNull();
     expect(row.priceDifferencePerUnit).toBeNull();
@@ -461,7 +475,7 @@ describe("Kostprijs 0 als basiswaarde (v0.6.1 review-punt 1) — percentage nooi
     const a1 = makeArticle("A1");
     const snapA = makeSnapshot("s-a", "A", [makeRow(a1, { quantity: 5, costPrice: 0 })]);
     const snapB = makeSnapshot("s-b", "B", [makeRow(a1, { quantity: 5, costPrice: 8 })]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     const row = cmp.articles[0];
     expect(row.costPriceA).toBe(0);
     expect(row.priceDifferencePerUnit).toBe(8); // € blijft berekenbaar (8 - 0)
@@ -490,7 +504,7 @@ describe("Grootste prijsstijgingen/dalingen (Sprint 3.1 §6) — sorteert op fin
       makeRow(bulk, { quantity: 1000, costPrice: 6 }), // +€1/eenheid, 1000 stuks -> €1.000 effect
       makeRow(single, { quantity: 1, costPrice: 15 }), // +€10/eenheid, 1 stuk -> €10 effect
     ]);
-    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)));
+    const cmp = buildSessionComparison(makeInput("s-a", "A", snapA), makeInput("s-b", "B", snapB), historyWithOnlyB(makeInput("s-b", "B", snapB)), new Map());
     expect(cmp.priceMovers.biggestIncreases.map((r) => r.articleId)).toEqual([bulk.id, single.id]);
     expect(cmp.priceMovers.biggestIncreases[0].priceEffect).toBe(1000);
     expect(cmp.priceMovers.biggestIncreases[1].priceEffect).toBe(10);
@@ -504,6 +518,8 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
       articleNumber: "N1",
       description: "Beta artikel",
       productGroup: "G1",
+      productCategoryId: "cat:G1",
+      productCategory: "G1",
       unit: "stuk",
       presentInA: true,
       presentInB: true,
@@ -541,6 +557,8 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
       articleNumber: "N2",
       description: "Alfa artikel",
       productGroup: "G2",
+      productCategoryId: "cat:G2",
+      productCategory: "G2",
       unit: "stuk",
       presentInA: true,
       presentInB: true,
@@ -580,8 +598,10 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
     expect(filterArticleComparisonRows(rows, { ...DEFAULT_ARTICLE_COMPARISON_FILTERS, state: "UNCHANGED" })[0].articleNumber).toBe("N1");
   });
 
-  it("filtert op productgroep en zoekterm", () => {
-    expect(filterArticleComparisonRows(rows, { ...DEFAULT_ARTICLE_COMPARISON_FILTERS, productGroup: "G2" })).toHaveLength(1);
+  it("filtert op productgamma en zoekterm", () => {
+    expect(
+      filterArticleComparisonRows(rows, { ...DEFAULT_ARTICLE_COMPARISON_FILTERS, productCategory: "G2" }),
+    ).toHaveLength(1);
     expect(filterArticleComparisonRows(rows, { ...DEFAULT_ARTICLE_COMPARISON_FILTERS, search: "beta" })).toHaveLength(1);
   });
 

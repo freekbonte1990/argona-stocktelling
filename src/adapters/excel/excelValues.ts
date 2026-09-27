@@ -46,3 +46,18 @@ export function toIsoDateString(value: unknown): string | null {
 export function isRowBlank(row: unknown[]): boolean {
   return row.every((cell) => cell === null || cell === undefined || String(cell).trim() === "");
 }
+
+/**
+ * Ja/nee-achtige Excelcel naar boolean — gedeeld door ARTIKEL_LOCATIES
+ * ("Actief") en PRODUCTGAMMAS ("Actief", Sprint 3.2 §14). Een lege/ontbrekende
+ * cel geeft `defaultValue` terug (bij ARTIKEL_LOCATIES en PRODUCTGAMMAS: altijd
+ * `true`, zodat een handmatig ingekorte/oudere rij niet stilzwijgend inactief
+ * wordt). Enkel expliciete "nee"/"no"/"false"/"0" gelden als `false`.
+ */
+export function toBooleanFlag(raw: unknown, defaultValue: boolean): boolean {
+  if (raw === null || raw === undefined) return defaultValue;
+  const text = String(raw).trim();
+  if (text === "") return defaultValue;
+  const normalized = text.toLowerCase();
+  return normalized !== "nee" && normalized !== "no" && normalized !== "false" && normalized !== "0";
+}

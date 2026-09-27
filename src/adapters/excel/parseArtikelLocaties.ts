@@ -1,6 +1,6 @@
 import type { ArticleLocationAssignment, Location } from "../../domain/types";
 import { extractDataRows, findHeaderRow } from "./excelHeaderUtils";
-import { toStringOrNull } from "./excelValues";
+import { toBooleanFlag, toStringOrNull } from "./excelValues";
 
 export const ARTIKEL_LOCATIES_SHEET_NAME = "ARTIKEL_LOCATIES";
 
@@ -33,12 +33,6 @@ export const ARTIKEL_LOCATIES_REQUIRED_HEADERS = [
   "Laatst gezien op",
 ] as const;
 
-function parseActiveFlag(raw: unknown): boolean {
-  if (raw === null || raw === undefined) return true;
-  const text = String(raw).trim().toLowerCase();
-  return text !== "nee" && text !== "no" && text !== "false" && text !== "0";
-}
-
 /**
  * Leest sheet ARTIKEL_LOCATIES in. Rijen die naar een onbekende (niet meer
  * bestaande) locatie-ID verwijzen worden bewust genegeerd (defensief tegen
@@ -70,7 +64,7 @@ export function parseArtikelLocatiesSheet(
       officeId,
       articleId,
       locationId,
-      active: parseActiveFlag(row["Actief"]),
+      active: toBooleanFlag(row["Actief"], true),
       // Bewust GEEN Date-conversie (zoals toIsoDateString voor CONFIG's
       // basisdatum) — `lastSeenAt` is een volledige ISO-timestamp
       // (`new Date().toISOString()`, zie CountingService), geen kalenderdag.

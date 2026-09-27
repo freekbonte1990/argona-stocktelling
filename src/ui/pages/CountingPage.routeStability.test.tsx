@@ -72,6 +72,7 @@ beforeEach(async () => {
     db.importMeta,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
   ]) {
     await table.clear();
   }

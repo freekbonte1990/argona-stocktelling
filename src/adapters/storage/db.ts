@@ -6,6 +6,7 @@ import type {
   CountSession,
   LocationSessionStatus,
   Office,
+  ProductCategory,
 } from "../../domain/types";
 import type {
   FinalizedSessionResult,
@@ -47,6 +48,7 @@ export class AppDatabase extends Dexie {
   historicalSheets!: Table<HistoricalSheetRow, string>;
   stockHistoryEntries!: Table<StockHistoryEntryRow, string>;
   finalizedSessionResults!: Table<FinalizedSessionResult, string>;
+  productCategories!: Table<ProductCategory, string>;
 
   constructor(name = "argona-stocktelling") {
     super(name);
@@ -86,6 +88,33 @@ export class AppDatabase extends Dexie {
     // `ExportService`s backward-compatibele terugvalpad.
     this.version(5).stores({
       finalizedSessionResults: "sessionId",
+    });
+    // v6 (Sprint 3.2 — Dynamic Product Categories): de standalone,
+    // persistente "Productgamma"-entiteit (zie domain/types.ts#ProductCategory
+    // en domain/productCategory.ts) — puur additief, een volledig NIEUWE
+    // tabel, dus een bestaande database (versies 1-5) upgradet hier zonder
+    // dataverlies of crash. `Article.categoryId` zelf is een niet-geïndexeerd
+    // veld op de al bestaande `articles`-tabel (zie `Article` in
+    // domain/types.ts) en heeft daarom geen aparte schemawijziging nodig —
+    // exact hetzelfde patroon als `Article.stockClassification` in Sprint 2.
+    this.version(6).stores({
+      productCategories: "id, officeId",
+    });
+    // v7 (Sprint 3.2.1-architectuurfix): `ProductCategory` blijkt bedrijfsbreed/
+    // globaal te moeten zijn, niet office-scoped (zie domain/types.ts#
+    // ProductCategory) — "Kabels" moet dezelfde stabiele ID hebben voor
+    // Antwerpen, Damme en Lokeren. De `officeId`-index op deze tabel vervalt
+    // daarom hier; Dexie-versioning-discipline: een NIEUWE versie die het
+    // schema herdefinieert, nooit een bestaande versie in-place wijzigen. Dit
+    // is een pure index-wijziging (het veld zelf verdwijnt uit de records via
+    // normale toepassingslogica, niet via een schema-migratiefunctie hier) —
+    // bestaande lokale databases (versies 1-6) upgraden zonder crash; enkel
+    // het (nu overbodige) `officeId`-veld op reeds opgeslagen categorierijen
+    // blijft fysiek in IndexedDB staan tot de eerstvolgende
+    // `saveProductCategories`-aanroep die rij overschrijft (onschadelijk: het
+    // domein/de UI lezen dat veld nergens meer).
+    this.version(7).stores({
+      productCategories: "id",
     });
   }
 }

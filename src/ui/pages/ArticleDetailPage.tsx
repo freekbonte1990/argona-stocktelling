@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { activeLocationsInOrder } from "../../domain/locations";
 import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
 import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
+import {
+  activeProductCategoriesInOrder,
+  allProductCategoriesInOrder,
+  categoriesById,
+  resolveCategoryLabel,
+} from "../../domain/productCategory";
 import { getStockClassification, STOCK_CLASSIFICATION_LABELS } from "../../domain/stockClassification";
 import type { ArticleCountFrequency, StockClassification } from "../../domain/types";
-import { countingRepository } from "../../application/container";
+import { countingRepository, productCategoryService } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { SimpleLineChart } from "../components/SimpleLineChart";
 import type { SimpleLineChartPoint } from "../components/SimpleLineChart";
@@ -15,6 +21,7 @@ import {
   useArticles,
   useAssignments,
   useOffice,
+  useProductCategories,
 } from "../hooks/useLiveData";
 
 interface ArticleDetailPageProps {
@@ -101,6 +108,16 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   const assignments = useAssignments(officeId) ?? [];
   const history = useArticleHistory(officeId, articleId) ?? [];
 
+  // Sprint 3.2 §7: "Productgamma" — de eenmalige (idempotente) migratie/
+  // bootstrap loopt via deze aanroep, `useProductCategories` levert de
+  // reactieve lijst voor de select/weergave.
+  useEffect(() => {
+    void productCategoryService.listCategories(officeId);
+  }, [officeId]);
+  const allCategories = allProductCategoriesInOrder(useProductCategories() ?? []);
+  const activeCategories = activeProductCategoriesInOrder(allCategories);
+  const categoryByIdMap = categoriesById(allCategories);
+
   const [addingLocationId, setAddingLocationId] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Aanvulling ("Bij Artikel moeten er gemakkelijk wijzigingen aangebracht
@@ -113,7 +130,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   // toetsaanslag zou wegschrijven).
   const [editingGeneral, setEditingGeneral] = useState(false);
   const [draftDescription, setDraftDescription] = useState("");
-  const [draftProductGroup, setDraftProductGroup] = useState("");
+  const [draftCategoryId, setDraftCategoryId] = useState("");
   const [draftSupplier, setDraftSupplier] = useState("");
   const [draftCostPrice, setDraftCostPrice] = useState("");
   // Aanvulling ("telperiode en status moet je ook kunnen aanpassen"): dezelfde
@@ -142,7 +159,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     if (!article) return;
     setError(null);
     setDraftDescription(article.description);
-    setDraftProductGroup(article.productGroup ?? "");
+    setDraftCategoryId(article.categoryId ?? "");
     setDraftSupplier(article.supplier ?? "");
     setDraftCostPrice(article.costPrice !== null ? String(article.costPrice) : "");
     setDraftCountPeriod(article.countPeriod);
@@ -173,7 +190,14 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
         {
           ...article,
           description: trimmedDescription,
-          productGroup: draftProductGroup.trim() === "" ? null : draftProductGroup.trim(),
+          categoryId: draftCategoryId === "" ? null : draftCategoryId,
+          // Bronproductgroep (`productGroup`) is bevroren bron-/auditinformatie
+          // (spec-verduidelijking Sprint 3.2.1): NOOIT via deze vrije-tekst-UI
+          // wijzigbaar. `...article` hierboven behoudt de bestaande waarde
+          // ongewijzigd — enkel een Excel-import of de eenmalige
+          // nieuw-artikel-bootstrap (`NewArticleService`) mogen dit veld ooit
+          // schrijven. Zie de "Productgamma"-select hierboven voor de wél
+          // editable management-classificatie.
           supplier: draftSupplier.trim() === "" ? null : draftSupplier.trim(),
           costPrice: parsedPrice,
           countPeriod: draftCountPeriod,
@@ -284,12 +308,26 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
               />
             </div>
             <div className="article-detail-field">
-              <span className="article-detail-field__label">Productgroep</span>
-              <input
+              <span className="article-detail-field__label">Productgamma</span>
+              <select
                 className="search-input"
-                value={draftProductGroup}
-                onChange={(e) => setDraftProductGroup(e.target.value)}
-              />
+                style={{ width: "auto" }}
+                value={draftCategoryId}
+                onChange={(e) => setDraftCategoryId(e.target.value)}
+              >
+                <option value="">Niet ingedeeld</option>
+                {activeCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Bronproductgroep</span>
+              <span className="article-detail-field__value">
+                {article.productGroup?.trim() ? article.productGroup : "—"}
+              </span>
             </div>
             <div className="article-detail-field">
               <span className="article-detail-field__label">Leverancier</span>
@@ -378,7 +416,13 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
               <span className="article-detail-field__value">{article.description || "—"}</span>
             </div>
             <div className="article-detail-field">
-              <span className="article-detail-field__label">Productgroep</span>
+              <span className="article-detail-field__label">Productgamma</span>
+              <span className="article-detail-field__value">
+                {resolveCategoryLabel(article.categoryId, categoryByIdMap)}
+              </span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Bronproductgroep</span>
               <span className="article-detail-field__value">{article.productGroup ?? "—"}</span>
             </div>
             <div className="article-detail-field">

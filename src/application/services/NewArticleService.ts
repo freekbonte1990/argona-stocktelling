@@ -6,11 +6,21 @@ import { assertSessionEditable } from "../errors";
 import type { CountingRepository } from "../ports/CountingRepository";
 import type { CountingService } from "./CountingService";
 import type { LocationAssignmentService } from "./LocationAssignmentService";
+import type { ProductCategoryService } from "./ProductCategoryService";
 
-/** Gemeenschappelijke, minimale velden voor een handmatig aangemaakt artikel. */
+/**
+ * Gemeenschappelijke, minimale velden voor een handmatig aangemaakt artikel.
+ * Sprint 3.2 §10: "Productgroep" (vrije tekst) is vervangen door een
+ * verplichte `categoryId` uit de dynamische, levende Productgamma-lijst — een
+ * nieuw productgamma moet meteen selecteerbaar zijn zonder code-wijziging.
+ * `Article.productGroup` (het bronveld dat Excel verwacht, spec §10: "blijf
+ * backward compatible") wordt hieruit afgeleid als de naam van dat gekozen
+ * productgamma op het moment van aanmaken — er bestaat voor een gloednieuw
+ * artikel immers geen apart "historisch" bronveld.
+ */
 interface NewArticleCoreInput {
   description: string;
-  productGroup: string;
+  categoryId: string;
   unit: string;
   countPeriod: ArticleCountFrequency;
   supplier?: string | null;
@@ -44,21 +54,25 @@ export class NewArticleService {
   private readonly repository: CountingRepository;
   private readonly locationAssignmentService: LocationAssignmentService;
   private readonly countingService: CountingService;
+  private readonly productCategoryService: ProductCategoryService;
 
   constructor(
     repository: CountingRepository,
     locationAssignmentService: LocationAssignmentService,
     countingService: CountingService,
+    productCategoryService: ProductCategoryService,
   ) {
     this.repository = repository;
     this.locationAssignmentService = locationAssignmentService;
     this.countingService = countingService;
+    this.productCategoryService = productCategoryService;
   }
 
   private async buildNewArticle(officeId: string, input: NewArticleCoreInput): Promise<Article> {
-    const [office, existingArticles] = await Promise.all([
+    const [office, existingArticles, categories] = await Promise.all([
       this.repository.getOffice(officeId),
       this.repository.getArticles(officeId),
+      this.productCategoryService.listCategories(officeId),
     ]);
     if (!office) {
       throw new Error(`Kantoor ${officeId} niet gevonden.`);
@@ -68,6 +82,10 @@ export class NewArticleService {
     if (!description) {
       throw new Error("Omschrijving is verplicht voor een nieuw artikel.");
     }
+    if (!input.categoryId.trim()) {
+      throw new Error("Productgamma is verplicht voor een nieuw artikel.");
+    }
+    const category = categories.find((c) => c.id === input.categoryId);
     return {
       id: `${officeId}:${articleNumber}`,
       officeId,
@@ -75,7 +93,11 @@ export class NewArticleService {
       officialArticleNumber: null,
       idType: "TIJDELIJK",
       description,
-      productGroup: input.productGroup.trim() || null,
+      // Geen apart historisch bronveld voor een gloednieuw artikel — de naam
+      // van het gekozen productgamma dient meteen als bronproductgroep, zodat
+      // Excel-export/import (dat dit veld verwacht, spec §10) nooit leeg is.
+      productGroup: category?.name ?? null,
+      categoryId: input.categoryId,
       supplier: input.supplier?.trim() || null,
       unit: input.unit.trim() || null,
       costPrice: input.costPrice ?? null,

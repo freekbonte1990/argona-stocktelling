@@ -72,6 +72,7 @@ beforeEach(async () => {
     db.importMeta,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
     db.historicalSheets,
     db.stockHistoryEntries,
     db.finalizedSessionResults,
@@ -118,7 +119,7 @@ async function waitUntilLoaded() {
   await waitFor(() => {
     expect(screen.queryByText("Bezig met laden...")).not.toBeInTheDocument();
     expect(screen.queryByText("Bezig met vergelijken...")).not.toBeInTheDocument();
-    expect(screen.getByText("Vergelijking per productgroep")).toBeInTheDocument();
+    expect(screen.getByText("Vergelijking per productgamma")).toBeInTheDocument();
   });
 }
 

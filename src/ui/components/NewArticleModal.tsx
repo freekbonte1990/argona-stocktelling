@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { newArticleService } from "../../application/container";
-import type { ArticleCountFrequency, Location } from "../../domain/types";
+import { useEffect, useState } from "react";
+import { newArticleService, productCategoryService } from "../../application/container";
+import { activeProductCategoriesInOrder } from "../../domain/productCategory";
+import type { ArticleCountFrequency, Location, ProductCategory } from "../../domain/types";
+import { useProductCategories } from "../hooks/useLiveData";
 import { BigButton } from "./BigButton";
 
 const FREQUENCY_OPTIONS: { value: ArticleCountFrequency; label: string }[] = [
@@ -32,7 +34,7 @@ interface NewArticleModalProps {
  */
 export function NewArticleModal({ officeId, activeLocations, onClose, onCreated }: NewArticleModalProps) {
   const [description, setDescription] = useState("");
-  const [productGroup, setProductGroup] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [unit, setUnit] = useState("");
   const [countPeriod, setCountPeriod] = useState<ArticleCountFrequency>("MONTHLY");
   const [supplier, setSupplier] = useState("");
@@ -42,7 +44,15 @@ export function NewArticleModal({ officeId, activeLocations, onClose, onCreated 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const canSubmit = description.trim() !== "" && productGroup.trim() !== "" && unit.trim() !== "";
+  // Sprint 3.2 §10: een nieuw productgamma moet meteen selecteerbaar zijn
+  // zonder codewijziging — deze effect triggert de (idempotente, eenmalige)
+  // migratie/bootstrap, `useProductCategories` levert de reactieve lijst.
+  useEffect(() => {
+    void productCategoryService.listCategories(officeId);
+  }, [officeId]);
+  const categories: ProductCategory[] = activeProductCategoriesInOrder(useProductCategories() ?? []);
+
+  const canSubmit = description.trim() !== "" && categoryId.trim() !== "" && unit.trim() !== "";
 
   function toggleLocation(id: string) {
     setLocationIds((prev) => {
@@ -60,7 +70,7 @@ export function NewArticleModal({ officeId, activeLocations, onClose, onCreated 
     try {
       const article = await newArticleService.createArticle(officeId, {
         description,
-        productGroup,
+        categoryId,
         unit,
         countPeriod,
         supplier: supplier.trim() || null,
@@ -98,8 +108,15 @@ export function NewArticleModal({ officeId, activeLocations, onClose, onCreated 
         </label>
 
         <label className="form-field">
-          <span>Productgroep *</span>
-          <input className="search-input" value={productGroup} onChange={(e) => setProductGroup(e.target.value)} />
+          <span>Productgamma *</span>
+          <select className="search-input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="">Kies een productgamma...</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="form-field">

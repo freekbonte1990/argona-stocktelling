@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
-import { locationAssignmentService } from "../../application/container";
-import type { Article, Location } from "../../domain/types";
+import { locationAssignmentService, productCategoryService } from "../../application/container";
+import { resolveCategoryLabel } from "../../domain/productCategory";
+import type { Article, Location, ProductCategory } from "../../domain/types";
 import { BigButton } from "./BigButton";
 
-type BulkAction = "ADD" | "REMOVE" | "MOVE";
+type BulkAction = "ADD" | "REMOVE" | "MOVE" | "SET_CATEGORY";
 
 const BULK_ACTION_TITLES: Record<BulkAction, string> = {
   ADD: "Locatie toevoegen",
   REMOVE: "Locatie verwijderen",
   MOVE: "Verplaatsen naar",
+  SET_CATEGORY: "Productgamma wijzigen",
 };
 
 interface ArticleBulkListProps {
@@ -20,6 +22,9 @@ interface ArticleBulkListProps {
   locationById: Map<string, Location>;
   /** Actieve locatie-ID's per artikel (spec §3/§6). */
   locationIdsByArticle: Map<string, Set<string>>;
+  /** Sprint 3.2 §8: actieve productgamma's, voor de bulkactie "Productgamma wijzigen" + de weergavenaam per rij. */
+  activeCategories: ProductCategory[];
+  categoriesById: Map<string, ProductCategory>;
   onOpenArticle: (articleId: string) => void;
 }
 
@@ -40,11 +45,14 @@ export function ArticleBulkList({
   activeLocations,
   locationById,
   locationIdsByArticle,
+  activeCategories,
+  categoriesById,
   onOpenArticle,
 }: ArticleBulkListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [categoryTarget, setCategoryTarget] = useState<string | null>(null);
   const [quickAddArticleId, setQuickAddArticleId] = useState<string | null>(null);
   const [quickAddLocationId, setQuickAddLocationId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +84,21 @@ export function ArticleBulkList({
   function closeBulkModal() {
     setBulkAction(null);
     setMoveTarget(null);
+    setCategoryTarget(null);
+  }
+
+  async function runCategoryBulkAction(categoryId: string) {
+    setError(null);
+    setBusy(true);
+    try {
+      await productCategoryService.assignArticles(officeId, Array.from(selectedIds), categoryId);
+      closeBulkModal();
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout bij het wijzigen van het productgamma.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function runBulkAction(locationId: string) {
@@ -106,6 +129,10 @@ export function ArticleBulkList({
       return;
     }
     void runBulkAction(locationId);
+  }
+
+  function handlePickBulkCategory(categoryId: string) {
+    setCategoryTarget(categoryId);
   }
 
   async function handleQuickAdd(articleId: string) {
@@ -161,6 +188,9 @@ export function ArticleBulkList({
             <button type="button" className="chip" onClick={() => setBulkAction("MOVE")}>
               Verplaatsen naar
             </button>
+            <button type="button" className="chip" onClick={() => setBulkAction("SET_CATEGORY")}>
+              Productgamma wijzigen
+            </button>
             <button type="button" className="chip" onClick={() => setSelectedIds(new Set())}>
               Selectie wissen
             </button>
@@ -184,6 +214,7 @@ export function ArticleBulkList({
               (l) => !(locationIdsByArticle.get(article.id) ?? new Set()).has(l.id),
             )}
             quickAddOpen={quickAddArticleId === article.id}
+            categoryLabel={resolveCategoryLabel(article.categoryId, categoriesById)}
             quickAddLocationId={quickAddArticleId === article.id ? quickAddLocationId : ""}
             onOpenQuickAdd={() => {
               setQuickAddArticleId(article.id);
@@ -214,6 +245,48 @@ export function ArticleBulkList({
                   <BigButton variant="ghost" disabled={busy} onClick={() => setMoveTarget(null)}>
                     Terug
                   </BigButton>
+                </div>
+              </>
+            ) : bulkAction === "SET_CATEGORY" && categoryTarget ? (
+              <>
+                <p style={{ margin: 0, fontWeight: 700 }}>Productgamma wijzigen bevestigen</p>
+                {/* Sprint 3.2 §8: exacte bevestigingstekst uit de spec. */}
+                <p className="screen-subtitle" style={{ margin: 0 }}>
+                  {selectedIds.size} artikelen worden toegewezen aan {categoriesById.get(categoryTarget)?.name}. Dit
+                  wijzigt ook hun indeling in historische managementanalyses. Historische brongegevens blijven
+                  ongewijzigd.
+                </p>
+                <div className="stack">
+                  <BigButton variant="primary" disabled={busy} onClick={() => runCategoryBulkAction(categoryTarget)}>
+                    Bevestigen
+                  </BigButton>
+                  <BigButton variant="ghost" disabled={busy} onClick={() => setCategoryTarget(null)}>
+                    Terug
+                  </BigButton>
+                </div>
+              </>
+            ) : bulkAction === "SET_CATEGORY" ? (
+              <>
+                <p style={{ margin: 0, fontWeight: 700 }}>
+                  {BULK_ACTION_TITLES[bulkAction]} — {selectedIds.size} artikel(en) geselecteerd
+                </p>
+                <p className="screen-subtitle" style={{ margin: 0 }}>
+                  Kies een productgamma.
+                </p>
+                <div className="stack stack--tight">
+                  {activeCategories.length === 0 && (
+                    <p className="empty-state">Nog geen productgamma's aangemaakt — dat kan bij Instellingen.</p>
+                  )}
+                  {activeCategories.map((category) => (
+                    <BigButton
+                      key={category.id}
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => handlePickBulkCategory(category.id)}
+                    >
+                      {category.name}
+                    </BigButton>
+                  ))}
                 </div>
               </>
             ) : (
@@ -254,6 +327,7 @@ interface ArticleRowProps {
   onToggleSelected: () => void;
   onOpen: () => void;
   locations: Location[];
+  categoryLabel: string;
   availableLocationsToAdd: Location[];
   quickAddOpen: boolean;
   quickAddLocationId: string;
@@ -282,6 +356,7 @@ function ArticleRow({
   onToggleSelected,
   onOpen,
   locations,
+  categoryLabel,
   availableLocationsToAdd,
   quickAddOpen,
   quickAddLocationId,
@@ -305,7 +380,7 @@ function ArticleRow({
           <div className="article-card__description">{article.description || "(geen omschrijving)"}</div>
           <div className="article-card__meta">
             <span className="meta-article-number">{article.articleNumber}</span>
-            {article.productGroup && <span>{article.productGroup}</span>}
+            <span>{categoryLabel}</span>
             <span>Telfrequentie: {article.rawCountPeriod ?? "—"}</span>
             <span>Vorige telling: {article.previousCount ?? "—"}</span>
           </div>

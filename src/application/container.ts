@@ -8,6 +8,7 @@ import { AnalysisService } from "./services/AnalysisService";
 import { ComparisonService } from "./services/ComparisonService";
 import { LocationAssignmentService } from "./services/LocationAssignmentService";
 import { NewArticleService } from "./services/NewArticleService";
+import { ProductCategoryService } from "./services/ProductCategoryService";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -29,8 +30,14 @@ export const importService = new ImportService(repository);
 export const countSessionService = new CountSessionService(repository);
 export const countingService = new CountingService(repository);
 export const exportService = new ExportService(repository, resultExporter);
-export const analysisService = new AnalysisService(repository);
-export const comparisonService = new ComparisonService(repository);
+export const productCategoryService = new ProductCategoryService(repository);
+export const analysisService = new AnalysisService(repository, productCategoryService);
+export const comparisonService = new ComparisonService(repository, productCategoryService);
 export const locationAssignmentService = new LocationAssignmentService(repository);
-export const newArticleService = new NewArticleService(repository, locationAssignmentService, countingService);
+export const newArticleService = new NewArticleService(
+  repository,
+  locationAssignmentService,
+  countingService,
+  productCategoryService,
+);
 export const countingRepository = repository;

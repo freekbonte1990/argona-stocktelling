@@ -55,7 +55,7 @@ const articleA2 = makeArticle({ articleNumber: "A2", description: "Beta artikel"
 const articleA3 = makeArticle({ articleNumber: "A3", description: "Gamma artikel", productGroup: "Groep A" });
 
 beforeEach(async () => {
-  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState]) {
+  for (const table of [db.offices, db.articles, db.sessions, db.countEntries, db.assignments, db.appState, db.productCategories]) {
     await table.clear();
   }
   await countingRepository.saveOffice(office);
@@ -87,13 +87,19 @@ describe("WithoutLocationPage (v0.2.1 correctieronde §2)", () => {
     expect(screen.queryByText("Beta artikel")).not.toBeInTheDocument();
   });
 
-  it("filtert op productgroep", async () => {
+  it("filtert op productgamma", async () => {
     const user = userEvent.setup();
     const session = await countSessionService.startSession("office-1", "MONTHLY");
     render(<WithoutLocationPage sessionId={session.id} onOpenArticle={() => {}} />);
     await waitUntilLoaded();
 
-    await user.click(screen.getByRole("button", { name: "Groep B" }));
+    // Sprint 3.2 §4/§9: de productgamma-chips verschijnen pas zodra de
+    // eenmalige migratie (uit de bestaande `productGroup`-waarden) via de
+    // reactieve `useProductCategories`-liveQuery is doorgekomen — dat is een
+    // aparte, asynchrone stap NA het laden van sessie/kantoor zelf, dus hier
+    // expliciet op wachten i.p.v. onmiddellijk na `waitUntilLoaded` te lezen.
+    const groepBChip = await screen.findByRole("button", { name: "Groep B" });
+    await user.click(groepBChip);
     expect(screen.queryByText("Alfa artikel")).not.toBeInTheDocument();
     expect(screen.getByText("Beta artikel")).toBeInTheDocument();
   });

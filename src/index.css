@@ -1349,8 +1349,18 @@ button {
 }
 
 .location-settings-row__name {
-  flex: 1;
-  min-width: 0;
+  /* Sprint 3.2: op de Productgamma-rijen staat, i.t.t. de locatierijen, nog
+     een derde flex-sibling ("N artikel(en)") naast de naam + "Naam
+     wijzigen"-knop. Met `flex-basis: 0%` (het gevolg van de vroegere `flex:
+     1` shorthand) telt deze span voor 0 mee in de wrap-berekening van de
+     ouder (`flex-wrap: wrap`), waardoor alle drie op één regel "passen" en
+     de naam vervolgens tot een paar pixels breed kan krimpen (`min-width:
+     0`) — icm. `overflow-wrap: anywhere` brak dat elk lettertekens op een
+     eigen regel af op smalle (~390px) schermen. `flex-basis: auto` laat de
+     ouder normaal naar een nieuwe regel wrappen zodra het niet past, en de
+     `min-width` garandeert sowieso een leesbare minimumbreedte. */
+  flex: 1 1 auto;
+  min-width: 8em;
   font-weight: 700;
   font-size: 1.05rem;
   overflow-wrap: anywhere;

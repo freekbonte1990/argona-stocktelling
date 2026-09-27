@@ -5,6 +5,7 @@ import type {
   CountSession,
   LocationSessionStatus,
   Office,
+  ProductCategory,
 } from "../../domain/types";
 import type {
   CountingRepository,
@@ -57,6 +58,10 @@ export class IndexedDbCountingRepository implements CountingRepository {
 
   async getArticles(officeId: string): Promise<Article[]> {
     return this.db.articles.where("officeId").equals(officeId).toArray();
+  }
+
+  async getAllArticles(): Promise<Article[]> {
+    return this.db.articles.toArray();
   }
 
   async createSession(session: CountSession): Promise<void> {
@@ -195,5 +200,18 @@ export class IndexedDbCountingRepository implements CountingRepository {
   async getStockHistoryEntries(officeId: string): Promise<StockHistoryEntry[]> {
     const rows = await this.db.stockHistoryEntries.where("officeId").equals(officeId).toArray();
     return rows.map(({ id: _id, officeId: _officeId, ...entry }) => entry);
+  }
+
+  async saveProductCategories(categories: ProductCategory[]): Promise<void> {
+    if (categories.length === 0) return;
+    await this.db.productCategories.bulkPut(categories);
+  }
+
+  async getProductCategories(): Promise<ProductCategory[]> {
+    return this.db.productCategories.toArray();
+  }
+
+  async deleteProductCategory(categoryId: string): Promise<void> {
+    await this.db.productCategories.delete(categoryId);
   }
 }

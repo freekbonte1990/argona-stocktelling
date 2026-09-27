@@ -139,14 +139,19 @@ export class ExportService {
       throw new ActiveSessionExportError(sessionId);
     }
 
-    const [office, allArticles, assignments, existingSheets, existingHistory, finalized] = await Promise.all([
-      this.repository.getOffice(session.officeId),
-      this.repository.getArticles(session.officeId),
-      this.repository.getArticleLocationAssignments(session.officeId),
-      this.repository.getHistoricalSheetSnapshots(session.officeId),
-      this.repository.getStockHistoryEntries(session.officeId),
-      this.repository.getFinalizedSessionResult(sessionId),
-    ]);
+    const [office, allArticles, assignments, existingSheets, existingHistory, finalized, categories] =
+      await Promise.all([
+        this.repository.getOffice(session.officeId),
+        this.repository.getArticles(session.officeId),
+        this.repository.getArticleLocationAssignments(session.officeId),
+        this.repository.getHistoricalSheetSnapshots(session.officeId),
+        this.repository.getStockHistoryEntries(session.officeId),
+        this.repository.getFinalizedSessionResult(sessionId),
+        // Sprint 3.2 §14: de VOLLEDIGE, bedrijfsbrede/globale Productgamma-
+        // lijst — bewust NIET gescopet op `session.officeId`, zie
+        // `ProductCategory`/`StockResultExportInput.categories`.
+        this.repository.getProductCategories(),
+      ]);
     if (!office) {
       throw new Error(`Kantoor ${session.officeId} niet gevonden.`);
     }
@@ -237,6 +242,7 @@ export class ExportService {
       review,
       allArticles,
       assignments,
+      categories,
       snapshot,
       historicalSheets: otherHistoricalSheets,
       historyEntries,

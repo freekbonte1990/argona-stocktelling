@@ -35,6 +35,64 @@ export interface Office {
   /** Basisdatum van de laatste/huidige telperiode zoals in CONFIG-sheet. */
   baseDate: string | null;
   locations: Location[];
+  /**
+   * Sprint 3.2.1 (architectuurfix — review na Sprint 3.2): of de eenmalige
+   * Productgamma-migratiebootstrap (`domain/productCategory.ts#
+   * migrateProductGroupsToCategories`) al voor DIT kantoor gedraaid heeft.
+   *
+   * Nodig sinds `ProductCategory` een GLOBALE entiteit werd (zie hieronder):
+   * de oorspronkelijke idempotentie-check ("heeft dit kantoor al minstens één
+   * categorie?") werkt niet meer zodra categorieën gedeeld worden — zodra
+   * kantoor A gemigreerd heeft, zou kantoor B de (nu niet-lege) globale lijst
+   * zien en zijn EIGEN migratie nooit meer draaien, waardoor B's artikelen
+   * met een eigen, nog niet elders voorkomende bronproductgroep nooit
+   * geclassificeerd zouden worden. Deze vlag maakt de bootstrap terug
+   * per-kantoor idempotent, los van hoeveel andere kantoren al gemigreerd
+   * hebben. BEWUST optioneel (`?`), net als `CountSession.locationIds?`:
+   * een kantoor van vóór deze fix kent dit veld nog niet — ontbrekend/
+   * `undefined` betekent gewoon "nog niet gemigreerd", en de bootstrap is
+   * zelf volledig veilig om (opnieuw) te draaien (additief, matcht op naam).
+   */
+  categoriesMigrated?: boolean;
+}
+
+/**
+ * Sprint 3.2 — Dynamic Product Categories: Argona's HUIDIGE, beheerde
+ * management-classificatie ("Productgamma" in de UI, bv. Zonnepanelen,
+ * Batterijen, Omvormers, Laadpalen, Kabels...). Dit is een STANDALONE,
+ * persistente entiteit met een stabiele `id` — NIET dezelfde as als
+ * `Article.productGroup` (de historische/bron-productgroep uit Excel, die
+ * nooit met terugwerkende kracht wijzigt, zie `Article.productGroup` en
+ * `domain/productCategory.ts` voor de volledige uitleg van dit onderscheid).
+ * `id` wordt bewust NOOIT vervangen door de naam als referentie elders
+ * (`Article.categoryId`, de PRODUCTGAMMAS-Excelsheet): een categorie kan
+ * hernoemd worden zonder dat bestaande toewijzingen breken.
+ *
+ * Sprint 3.2.1 (architectuurfix): GLOBAAL voor heel Argona, NIET per kantoor
+ * — "Kabels", "Laadpalen", "Batterijen" enz. zijn dezelfde categorie (zelfde
+ * stabiele `id`) voor Antwerpen, Damme en Lokeren. Er bestaat dus GEEN
+ * `officeId` meer op dit type (dat stond hier oorspronkelijk, bleek na
+ * review de verkeerde businessregel: dat zou drie aparte "Kabels"-records
+ * met verschillende ID's per kantoor opleveren). Welk kantoor een categorie
+ * effectief GEBRUIKT volgt uitsluitend uit welke `Article.categoryId`'s naar
+ * haar verwijzen — een expliciet "kantoorassortiment" (categorie X actief/
+ * inactief PER kantoor) is bewust NIET in scope van deze sprint en volgt
+ * pas in Sprint 3.2.1 als een apart concept.
+ */
+export interface ProductCategory {
+  id: string;
+  name: string;
+  /** Weergavevolgorde (1-indexed, aanpasbaar via Instellingen) — zelfde patroon als `Location.number`. Globaal, dus dezelfde volgorde voor elk kantoor. */
+  sortOrder: number;
+  /**
+   * Inactieve categorieën verdwijnen uit nieuwe toewijzingscontrols (net als
+   * `Location.active`) maar blijven geldig/zichtbaar voor reeds toegewezen
+   * artikelen en in historische analyses — nooit hard verwijderd zolang ze
+   * gebruikt zijn (zie `domain/productCategory.ts`). Globaal: inactief maken
+   * geldt voor alle kantoren tegelijk (er is nog geen per-kantoor
+   * assortiment — zie hierboven).
+   */
+  active: boolean;
 }
 
 /**
@@ -93,6 +151,14 @@ export interface Article {
   /** Kolom "ID type" — vrije tekst uit ARTIKEL-sheet (bv. "TIJDELIJK", "OFFICIEEL"). */
   idType: string | null;
   description: string;
+  /**
+   * Sprint 3.2 §2: "Bronproductgroep" — de historische/bron-productgroep
+   * zoals aangetroffen in de brondata op het moment van import/snapshot (bv.
+   * "LAADPALEN"). Dit veld verandert NOOIT met terugwerkende kracht en is
+   * puur audit/naslag ("waar kwam dit artikel oorspronkelijk vandaan") — het
+   * wordt NOOIT meer gebruikt voor management-groepering/-analyse. Zie
+   * `categoryId` hieronder voor de huidige, beheerde classificatie.
+   */
   productGroup: string | null;
   supplier: string | null;
   unit: string | null;
@@ -126,6 +192,20 @@ export interface Article {
    * `article.stockClassification` vergelijken.
    */
   stockClassification?: StockClassification;
+  /**
+   * Sprint 3.2 §2/§7: de HUIDIGE, beheerde "Productgamma"-classificatie —
+   * verwijst naar `ProductCategory.id` (nooit naar een naam, die kan
+   * hernoemd worden). Mag retroactief wijzigen: management-analyses van OUDE
+   * (reeds bevroren) sessies gebruiken bij het opbouwen altijd de HUIDIGE
+   * waarde van dit veld, nooit een bevroren kopie (zie
+   * `domain/productCategory.ts` en `AnalysisService`/`ComparisonService`).
+   * BEWUST optioneel (`?`), exact het `stockClassification`-patroon
+   * hierboven: een artikel van vóór deze sprint, of nog niet ingedeeld, kent
+   * dit veld niet — ontbrekend/`undefined`/`null` betekenen alle drie
+   * "nog niet ingedeeld" (nooit hard verwijderen, spec §9: "mag niet
+   * verborgen worden").
+   */
+  categoryId?: string | null;
 }
 
 export interface CountSession {

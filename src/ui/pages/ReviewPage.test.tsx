@@ -69,6 +69,7 @@ beforeEach(async () => {
     db.importMeta,
     db.appState,
     db.locationSessionStatuses,
+    db.productCategories,
   ]) {
     await table.clear();
   }
@@ -476,8 +477,15 @@ describe(
 
       // Standaard: vergelijkt met Article.previousCount (2, van de meest
       // recente afgeronde sessie `olderSession`) -> verschil +1.
-      expect(screen.getAllByText("Vorige telling").length).toBeGreaterThan(0);
-      expect(screen.getByText("+1", { selector: ".review-row__figure-value" })).toBeInTheDocument();
+      // Net als de vergelijk-dropdown hieronder: `officeArticles` (met de
+      // bijgewerkte `previousCount`) komt uit een eigen live query die de
+      // "Bezig met laden..."-gate niet blokkeert (die valt terug op een lege
+      // lijst zolang de query nog loopt) — dus expliciet afwachten i.p.v.
+      // aannemen dat dit al synchroon met `waitUntilLoaded()` klaarstaat.
+      await waitFor(() => {
+        expect(screen.getAllByText("Vorige telling").length).toBeGreaterThan(0);
+        expect(screen.getByText("+1", { selector: ".review-row__figure-value" })).toBeInTheDocument();
+      });
 
       // `comparisonSessions` komt uit een aparte live query (useSessionsForOffice)
       // dan degene die "Bezig met laden..." bepaalt — die kan nog even

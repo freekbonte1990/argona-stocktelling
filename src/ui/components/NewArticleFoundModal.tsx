@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { newArticleService } from "../../application/container";
+import { useEffect, useState } from "react";
+import { newArticleService, productCategoryService } from "../../application/container";
+import { activeProductCategoriesInOrder } from "../../domain/productCategory";
 import { isValidQuantity } from "../../domain/quantityValidation";
-import type { ArticleCountFrequency, CountSession } from "../../domain/types";
+import type { ArticleCountFrequency, CountSession, ProductCategory } from "../../domain/types";
+import { useProductCategories } from "../hooks/useLiveData";
 import { BigButton } from "./BigButton";
 
 const FREQUENCY_OPTIONS: { value: ArticleCountFrequency; label: string }[] = [
@@ -37,7 +39,7 @@ export function NewArticleFoundModal({
   onCreated,
 }: NewArticleFoundModalProps) {
   const [description, setDescription] = useState("");
-  const [productGroup, setProductGroup] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [unit, setUnit] = useState("");
   const [countPeriod, setCountPeriod] = useState<ArticleCountFrequency>("MONTHLY");
   const [quantity, setQuantity] = useState("");
@@ -47,6 +49,11 @@ export function NewArticleFoundModal({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    void productCategoryService.listCategories(session.officeId);
+  }, [session.officeId]);
+  const categories: ProductCategory[] = activeProductCategoriesInOrder(useProductCategories() ?? []);
+
   // Expliciete "0" moet geldig zijn: enkel een LEEG veld (of iets dat geen
   // getal is) blokkeert het opslaan — nooit `!quantity`, want dat zou "0"
   // ook als ongeldig behandelen.
@@ -55,7 +62,7 @@ export function NewArticleFoundModal({
   // hier al blokkeren — niet enkel vertrouwen op de service-laagcontrole.
   const canSubmit =
     description.trim() !== "" &&
-    productGroup.trim() !== "" &&
+    categoryId.trim() !== "" &&
     unit.trim() !== "" &&
     parsedQuantity !== null &&
     isValidQuantity(parsedQuantity);
@@ -67,7 +74,7 @@ export function NewArticleFoundModal({
     try {
       const article = await newArticleService.createArticleFoundDuringCounting(session, locationId, {
         description,
-        productGroup,
+        categoryId,
         unit,
         countPeriod,
         quantity: parsedQuantity,
@@ -104,8 +111,15 @@ export function NewArticleFoundModal({
         </label>
 
         <label className="form-field">
-          <span>Productgroep *</span>
-          <input className="search-input" value={productGroup} onChange={(e) => setProductGroup(e.target.value)} />
+          <span>Productgamma *</span>
+          <select className="search-input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="">Kies een productgamma...</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="form-field">

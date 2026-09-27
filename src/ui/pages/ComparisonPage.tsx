@@ -251,7 +251,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
           setSortMode={setSortMode}
           filteredArticles={filteredArticles}
           onOpenArticle={onOpenArticle}
-          onFilterProductGroup={(group) => applyFilter({ productGroup: group })}
+          onFilterProductCategory={(category) => applyFilter({ productCategory: category })}
           onFilterState={(state) => applyFilter({ state }, "VALUE_DIFF_DESC")}
         />
       )}
@@ -267,7 +267,7 @@ function ComparisonBody({
   setSortMode,
   filteredArticles,
   onOpenArticle,
-  onFilterProductGroup,
+  onFilterProductCategory,
   onFilterState,
 }: {
   comparison: SessionComparison;
@@ -277,10 +277,10 @@ function ComparisonBody({
   setSortMode: React.Dispatch<React.SetStateAction<ArticleComparisonSortMode>>;
   filteredArticles: ArticleComparisonRow[];
   onOpenArticle: (articleId: string) => void;
-  onFilterProductGroup: (group: string) => void;
+  onFilterProductCategory: (category: string) => void;
   onFilterState: (state: ArticleComparisonFilters["state"]) => void;
 }) {
-  const { headerA, headerB, kpis, productGroups, movers, priceMovers, unchanged, obsoleteCandidates, obsoleteTransitions, transitionCounts, attentionPoints, articles } = comparison;
+  const { headerA, headerB, kpis, productCategories, movers, priceMovers, unchanged, obsoleteCandidates, obsoleteTransitions, transitionCounts, attentionPoints, articles } = comparison;
 
   return (
     <>
@@ -356,14 +356,14 @@ function ComparisonBody({
         </div>
       )}
 
-      {/* Productgroepvergelijking (spec §5). */}
+      {/* Productgammavergelijking (spec §5). */}
       <div className="card stack">
-        <h2 style={{ margin: 0 }}>Vergelijking per productgroep</h2>
+        <h2 style={{ margin: 0 }}>Vergelijking per productgamma</h2>
         <div className="table-scroll">
           <table className="history-table">
             <thead>
               <tr>
-                <th>Productgroep</th>
+                <th>Productgamma</th>
                 <th>Artikelen A</th>
                 <th>Artikelen B</th>
                 <th>Waarde A</th>
@@ -375,28 +375,28 @@ function ComparisonBody({
               </tr>
             </thead>
             <tbody>
-              {productGroups.map((group) => (
-                <tr key={group.productGroup}>
+              {productCategories.map((category) => (
+                <tr key={category.productCategory}>
                   <td>
                     <button
                       type="button"
                       className="text-link-button"
-                      onClick={() => onFilterProductGroup(group.productGroup)}
+                      onClick={() => onFilterProductCategory(category.productCategory)}
                     >
-                      {group.productGroup}
+                      {category.productCategory}
                     </button>
                   </td>
-                  <td>{group.articleCountA}</td>
-                  <td>{group.articleCountB}</td>
-                  <td>{formatEuro(group.valueA)}</td>
-                  <td>{formatEuro(group.valueB)}</td>
-                  <td>{formatSignedEuro(group.valueDifference)}</td>
-                  <td>{formatSignedPercentDisplay(group.valueDifferencePercent)}</td>
-                  <td>{formatEuro(group.obsoleteValueA)}</td>
-                  <td>{formatEuro(group.obsoleteValueB)}</td>
+                  <td>{category.articleCountA}</td>
+                  <td>{category.articleCountB}</td>
+                  <td>{formatEuro(category.valueA)}</td>
+                  <td>{formatEuro(category.valueB)}</td>
+                  <td>{formatSignedEuro(category.valueDifference)}</td>
+                  <td>{formatSignedPercentDisplay(category.valueDifferencePercent)}</td>
+                  <td>{formatEuro(category.obsoleteValueA)}</td>
+                  <td>{formatEuro(category.obsoleteValueB)}</td>
                 </tr>
               ))}
-              {productGroups.length === 0 && (
+              {productCategories.length === 0 && (
                 <tr>
                   <td colSpan={9} className="empty-state">
                     Geen artikelen.
@@ -459,7 +459,7 @@ function ComparisonBody({
               <thead>
                 <tr>
                   <th>Artikel</th>
-                  <th>Productgroep</th>
+                  <th>Productgamma</th>
                   <th>Aantal A</th>
                   <th>Aantal B</th>
                   <th>Kostprijs A</th>
@@ -476,7 +476,7 @@ function ComparisonBody({
                         {row.articleNumber} — {row.description}
                       </button>
                     </td>
-                    <td>{row.productGroup ?? "—"}</td>
+                    <td>{row.productCategory ?? "—"}</td>
                     <td>{formatCount(row.quantityA)}</td>
                     <td>{formatCount(row.quantityB)}</td>
                     <td>{formatEuro(row.costPriceA)}</td>
@@ -516,7 +516,7 @@ function ComparisonBody({
               <thead>
                 <tr>
                   <th>Artikel</th>
-                  <th>Productgroep</th>
+                  <th>Productgamma</th>
                   <th>Aantal</th>
                   <th>Voorraadwaarde</th>
                   <th>Opeenvolgend ongewijzigd</th>
@@ -533,7 +533,7 @@ function ComparisonBody({
                         {row.articleNumber} — {row.description}
                       </button>
                     </td>
-                    <td>{row.productGroup ?? "—"}</td>
+                    <td>{row.productCategory ?? "—"}</td>
                     <td>{formatCount(row.quantityB)}</td>
                     <td>{formatEuro(row.stockValueB)}</td>
                     <td>{row.consecutiveUnchangedCount}</td>
@@ -629,7 +629,7 @@ function ComparisonBody({
         <div className="filter-row">
           <button
             type="button"
-            className={`chip ${filters.state === "ALL" && filters.classification === null && filters.productGroup === null ? "chip--active" : ""}`}
+            className={`chip ${filters.state === "ALL" && filters.classification === null && filters.productCategory === null ? "chip--active" : ""}`}
             onClick={() => setFilters(DEFAULT_ARTICLE_COMPARISON_FILTERS)}
           >
             Alles
@@ -691,14 +691,14 @@ function ComparisonBody({
               {STOCK_CLASSIFICATION_LABELS[classification]} (B)
             </button>
           ))}
-          {filters.productGroup !== null && (
+          {filters.productCategory !== null && (
             <span className="chip chip--active location-chip">
-              <span>Productgroep: {filters.productGroup}</span>
+              <span>Productgamma: {filters.productCategory}</span>
               <button
                 type="button"
                 className="location-chip__remove"
-                aria-label="Productgroepfilter wissen"
-                onClick={() => setFilters((prev) => ({ ...prev, productGroup: null }))}
+                aria-label="Productgammafilter wissen"
+                onClick={() => setFilters((prev) => ({ ...prev, productCategory: null }))}
               >
                 ×
               </button>
@@ -710,7 +710,7 @@ function ComparisonBody({
             <thead>
               <tr>
                 <th>Artikel</th>
-                <th>Productgroep</th>
+                <th>Productgamma</th>
                 <th>Classificatie A</th>
                 <th>Classificatie B</th>
                 <th>Aantal A</th>
@@ -735,7 +735,7 @@ function ComparisonBody({
                       {row.articleNumber} — {row.description}
                     </button>
                   </td>
-                  <td>{row.productGroup ?? "—"}</td>
+                  <td>{row.productCategory ?? "—"}</td>
                   <td>{row.classificationA ? STOCK_CLASSIFICATION_LABELS[row.classificationA] : "—"}</td>
                   <td>{row.classificationB ? STOCK_CLASSIFICATION_LABELS[row.classificationB] : "—"}</td>
                   <td>{row.presentInA ? formatCount(row.quantityA) : "—"}</td>
@@ -777,7 +777,7 @@ function MoverTable({ rows, onOpenArticle }: { rows: MoverRow[]; onOpenArticle: 
         <thead>
           <tr>
             <th>Artikel</th>
-            <th>Productgroep</th>
+            <th>Productgamma</th>
             <th>Aantal A</th>
             <th>Aantal B</th>
             <th>Kostprijs A</th>
@@ -798,7 +798,7 @@ function MoverTable({ rows, onOpenArticle }: { rows: MoverRow[]; onOpenArticle: 
                   {row.articleNumber} — {row.description}
                 </button>
               </td>
-              <td>{row.productGroup ?? "—"}</td>
+              <td>{row.productCategory ?? "—"}</td>
               <td>{formatCount(row.quantityA)}</td>
               <td>{formatCount(row.quantityB)}</td>
               <td>{formatEuro(row.costPriceA)}</td>
@@ -833,7 +833,7 @@ function PriceMoverTable({
         <thead>
           <tr>
             <th>Artikel</th>
-            <th>Productgroep</th>
+            <th>Productgamma</th>
             <th>Prijs A</th>
             <th>Prijs B</th>
             <th>Verschil €</th>
@@ -850,7 +850,7 @@ function PriceMoverTable({
                   {row.articleNumber} — {row.description}
                 </button>
               </td>
-              <td>{row.productGroup ?? "—"}</td>
+              <td>{row.productCategory ?? "—"}</td>
               <td>{formatEuro(row.costPriceA)}</td>
               <td>{formatEuro(row.costPriceB)}</td>
               <td>{formatSignedEuro(row.priceDifferencePerUnit)}</td>
@@ -887,7 +887,7 @@ function ObsoleteTransitionList({
             <thead>
               <tr>
                 <th>Artikel</th>
-                <th>Productgroep</th>
+                <th>Productgamma</th>
                 <th>Aantal B</th>
                 <th>Voorraadwaarde B</th>
               </tr>
@@ -900,7 +900,7 @@ function ObsoleteTransitionList({
                       {row.articleNumber} — {row.description}
                     </button>
                   </td>
-                  <td>{row.productGroup ?? "—"}</td>
+                  <td>{row.productCategory ?? "—"}</td>
                   <td>{formatCount(row.quantityB)}</td>
                   <td>{formatEuro(row.stockValueB)}</td>
                 </tr>

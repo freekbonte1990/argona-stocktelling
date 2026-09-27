@@ -116,6 +116,7 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles,
       assignments: [],
+      categories: [],
       ...buildSnapshotInputs(session, allArticles, review),
     });
 
@@ -231,6 +232,7 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [tempArticle],
       assignments,
+      categories: [],
       ...buildSnapshotInputs(session, [tempArticle], review),
     });
 
@@ -274,6 +276,7 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [article],
       assignments: [],
+      categories: [],
       ...buildSnapshotInputs(session, [article], review),
     });
 
@@ -316,6 +319,7 @@ describe("ExcelStockResultExporter", () => {
       review,
       allArticles: [scopeArticle, manualArticle],
       assignments: [],
+      categories: [],
       ...buildSnapshotInputs(session, [scopeArticle, manualArticle], review),
     });
 
@@ -359,6 +363,7 @@ describe("ExcelStockResultExporter — rollend stockarchief", () => {
       review,
       allArticles,
       assignments: [],
+      categories: [],
       ...buildSnapshotInputs(session, allArticles, review),
     });
 
@@ -400,6 +405,7 @@ describe("ExcelStockResultExporter — rollend stockarchief", () => {
       review,
       allArticles: [article],
       assignments: [],
+      categories: [],
       ...buildSnapshotInputs(session, [article], review),
     });
 
@@ -435,6 +441,7 @@ describe("ExcelStockResultExporter — rollend stockarchief", () => {
       review,
       allArticles: [article],
       assignments: [],
+      categories: [],
       snapshot: buildSessionSnapshot(session, [article], review),
       historicalSheets: [{ sheetName: "2026-08 Maand", rows: historicalRows }],
       historyEntries: [],
@@ -467,6 +474,7 @@ describe("ExcelStockResultExporter — rollend stockarchief", () => {
       review,
       allArticles: [article],
       assignments: [],
+      categories: [],
       snapshot: buildSessionSnapshot(session, [article], review),
       historicalSheets: [],
       historyEntries: [],

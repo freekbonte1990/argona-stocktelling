@@ -29,15 +29,31 @@ function makeArticle(overrides: Partial<Article>): Article {
   };
 }
 
-describe("sortArticlesForList (v0.2.1 §5, Artikels-overzicht)", () => {
-  const a1 = makeArticle({ articleNumber: "A1", description: "Zaagblad", productGroup: "Gereedschap" });
-  const a2 = makeArticle({ articleNumber: "A2", description: "Boormachine", productGroup: "Gereedschap" });
-  const a3 = makeArticle({ articleNumber: "A3", description: "Fietsbel", productGroup: "Accessoires" });
-  const a10 = makeArticle({ articleNumber: "A10", description: "Kettingslot", productGroup: "Accessoires" });
+/** Sprint 3.2 §9: sortering/filtering werkt sinds deze sprint op de canonieke Productgamma (`categoryId`), nooit meer op de bevroren `productGroup`. */
+const GEREEDSCHAP = "cat-gereedschap";
+const ACCESSOIRES = "cat-accessoires";
+const BATTERIJEN = "cat-batterijen";
+const CATEGORY_NAME_BY_ID = new Map<string, string>([
+  [GEREEDSCHAP, "Gereedschap"],
+  [ACCESSOIRES, "Accessoires"],
+  [BATTERIJEN, "Batterijen"],
+]);
 
-  it("sorteert standaard op Productgroep → Omschrijving", () => {
-    const sorted = sortArticlesForList([a1, a2, a3, a10], "GROUP_THEN_DESCRIPTION");
+describe("sortArticlesForList (v0.2.1 §5, Artikels-overzicht; Sprint 3.2 §9: op canonieke Productgamma)", () => {
+  const a1 = makeArticle({ articleNumber: "A1", description: "Zaagblad", categoryId: GEREEDSCHAP });
+  const a2 = makeArticle({ articleNumber: "A2", description: "Boormachine", categoryId: GEREEDSCHAP });
+  const a3 = makeArticle({ articleNumber: "A3", description: "Fietsbel", categoryId: ACCESSOIRES });
+  const a10 = makeArticle({ articleNumber: "A10", description: "Kettingslot", categoryId: ACCESSOIRES });
+
+  it("sorteert standaard op Productgamma → Omschrijving", () => {
+    const sorted = sortArticlesForList([a1, a2, a3, a10], "GROUP_THEN_DESCRIPTION", CATEGORY_NAME_BY_ID);
     expect(sorted.map((a) => a.articleNumber)).toEqual(["A3", "A10", "A2", "A1"]);
+  });
+
+  it("zonder categoryNameById-map valt elk artikel terug op dezelfde fallback-groep (nooit een crash)", () => {
+    const sorted = sortArticlesForList([a1, a3], "GROUP_THEN_DESCRIPTION");
+    // Beide vallen terug op "Niet ingedeeld" -> sortering degradeert naar Omschrijving.
+    expect(sorted.map((a) => a.description)).toEqual(["Fietsbel", "Zaagblad"]);
   });
 
   it("Omschrijving A-Z en Z-A", () => {
@@ -70,43 +86,59 @@ describe("sortArticlesForList (v0.2.1 §5, Artikels-overzicht)", () => {
   });
 });
 
-describe("filterArticlesForList (v0.2.1 §6)", () => {
+describe("filterArticlesForList (v0.2.1 §6; Sprint 3.2 §9: filtert op canonieke Productgamma, met expliciet 'niet ingedeeld' filter)", () => {
   const battery = makeArticle({
     articleNumber: "BAT1",
     description: "Batterij pack",
-    productGroup: "Batterijen",
+    categoryId: BATTERIJEN,
     countPeriod: "MONTHLY",
     status: "ACTIVE",
   });
   const tool = makeArticle({
     articleNumber: "TOOL1",
     description: "Boormachine",
-    productGroup: "Gereedschap",
+    categoryId: GEREEDSCHAP,
     countPeriod: "YEARLY",
     status: "ACTIVE",
   });
   const inactive = makeArticle({
     articleNumber: "OLD1",
     description: "Verouderd onderdeel",
-    productGroup: "Batterijen",
+    categoryId: BATTERIJEN,
     countPeriod: "MONTHLY",
     status: "INACTIVE",
   });
+  const unclassified = makeArticle({
+    articleNumber: "NEW1",
+    description: "Nog niet ingedeeld onderdeel",
+    categoryId: null,
+    countPeriod: "MONTHLY",
+    status: "ACTIVE",
+  });
 
-  const articles = [battery, tool, inactive];
+  const articles = [battery, tool, inactive, unclassified];
 
   it("zonder filters komt alles terug", () => {
     const result = filterArticlesForList(articles, DEFAULT_ARTICLE_LIST_FILTERS, new Map());
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(4);
   });
 
-  it("filtert op productgroep", () => {
+  it("filtert op een specifieke productgamma", () => {
     const result = filterArticlesForList(
       articles,
-      { ...DEFAULT_ARTICLE_LIST_FILTERS, productGroup: "Batterijen" },
+      { ...DEFAULT_ARTICLE_LIST_FILTERS, category: BATTERIJEN },
       new Map(),
     );
     expect(result.map((a) => a.articleNumber).sort()).toEqual(["BAT1", "OLD1"]);
+  });
+
+  it("filtert op 'niet ingedeeld' (spec §9: mag nooit verborgen worden, enkel expliciet filterbaar)", () => {
+    const result = filterArticlesForList(
+      articles,
+      { ...DEFAULT_ARTICLE_LIST_FILTERS, category: "UNCLASSIFIED" },
+      new Map(),
+    );
+    expect(result.map((a) => a.articleNumber)).toEqual(["NEW1"]);
   });
 
   it("filtert op telfrequentie", () => {
@@ -134,7 +166,7 @@ describe("filterArticlesForList (v0.2.1 §6)", () => {
       { ...DEFAULT_ARTICLE_LIST_FILTERS, location: "NONE" },
       locationIdsByArticle,
     );
-    expect(result.map((a) => a.articleNumber).sort()).toEqual(["OLD1", "TOOL1"]);
+    expect(result.map((a) => a.articleNumber).sort()).toEqual(["NEW1", "OLD1", "TOOL1"]);
   });
 
   it("filtert op een specifieke locatie", () => {
@@ -153,7 +185,7 @@ describe("filterArticlesForList (v0.2.1 §6)", () => {
   it("zoekterm combineert met filters", () => {
     const result = filterArticlesForList(
       articles,
-      { ...DEFAULT_ARTICLE_LIST_FILTERS, productGroup: "Batterijen", search: "pack" },
+      { ...DEFAULT_ARTICLE_LIST_FILTERS, category: BATTERIJEN, search: "pack" },
       new Map(),
     );
     expect(result.map((a) => a.articleNumber)).toEqual(["BAT1"]);
@@ -169,7 +201,7 @@ describe("countActiveArticleListFilters (v0.2.1 correctieronde §1: 'Filters (N)
     expect(
       countActiveArticleListFilters({
         ...DEFAULT_ARTICLE_LIST_FILTERS,
-        productGroup: "Batterijen",
+        category: BATTERIJEN,
         location: "NONE",
         search: "iets",
       }),
@@ -180,7 +212,7 @@ describe("countActiveArticleListFilters (v0.2.1 correctieronde §1: 'Filters (N)
     expect(
       countActiveArticleListFilters({
         search: "",
-        productGroup: "Batterijen",
+        category: BATTERIJEN,
         countPeriod: "MONTHLY",
         status: "ACTIVE",
         location: "loc-1",

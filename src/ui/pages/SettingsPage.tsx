@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   activeLocationsInOrder,
   addLocation,
@@ -9,11 +9,12 @@ import {
   reorderLocations,
   setLocationActive,
 } from "../../domain/locations";
-import type { Location, Office } from "../../domain/types";
+import { allProductCategoriesInOrder, countArticlesInCategory } from "../../domain/productCategory";
+import type { Location, Office, ProductCategory } from "../../domain/types";
 import { generateLocationId } from "../../shared/ids";
-import { countingRepository } from "../../application/container";
+import { countingRepository, productCategoryService } from "../../application/container";
 import { BigButton } from "../components/BigButton";
-import { useAssignments, useOffice } from "../hooks/useLiveData";
+import { useAllArticles, useAssignments, useOffice, useProductCategories } from "../hooks/useLiveData";
 
 interface SettingsPageProps {
   officeId: string;
@@ -40,6 +41,28 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
    * veld zichtbaar is, is nieuw.
    */
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+
+  // Sprint 3.2 §5 — "Productgamma's": zelfde interactiepatronen als
+  // Stocklocaties hierboven (rechtstreeks op het domeinmodel werken, direct
+  // opslaan, geen apart "Opslaan"-moment), plus een samenvoegactie (§6) die
+  // een reeds gebruikte categorie nooit destructief laat verwijderen.
+  //
+  // Sprint 3.2.1-architectuurfix: `ProductCategory` is nu bedrijfsbreed/
+  // globaal — "aantal toegewezen artikelen"/"kan verwijderd worden" moet dus
+  // over ALLE kantoren gecontroleerd worden (`useAllArticles`), niet enkel
+  // het hier geselecteerde kantoor. Anders zou een categorie die enkel bij
+  // een ANDER kantoor in gebruik is hier ten onrechte "0 artikel(en)" en
+  // verwijderbaar tonen.
+  const articles = useAllArticles() ?? [];
+  useEffect(() => {
+    void productCategoryService.listCategories(officeId);
+  }, [officeId]);
+  const categories = allProductCategoriesInOrder(useProductCategories() ?? []);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>("");
 
   if (!officeOrUndefined) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
@@ -100,6 +123,70 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
 
   const orderedLocations = allLocationsInOrder(office);
   const activeCount = activeLocationsInOrder(office).length;
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+    setCategoryError(null);
+    try {
+      await productCategoryService.addCategory(officeId, newCategoryName);
+      setNewCategoryName("");
+    } catch (err) {
+      setCategoryError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleRenameCategory = async (categoryId: string, name: string) => {
+    setEditingCategoryId(null);
+    setCategoryError(null);
+    try {
+      await productCategoryService.renameCategory(officeId, categoryId, name);
+    } catch (err) {
+      setCategoryError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleMoveCategory = async (categoryId: string, direction: -1 | 1) => {
+    const ordered = categories.map((c) => c.id);
+    const index = ordered.indexOf(categoryId);
+    const target = index + direction;
+    if (target < 0 || target >= ordered.length) return;
+    const reordered = [...ordered];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    await productCategoryService.reorderCategories(officeId, reordered);
+  };
+
+  const handleToggleCategoryActive = async (category: ProductCategory) => {
+    setCategoryError(null);
+    try {
+      await productCategoryService.setCategoryActive(officeId, category.id, !category.active);
+    } catch (err) {
+      setCategoryError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleDeleteCategory = async (category: ProductCategory) => {
+    setCategoryError(null);
+    try {
+      await productCategoryService.deleteUnusedCategory(officeId, category.id);
+    } catch (err) {
+      setCategoryError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const handleConfirmMerge = async () => {
+    if (!mergeSourceId || !mergeTargetId) return;
+    setCategoryError(null);
+    try {
+      await productCategoryService.mergeCategories(officeId, mergeSourceId, mergeTargetId);
+      setMergeSourceId(null);
+      setMergeTargetId("");
+    } catch (err) {
+      setCategoryError(err instanceof Error ? err.message : "Onbekende fout.");
+    }
+  };
+
+  const mergeSource = categories.find((c) => c.id === mergeSourceId) ?? null;
+  const mergeSourceCount = mergeSource ? countArticlesInCategory(articles, mergeSource.id) : 0;
 
   return (
     <div className="stack">
@@ -220,6 +307,166 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           </BigButton>
         </div>
       </div>
+
+      <div className="card stack">
+        <h2 style={{ margin: 0 }}>Productgamma's</h2>
+        <p className="screen-subtitle" style={{ margin: 0 }}>
+          De huidige, beheerde indeling van artikelen (bv. Zonnepanelen, Batterijen, Kabels...). Een wijziging
+          hier werkt door in alle managementanalyses, ook van reeds afgeronde tellingen — de historische
+          brongegevens per artikel (Bronproductgroep) blijven altijd ongewijzigd.
+        </p>
+
+        {categoryError && <div className="error-banner">{categoryError}</div>}
+
+        <div className="stack stack--tight">
+          {categories.length === 0 && (
+            <p className="empty-state">Nog geen productgamma's aangemaakt.</p>
+          )}
+          {categories.map((category, index) => {
+            const assignedCount = countArticlesInCategory(articles, category.id);
+            const canDelete = assignedCount === 0;
+            const isEditing = editingCategoryId === category.id;
+            return (
+              <div
+                key={category.id}
+                className={`card stack stack--tight location-settings-row ${
+                  !category.active ? "location-settings-row--inactive" : ""
+                }`}
+              >
+                <div className="stack stack--tight stack--row">
+                  {isEditing ? (
+                    <input
+                      key={category.id}
+                      className="search-input"
+                      style={{ flex: 1 }}
+                      defaultValue={category.name}
+                      autoFocus
+                      onBlur={(e) => handleRenameCategory(category.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="location-settings-row__name">{category.name}</span>
+                      <button
+                        type="button"
+                        className="chip chip--settings"
+                        onClick={() => setEditingCategoryId(category.id)}
+                      >
+                        Naam wijzigen
+                      </button>
+                    </>
+                  )}
+                  <span className="screen-subtitle" style={{ margin: 0 }}>
+                    {assignedCount} artikel(en)
+                  </span>
+                  {!category.active && (
+                    <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
+                  )}
+                </div>
+                <div className="location-settings-row__actions">
+                  <div className="filter-row location-settings-row__order">
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omhoog verplaatsen"
+                      disabled={index === 0}
+                      onClick={() => handleMoveCategory(category.id, -1)}
+                    >
+                      ↑ Omhoog
+                    </button>
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omlaag verplaatsen"
+                      disabled={index === categories.length - 1}
+                      onClick={() => handleMoveCategory(category.id, 1)}
+                    >
+                      ↓ Omlaag
+                    </button>
+                  </div>
+                  <div className="filter-row">
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      onClick={() => handleToggleCategoryActive(category)}
+                    >
+                      {category.active ? "Inactief maken" : "Activeren"}
+                    </button>
+                    {canDelete ? (
+                      <button type="button" className="chip chip--settings" onClick={() => handleDeleteCategory(category)}>
+                        Verwijderen
+                      </button>
+                    ) : (
+                      categories.length > 1 && (
+                        <button
+                          type="button"
+                          className="chip chip--settings"
+                          onClick={() => {
+                            setMergeSourceId(category.id);
+                            setMergeTargetId("");
+                          }}
+                        >
+                          Samenvoegen met...
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="stack stack--tight stack--row">
+          <input
+            className="search-input"
+            style={{ flex: 1 }}
+            placeholder="Naam nieuw productgamma..."
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+          />
+          <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAddCategory}>
+            + Productgamma
+          </BigButton>
+        </div>
+      </div>
+
+      {mergeSource && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>"{mergeSource.name}" samenvoegen</p>
+            <p className="screen-subtitle" style={{ margin: 0 }}>
+              Kies het productgamma waar de {mergeSourceCount} artikel(en) van "{mergeSource.name}" naartoe
+              verhuizen. "{mergeSource.name}" wordt daarna inactief gemaakt (niet verwijderd) — historische
+              brongegevens en tellingen blijven volledig behouden.
+            </p>
+            <select
+              className="search-input"
+              value={mergeTargetId}
+              onChange={(e) => setMergeTargetId(e.target.value)}
+            >
+              <option value="">Kies een productgamma...</option>
+              {categories
+                .filter((c) => c.id !== mergeSource.id)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+            </select>
+            <div className="stack">
+              <BigButton variant="primary" disabled={!mergeTargetId} onClick={handleConfirmMerge}>
+                Samenvoegen bevestigen
+              </BigButton>
+              <BigButton variant="ghost" onClick={() => setMergeSourceId(null)}>
+                Annuleren
+              </BigButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { CountSessionType } from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
+import type { ProductCategoryService } from "./ProductCategoryService";
 
 export class ComparisonSessionNotFoundError extends Error {
   constructor(sessionId: string) {
@@ -59,9 +60,11 @@ export interface ComparisonSessionOption {
  */
 export class ComparisonService {
   private readonly repository: CountingRepository;
+  private readonly productCategoryService: ProductCategoryService;
 
-  constructor(repository: CountingRepository) {
+  constructor(repository: CountingRepository, productCategoryService: ProductCategoryService) {
     this.repository = repository;
+    this.productCategoryService = productCategoryService;
   }
 
   /**
@@ -162,7 +165,15 @@ export class ComparisonService {
 
     const history = await this.buildReliableHistoryFromB(sessionB);
 
-    return buildSessionComparison(inputA, inputB, history);
+    // Sprint 3.2 §12: zelfde resolutieprincipe als AnalysisService — de
+    // canonieke Productgamma wordt HIER, uit de HUIDIGE artikelstam,
+    // opgebouwd en als expliciete input doorgegeven aan de pure
+    // `buildSessionComparison`. Beide sessies zijn van hetzelfde kantoor
+    // (gecontroleerd hierboven), dus één gedeelde resolutie volstaat voor
+    // zowel A als B.
+    const categoryResolution = await this.productCategoryService.buildCategoryResolution(sessionA.officeId);
+
+    return buildSessionComparison(inputA, inputB, history, categoryResolution);
   }
 
   /**
