@@ -11,6 +11,7 @@ import {
   type MoverRow,
   type PriceMoverRow,
   type SessionComparison,
+  type SessionComparisonHeader,
 } from "../../domain/comparison";
 import { STOCK_CLASSIFICATION_LABELS } from "../../domain/stockClassification";
 import type { StockClassification } from "../../domain/types";
@@ -50,6 +51,20 @@ const DRIVER_LABELS: Record<MoverRow["driver"], string> = {
   BOTH: "Hoeveelheid + kostprijs",
   UNKNOWN: "Onbekend",
 };
+
+/** Sprint 3.3 §1: UI-label voor een A/B-keuzeoptie — legacy periodes krijgen ALTIJD het duidelijke "Historische snapshot" label, nooit hun (technisch nog steeds "FULL") sessietype. */
+function optionTypeLabel(option: ComparisonSessionOption): string {
+  if (option.provenance === "LEGACY_IMPORT") return "Historische snapshot";
+  return SESSION_TYPE_LABELS[option.sessionType] ?? option.sessionType;
+}
+
+/** Sprint 3.3 §1: een legacy snapshot werd nooit "afgerond" (geen CountSession) — eigen, correcte formulering i.p.v. het app-sessie-specifieke "afgerond op". */
+function headerCompletionSuffix(header: SessionComparisonHeader): string {
+  if (header.provenance === "LEGACY_IMPORT") {
+    return header.completedAt ? ` (Historische snapshot — ${formatDate(header.completedAt)})` : " (Historische snapshot)";
+  }
+  return header.completedAt ? ` (afgerond op ${formatDate(header.completedAt)})` : "";
+}
 
 /**
  * "Vergelijken" (Sprint 3): read-only vergelijking tussen twee AFGERONDE
@@ -114,7 +129,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sessionIdA || !sessionIdB) {
+    if (!officeId || !sessionIdA || !sessionIdB) {
       setComparison(null);
       return;
     }
@@ -122,7 +137,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
     setLoading(true);
     setLoadError(null);
     comparisonService
-      .compareSessions(sessionIdA, sessionIdB)
+      .compareSessions(officeId, sessionIdA, sessionIdB)
       .then((result) => {
         if (!cancelled) setComparison(result);
       })
@@ -144,7 +159,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
     return () => {
       cancelled = true;
     };
-  }, [sessionIdA, sessionIdB]);
+  }, [officeId, sessionIdA, sessionIdB]);
 
   const [filters, setFilters] = useState<ArticleComparisonFilters>(DEFAULT_ARTICLE_COMPARISON_FILTERS);
   const [sortMode, setSortMode] = useState<ArticleComparisonSortMode>("VALUE_DIFF_DESC");
@@ -203,7 +218,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
               </option>
               {options.map((s) => (
                 <option key={s.sessionId} value={s.sessionId} disabled={s.sessionId === sessionIdB}>
-                  {SESSION_TYPE_LABELS[s.sessionType] ?? s.sessionType} — {s.sessionName}
+                  {optionTypeLabel(s)} — {s.sessionName}
                   {s.completedAt ? ` (${formatDate(s.completedAt)})` : ""}
                 </option>
               ))}
@@ -219,7 +234,7 @@ export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: Com
             <select className="search-input" value={sessionIdB} onChange={(e) => setSessionIdB(e.target.value)}>
               {options.map((s) => (
                 <option key={s.sessionId} value={s.sessionId} disabled={s.sessionId === sessionIdA}>
-                  {SESSION_TYPE_LABELS[s.sessionType] ?? s.sessionType} — {s.sessionName}
+                  {optionTypeLabel(s)} — {s.sessionName}
                   {s.completedAt ? ` (${formatDate(s.completedAt)})` : ""}
                 </option>
               ))}
@@ -286,10 +301,10 @@ function ComparisonBody({
     <>
       <p className="screen-subtitle" style={{ margin: 0 }}>
         <strong>A:</strong> {headerA.sessionName}
-        {headerA.completedAt ? ` (afgerond op ${formatDate(headerA.completedAt)})` : ""}
+        {headerCompletionSuffix(headerA)}
         {" · "}
         <strong>B:</strong> {headerB.sessionName}
-        {headerB.completedAt ? ` (afgerond op ${formatDate(headerB.completedAt)})` : ""}
+        {headerCompletionSuffix(headerB)}
       </p>
 
       {/* Hoofd-KPI's (spec §4). */}

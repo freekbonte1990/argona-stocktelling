@@ -1,3 +1,4 @@
+import { computeAssortmentImportDiff } from "../../domain/articleAssortment";
 import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain/frequency";
 import { activeLocationsInOrder, mergeArticleLocationAssignments } from "../../domain/locations";
 import { mergeHistoryEntries } from "../../domain/stockSnapshot";
@@ -73,6 +74,16 @@ export interface ImportSummary {
   activeLocationCount: number;
   /** Meest recente historische telling die nu voor dit kantoor gekend is, indien beschikbaar (spec punt 4). */
   lastHistoricalCount: LastHistoricalCountSummary | null;
+  /**
+   * Sprint 3.3 §1/§4: aantal eerder gekende artikelen dat door DEZE import
+   * nieuw inactief werd in het assortiment (verdwenen uit het huidige
+   * master-bestand) — voor onmiddellijke, transparante feedback na import,
+   * zelfde precedent als `activeLocationCount`/`lastHistoricalCount`
+   * hierboven. `0` voor een gloednieuw kantoor of een import waarin niets
+   * verdween (incl. een herimport van een eigen export — zie
+   * `domain/articleAssortment.ts#computeAssortmentImportDiff`).
+   */
+  newlyInactiveArticleCount: number;
 }
 
 /**
@@ -146,8 +157,18 @@ export class ImportService {
       ? { ...preview.office, locations: preview.existing.office.locations }
       : preview.office;
 
+    // Sprint 3.3 §1: vóór we iets overschrijven, de eerder gekende
+    // artikelen van dit kantoor ophalen — nodig voor de assortiment-diff
+    // hieronder. Voor een gloednieuw kantoor (`preview.existing` is `null`)
+    // is dit uiteraard leeg: er is dan niets "eerder gekend".
+    const previousArticles = preview.existing ? await this.repository.getArticles(office.id) : [];
+
     await this.repository.saveOffice(office);
-    await this.repository.saveArticles(preview.articles);
+    const { incomingArticles, newlyInactiveArticles } = computeAssortmentImportDiff(
+      previousArticles,
+      preview.articles,
+    );
+    await this.repository.saveArticles([...incomingArticles, ...newlyInactiveArticles]);
     await this.repository.saveImportMeta({
       officeId: office.id,
       sourceFileName: preview.sourceLabel,
@@ -235,6 +256,7 @@ export class ImportService {
       lastHistoricalCount: lastHistoricalCount
         ? { sessionName: lastHistoricalCount.sessionName, countDate: lastHistoricalCount.countDate }
         : null,
+      newlyInactiveArticleCount: newlyInactiveArticles.length,
     };
   }
 }

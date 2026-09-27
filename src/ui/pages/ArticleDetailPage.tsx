@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { activeLocationsInOrder } from "../../domain/locations";
 import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
 import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
@@ -51,6 +52,11 @@ const HISTORY_STATUS_BADGE_CLASS: Record<string, string> = {
   "0 BEVESTIGD": "review-row__badge--manual",
   OVERGENOMEN: "review-row__badge--control",
   "OVERGENOMEN - NIET GETELD": "review-row__badge--not-counted",
+  // Sprint 3.3 §3/§4: een punt uit een geïmporteerd historisch stockbestand
+  // (vóór deze app) — bewust dezelfde neutrale stijl als OVERGENOMEN (geen
+  // "volledig fysiek geteld deze sessie"-claim), maar met een eigen,
+  // herkenbare badgetekst i.p.v. mee te liften op GETELD.
+  LEGACY: "review-row__badge--control",
 };
 
 /** Percentagevariant van `formatSignedEuro` — zelfde conventie als `domain/comparison.ts`s (private) `formatSignedPercent`. */
@@ -147,6 +153,11 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   // domain/stockClassification.ts. Zelfde inline-bewerkmodus als de andere
   // velden op deze kaart.
   const [draftStockClassification, setDraftStockClassification] = useState<StockClassification>("ACTIVE");
+  // Sprint 3.3 §1: "Actief in assortiment" — of dit artikel nog meetelt voor
+  // NIEUWE tellingen van dit kantoor (zie domain/articleAssortment.ts en
+  // domain/countScope.ts). Zelfde inline-bewerkmodus als de andere velden op
+  // deze kaart.
+  const [draftAssortmentActive, setDraftAssortmentActive] = useState(true);
   const [savingGeneral, setSavingGeneral] = useState(false);
 
   const article = articles.find((a) => a.id === articleId);
@@ -165,6 +176,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     setDraftCountPeriod(article.countPeriod);
     setDraftStatusRaw(matchArticleStatusOption(article.rawStatus, article.status).raw);
     setDraftStockClassification(getStockClassification(article));
+    setDraftAssortmentActive(isArticleActiveInAssortment(article));
     setEditingGeneral(true);
   }
 
@@ -205,6 +217,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
           status: statusOption.status,
           rawStatus: statusOption.raw,
           stockClassification: draftStockClassification,
+          assortmentActive: draftAssortmentActive,
         },
       ]);
       setEditingGeneral(false);
@@ -392,6 +405,18 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                 ))}
               </select>
             </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Actief in assortiment</span>
+              <select
+                className="search-input"
+                style={{ width: "auto" }}
+                value={draftAssortmentActive ? "JA" : "NEE"}
+                onChange={(e) => setDraftAssortmentActive(e.target.value === "JA")}
+              >
+                <option value="JA">Ja</option>
+                <option value="NEE">Nee (historisch)</option>
+              </select>
+            </div>
             <div className="stack stack--row">
               <BigButton variant="primary" style={{ width: "auto" }} disabled={savingGeneral} onClick={saveGeneral}>
                 {savingGeneral ? "Bezig..." : "Opslaan"}
@@ -447,6 +472,12 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
               <span className="article-detail-field__label">Voorraadclassificatie</span>
               <span className="article-detail-field__value">
                 {STOCK_CLASSIFICATION_LABELS[getStockClassification(article)]}
+              </span>
+            </div>
+            <div className="article-detail-field">
+              <span className="article-detail-field__label">Actief in assortiment</span>
+              <span className="article-detail-field__value">
+                {isArticleActiveInAssortment(article) ? "Ja" : "Nee (historisch)"}
               </span>
             </div>
           </>

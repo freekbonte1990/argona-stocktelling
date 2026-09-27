@@ -9,6 +9,7 @@ import type {
 } from "../../domain/types";
 import type {
   CountingRepository,
+  DeleteSessionInput,
   FinalizedSessionResult,
   FinalizeSessionInput,
   HistoricalSheetRecord,
@@ -108,6 +109,39 @@ export class InMemoryCountingRepository implements CountingRepository {
   }
   async getFinalizedSessionResult(sessionId: string): Promise<FinalizedSessionResult | undefined> {
     return this.finalizedSessionResults.get(sessionId);
+  }
+
+  async deleteSession(input: DeleteSessionInput): Promise<void> {
+    this.sessions.delete(input.sessionId);
+    for (const [id, entry] of this.entries) {
+      if (entry.sessionId === input.sessionId) this.entries.delete(id);
+    }
+    for (const [id, status] of this.locationSessionStatuses) {
+      if (status.sessionId === input.sessionId) this.locationSessionStatuses.delete(id);
+    }
+    this.finalizedSessionResults.delete(input.sessionId);
+
+    const sheetKey = `${input.officeId}:${input.sessionName}`;
+    const sheet = this.historicalSheets.get(sheetKey);
+    if (sheet && sheet.sessionId === input.sessionId) {
+      this.historicalSheets.delete(sheetKey);
+    }
+    for (const [key, entry] of this.stockHistoryEntries) {
+      if (entry.officeId === input.officeId && entry.sessionName === input.sessionName) {
+        this.stockHistoryEntries.delete(key);
+      }
+    }
+
+    for (const article of input.updatedArticles) this.articles.set(article.id, article);
+  }
+
+  async deleteHistoricalSnapshot(officeId: string, sessionName: string): Promise<void> {
+    this.historicalSheets.delete(`${officeId}:${sessionName}`);
+    for (const [key, entry] of this.stockHistoryEntries) {
+      if (entry.officeId === officeId && entry.sessionName === sessionName) {
+        this.stockHistoryEntries.delete(key);
+      }
+    }
   }
 
   async saveCountEntry(entry: CountEntry): Promise<void> {

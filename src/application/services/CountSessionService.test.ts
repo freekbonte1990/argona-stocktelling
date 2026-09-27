@@ -4,6 +4,7 @@ import {
   CountSessionService,
   SessionIncompleteError,
   SessionNotActiveError,
+  SessionNotDeletableError,
 } from "./CountSessionService";
 import { CountingService } from "./CountingService";
 import { InMemoryCountingRepository } from "./InMemoryCountingRepository";
@@ -555,5 +556,198 @@ describe("CountSessionService", () => {
     const entries = await repository.getCountEntries(second.id);
     const entryForM1 = entries.find((e) => e.articleId === "office-1:M1");
     expect(entryForM1).toBeUndefined();
+  });
+
+  describe("Sprint 3.3 §2: gecentraliseerde count-scope-regel (assortiment + telfrequentie)", () => {
+    it("een artikel dat inactief is in het assortiment (historisch-alleen) komt niet meer in scope van een nieuwe telling, ook al past het bij de telfrequentie", async () => {
+      await repository.saveArticles([
+        makeArticle({ articleNumber: "M1", countPeriod: "MONTHLY", assortmentActive: false }),
+      ]);
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      expect(session.articleIds).not.toContain("office-1:M1");
+      // De andere maandartikelen (nog steeds actief) blijven wél in scope.
+      expect(session.articleIds).toContain("office-1:M2");
+    });
+
+    it("previewScopes (het 'Nieuwe telling'-scherm) telt een historisch-alleen artikel ook niet mee", async () => {
+      await repository.saveArticles([
+        makeArticle({ articleNumber: "M1", countPeriod: "MONTHLY", assortmentActive: false }),
+      ]);
+      const previews = await sessionService.previewScopes("office-1");
+      const monthly = previews.find((p) => p.sessionType === "MONTHLY");
+      expect(monthly?.articleCount).toBe(1); // enkel M2 nog actief
+    });
+
+    it("een inactief-in-assortiment artikel blijft volledig raadpleegbaar: getArticles/geschiedenis blijven werken, het artikel wordt nooit verborgen of verwijderd", async () => {
+      await repository.saveArticles([
+        makeArticle({ articleNumber: "M1", countPeriod: "MONTHLY", assortmentActive: false, previousCount: 42 }),
+      ]);
+
+      // Nieuwe telling sluit het artikel terecht uit...
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      expect(session.articleIds).not.toContain("office-1:M1");
+
+      // ...maar het artikel zelf blijft gewoon bestaan/raadpleegbaar (spec:
+      // "historical appearances must remain visible even if the article is
+      // now inactive").
+      const articlesAfter = await repository.getArticles("office-1");
+      const historicalArticle = articlesAfter.find((a) => a.id === "office-1:M1");
+      expect(historicalArticle).toBeDefined();
+      expect(historicalArticle?.previousCount).toBe(42);
+
+      // De rest van de (nog wél actieve) sessiescope moet geteld worden
+      // vóór afronden mag — M2 is het enige nog actieve maandartikel.
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M2",
+        locationId: office.locations[0].id,
+        quantity: 1,
+      });
+
+      // Rond de sessie af en bevestig dat het (buiten-scope) artikel als
+      // OVERGENOMEN in de HISTORIE-log terechtkomt, exact zoals elk ander
+      // buiten-scope artikel (bv. een kwartaalartikel tijdens een
+      // maandtelling) — geen enkele regressie t.o.v. de bestaande
+      // OVERGENOMEN-logica.
+      await completeAllLocations(session.id);
+      await sessionService.completeSession(session.id);
+      const history = await repository.getStockHistoryEntries("office-1");
+      const historyEntry = history.find((h) => h.articleId === "office-1:M1");
+      expect(historyEntry).toBeDefined();
+      expect(historyEntry?.status).toBe("OVERGENOMEN");
+      expect(historyEntry?.totalCount).toBe(42);
+    });
+  });
+
+  describe("Sprint 3.3 §5: veilig verwijderen van tellingen", () => {
+    /** Rondt een volledige MONTHLY-sessie af met de opgegeven tellingen voor M1/M2. */
+    async function runMonthlyCount(m1: number, m2: number) {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: m1,
+      });
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M2",
+        locationId: office.locations[0].id,
+        quantity: m2,
+      });
+      await completeAllLocations(session.id);
+      await sessionService.completeSession(session.id);
+      return (await repository.getSession(session.id))!;
+    }
+
+    it("weigert een niet-COMPLETED sessie (ACTIVE) te verwijderen", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await expect(sessionService.deleteSession(session.id)).rejects.toThrow(SessionNotDeletableError);
+      expect(await repository.getSession(session.id)).toBeDefined();
+    });
+
+    it("verwijderen van de MEEST RECENTE telling herstelt previousCount naar de vorige echte fysieke telling", async () => {
+      await runMonthlyCount(10, 5);
+      const second = await runMonthlyCount(20, 5);
+
+      let articles = await repository.getArticles("office-1");
+      expect(articles.find((a) => a.articleNumber === "M1")?.previousCount).toBe(20);
+
+      await sessionService.deleteSession(second.id);
+
+      articles = await repository.getArticles("office-1");
+      expect(articles.find((a) => a.articleNumber === "M1")?.previousCount).toBe(10);
+      expect(articles.find((a) => a.articleNumber === "M2")?.previousCount).toBe(5);
+
+      // De sessie zelf is weg, maar de artikelen/mastergegevens zelf blijven
+      // gewoon bestaan (spec §5: "never delete articles or current master data").
+      expect(await repository.getSession(second.id)).toBeUndefined();
+      expect(articles).toHaveLength(5);
+    });
+
+    it("verwijderen van een MIDDEN-telling wijzigt niets wanneer een latere overblijvende sessie het artikel al herteld heeft", async () => {
+      await runMonthlyCount(10, 5);
+      const middle = await runMonthlyCount(20, 5);
+      await runMonthlyCount(30, 8);
+
+      await sessionService.deleteSession(middle.id);
+
+      const articles = await repository.getArticles("office-1");
+      expect(articles.find((a) => a.articleNumber === "M1")?.previousCount).toBe(30);
+      expect(articles.find((a) => a.articleNumber === "M2")?.previousCount).toBe(8);
+    });
+
+    it("de overblijvende HISTORIE/comparison-data blijft na verwijdering gewoon leesbaar, enkel de verwijderde sessie's eigen regels verdwijnen", async () => {
+      // Bewust twee VERSCHILLENDE sessietypes (MONTHLY/QUARTERLY), zodat hun
+      // bevroren snapshotnamen (spec: "2026-09 Maand" vs. "2026-Q3 Kwartaal")
+      // gegarandeerd verschillen, ook al worden beide "vandaag" afgerond —
+      // twee MONTHLY-sessies in dezelfde kalendermaand zouden anders dezelfde
+      // HISTORIE-sleutel delen (bestaande, losstaande naamgevingsbeperking).
+      const monthly = await runMonthlyCount(10, 5);
+
+      const quarterlySession = await sessionService.startSession("office-1", "QUARTERLY");
+      // QUARTERLY-scope omvat ook de MONTHLY-artikelen (spec: cumulatief) —
+      // die moeten dus ook opgelost worden vóór deze sessie afgerond kan worden.
+      for (const articleId of ["office-1:M1", "office-1:M2"]) {
+        await countingService.recordCount({
+          session: quarterlySession,
+          articleId,
+          locationId: office.locations[0].id,
+          quantity: 1,
+        });
+      }
+      await countingService.recordCount({
+        session: quarterlySession,
+        articleId: "office-1:Q1",
+        locationId: office.locations[0].id,
+        quantity: 7,
+      });
+      await completeAllLocations(quarterlySession.id);
+      await sessionService.completeSession(quarterlySession.id);
+      const quarterly = (await repository.getSession(quarterlySession.id))!;
+      const quarterlySessionName = (await repository.getFinalizedSessionResult(quarterly.id))!.snapshot
+        .sessionName;
+
+      await sessionService.deleteSession(quarterly.id);
+
+      const history = await repository.getStockHistoryEntries("office-1");
+      // De HISTORIE-regels van de overblijvende MONTHLY-sessie staan er nog...
+      expect(history.some((h) => h.articleId === "office-1:M1" && h.totalCount === 10)).toBe(true);
+      // ...maar GEEN ENKELE regel van de verwijderde QUARTERLY-sessie zelf meer
+      // (elke HISTORIE-rij wordt uniek gesleuteld op (sessionName, articleId) —
+      // Q1 kan wél nog een aparte, eigen OVERGENOMEN-rij hebben onder de
+      // MONTHLY-sessienaam, want een snapshot bevat ALTIJD alle artikelen van
+      // het kantoor, ook buiten-scope; dat is een APARTE, correcte rij).
+      expect(history.some((h) => h.sessionName === quarterlySessionName)).toBe(false);
+
+      const remainingSessions = await sessionService.getSessionsForOffice("office-1");
+      expect(remainingSessions.map((s) => s.id)).toEqual([monthly.id]);
+      // De MONTHLY-sessie blijft volledig raadpleegbaar (Comparison/Analysis).
+      expect(await repository.getFinalizedSessionResult(monthly.id)).toBeDefined();
+    });
+
+    it("een legacy-sessie zonder bevroren FinalizedSessionResult wordt gewoon verwijderd, zonder recompute-crash", async () => {
+      const session = await sessionService.startSession("office-1", "MONTHLY");
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M1",
+        locationId: office.locations[0].id,
+        quantity: 1,
+      });
+      await countingService.recordCount({
+        session,
+        articleId: "office-1:M2",
+        locationId: office.locations[0].id,
+        quantity: 1,
+      });
+      await completeAllLocations(session.id);
+      // LEGACY-simulatie: rond af via de oude, niet-finaliserende repository-methode
+      // in plaats van sessionService.completeSession (die altijd finalizeSession gebruikt) —
+      // zodat er hier bewust GEEN FinalizedSessionResult bestaat.
+      await repository.completeSession(session.id);
+
+      await expect(sessionService.deleteSession(session.id)).resolves.not.toThrow();
+      expect(await repository.getSession(session.id)).toBeUndefined();
+    });
   });
 });

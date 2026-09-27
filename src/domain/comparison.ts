@@ -43,6 +43,15 @@ export interface ComparisonSnapshotInput {
   snapshotDate: string;
   completedAt: string | null;
   snapshot: StockSnapshot;
+  /**
+   * Sprint 3.3 §1: herkomst van dit vergelijkingspunt — doorgegeven naar
+   * `SessionComparisonHeader` zodat de UI een legacy periode duidelijk kan
+   * labelen ("Historische snapshot"). BEWUST optioneel/redundant met
+   * `snapshot.provenance` (dat blijft de brontransportwaarheid) — expliciet
+   * hier herhaald op het header-niveau zodat de UI dit nooit via de volledige
+   * (potentieel grote) `snapshot` moet opzoeken.
+   */
+  provenance?: "APP_COUNT" | "LEGACY_IMPORT";
 }
 
 /** Minimale, per-artikel gegevens die de opeenvolgende-tellingen-berekening nodig heeft uit één historische snapshot. */
@@ -924,6 +933,8 @@ export interface SessionComparisonHeader {
   sessionType: CountSessionType;
   snapshotDate: string;
   completedAt: string | null;
+  /** Sprint 3.3 §1 — zie `ComparisonSnapshotInput.provenance`. `undefined` betekent `"APP_COUNT"`. */
+  provenance?: "APP_COUNT" | "LEGACY_IMPORT";
 }
 
 export interface SessionComparison {
@@ -1005,6 +1016,7 @@ export function buildSessionComparison(
       sessionType: inputA.sessionType,
       snapshotDate: inputA.snapshotDate,
       completedAt: inputA.completedAt,
+      provenance: inputA.provenance,
     },
     headerB: {
       sessionId: inputB.sessionId,
@@ -1012,6 +1024,7 @@ export function buildSessionComparison(
       sessionType: inputB.sessionType,
       snapshotDate: inputB.snapshotDate,
       completedAt: inputB.completedAt,
+      provenance: inputB.provenance,
     },
     kpis,
     productCategories,

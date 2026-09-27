@@ -206,6 +206,40 @@ export interface Article {
    * verborgen worden").
    */
   categoryId?: string | null;
+  /**
+   * Sprint 3.3 §1 ("Office assortment / active scope"): is dit artikel
+   * actief in het ASSORTIMENT van zijn kantoor — d.w.z. hoort het nog tot
+   * de meest recente/actuele Excel-masterlijst van dit kantoor? Dit is een
+   * APARTE as t.o.v. `status`/`ArticleActiveStatus` hierboven (een
+   * expliciete "Artikelstatus"-markering zoals OBSOLETE/NON-ACTIEF, uit de
+   * brondata zelf) en t.o.v. `stockClassification` (voorraadwaarde-analyse,
+   * ACTIVE/OBSOLETE). Dit veld gaat specifiek over telbaarheid: "hoort dit
+   * artikel nog tot het huidige assortiment van dit kantoor, of is het enkel
+   * nog relevant voor historische raadpleging?" — zie
+   * `domain/articleAssortment.ts`/`domain/countScope.ts`.
+   *
+   * Omdat een `Article` per constructie al aan precies één kantoor hangt
+   * (`officeId` + `articleNumber`, zie hierboven), is "actief in kantoor A,
+   * inactief in kantoor B" gewoon: twee aparte `Article`-records (één per
+   * kantoor, zoals altijd al het geval was) met elk hun EIGEN
+   * `assortmentActive` — geen extra join-tabel nodig.
+   *
+   * BEWUST optioneel (`?`), exact het `stockClassification`-patroon
+   * hierboven: een artikel van vóór deze sprint kent dit veld nog niet —
+   * ontbrekend/`undefined` betekent altijd "actief" (zie
+   * `domain/articleAssortment.ts#isArticleActiveInAssortment`), nooit een
+   * harde default die alle bestaande `Article`-objectliteralen/tests zou
+   * moeten aanpassen. Wordt bijgewerkt door `ImportService` (additief
+   * diff-algoritme bij elke import van een bestaand kantoor: artikelen die
+   * in de nieuwste import zitten -> actief; eerder gekende artikelen die er
+   * niet meer in zitten -> inactief, nooit verwijderd — zie
+   * `domain/articleAssortment.ts#computeAssortmentImportDiff`), door de
+   * legacy-historische importer (Sprint 3.3 §3: een artikel dat enkel in
+   * oude historische data voorkomt en niet in het huidige masterbestand,
+   * wordt aangemaakt met `assortmentActive: false`), en handmatig via
+   * ArticleDetail/de bulkactie op het Artikels-overzicht.
+   */
+  assortmentActive?: boolean;
 }
 
 export interface CountSession {

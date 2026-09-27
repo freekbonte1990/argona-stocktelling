@@ -39,12 +39,31 @@ import type { Article, CountSession, CountSessionType, Location } from "./types"
  *                                 meteen de zichtbare Excel-celtekst, net als
  *                                 zijn broers hierboven — geen aparte
  *                                 vertaal-/mappinglaag in de Excel-adapter.
+ *   LEGACY                     -> Sprint 3.3 §3/§4 (legacy historische
+ *                                 import): dit punt komt NIET uit een
+ *                                 CountSession/`buildArticleSnapshot`, maar
+ *                                 uit een geïmporteerd historisch
+ *                                 stockbestand van vóór deze app (bron
+ *                                 `LEGACY_IMPORT`, zie `StockHistoryEntry.source`).
+ *                                 Bewust een EIGEN, vierde status i.p.v.
+ *                                 hergebruik van GETELD: een legacy-punt kent
+ *                                 geen locaties, geen sessie-volledigheid en
+ *                                 geen `Article.previousCount`-bijdrage — het
+ *                                 zou "normale CountSession-semantiek
+ *                                 fabriceren" (spec) om dat als GETELD te
+ *                                 tonen. Wordt UITSLUITEND geproduceerd door
+ *                                 `domain/legacyImport.ts`, nooit door
+ *                                 `buildArticleSnapshot` hieronder — een
+ *                                 echte `ArticleSnapshot` (binnen een
+ *                                 `StockSnapshot` van een CountSession) krijgt
+ *                                 deze waarde dus nooit.
  */
 export type ArticleSnapshotStatus =
   | "GETELD"
   | "0 BEVESTIGD"
   | "OVERGENOMEN"
-  | "OVERGENOMEN - NIET GETELD";
+  | "OVERGENOMEN - NIET GETELD"
+  | "LEGACY";
 
 /** Eén artikel binnen één StockSnapshot — een volledige rij van een tellingtabblad. */
 export interface ArticleSnapshot {
@@ -80,6 +99,19 @@ export interface StockSnapshot {
   /** Lokale (niet-UTC) ISO-datum waarop de sessie werd afgerond — zie sessionSnapshotName. */
   snapshotDate: string;
   articles: ArticleSnapshot[];
+  /**
+   * Sprint 3.3 §1 (legacy Analyse/Vergelijken zonder fake CountSessions):
+   * herkomst van deze VOLLEDIGE snapshot — `"APP_COUNT"` voor een echte,
+   * afgeronde `CountSession` (via `buildSessionSnapshot` hieronder),
+   * `"LEGACY_IMPORT"` voor een gesynthetiseerde snapshot van een historisch
+   * geïmporteerde periode (via `buildLegacyPeriodSnapshot` hieronder). BEWUST
+   * optioneel: elke bestaande snapshot/test die dit veld niet zet, betekent
+   * gewoon `"APP_COUNT"` (net als `StockHistoryEntry.source`). Dit is het
+   * veld dat Analysis/Comparison-UI gebruikt om een vergelijking duidelijk
+   * te labelen als "Historische snapshot" — zonder ooit een legacy periode
+   * als een echte `CountSession` te modelleren.
+   */
+  provenance?: "APP_COUNT" | "LEGACY_IMPORT";
 }
 
 /** Eén regel van de machinevriendelijke HISTORIE-tab: één artikel per telling/snapshot. */
@@ -97,6 +129,30 @@ export interface StockHistoryEntry {
   differenceAmount: number | null;
   status: ArticleSnapshotStatus;
   locationNames: string[];
+  /**
+   * Sprint 3.3 §1 (legacy Analyse/Vergelijken): de historische/bron-
+   * productgroep zoals aangetroffen in het legacy-bronbestand op het moment
+   * van deze snapshot (frozen fact — verandert nooit met terugwerkende
+   * kracht, net als `Article.productGroup`). UITSLUITEND gezet door
+   * `domain/legacyImport.ts#buildLegacyHistoryEntry`; een gewone app-sessie
+   * kent dit veld niet (`undefined`) — die leest de productgroep gewoon uit
+   * de (bevroren) `Article` binnen de snapshot zelf. Nodig omdat een
+   * gesynthetiseerde legacy-`ArticleSnapshot` (`buildLegacyPeriodSnapshot`
+   * hieronder) geen eigen bevroren `Article`-record heeft om dit uit te
+   * lezen — enkel deze HISTORIE-regel bewaart het.
+   */
+  sourceProductGroup?: string | null;
+  /**
+   * Sprint 3.3 §3 (legacy historische import): herkomst van deze regel.
+   * BEWUST optioneel (`?`), net als `Article.assortmentActive`: elke
+   * bestaande regel (app-sessies, en elk bestand van vóór deze sprint) kent
+   * dit veld nog niet — ontbrekend/`undefined` betekent altijd `"APP"` (een
+   * echte CountSession), nooit een harde default die bestaande
+   * objectliteralen/tests zou moeten aanpassen. `"LEGACY_IMPORT"` markeert
+   * een regel die uit een geïmporteerd historisch stockbestand komt (zie
+   * `domain/legacyImport.ts`) — die regels hebben altijd `status: "LEGACY"`.
+   */
+  source?: "APP" | "LEGACY_IMPORT";
 }
 
 /**
@@ -253,7 +309,99 @@ export function buildSessionSnapshot(
     sessionName: sessionSnapshotName(session),
     snapshotDate: isoDateFromLocalDate(resolveSnapshotDate(session)),
     articles: allArticles.map((article) => buildArticleSnapshot(article, resultByArticleId.get(article.id))),
+    provenance: "APP_COUNT",
   };
+}
+
+/**
+ * Sprint 3.3 §1 (legacy Analyse/Vergelijken zonder fake CountSessions):
+ * synthetiseert een `StockSnapshot`-vormig object voor ÉÉN legacy periode,
+ * uit de reeds geïmporteerde `StockHistoryEntry`-regels van die periode
+ * (`domain/legacyImport.ts#buildLegacyHistoryEntry`, `status: "LEGACY"`,
+ * `source: "LEGACY_IMPORT"`). Dit laat Analysis/Comparison een legacy
+ * periode als A/B/vergelijkingspunt gebruiken via exact dezelfde
+ * `StockSnapshot`/`ArticleSnapshot`-vorm als een echte sessie — ZONDER
+ * ergens een fictieve `CountSession` te modelleren (spec: expliciet
+ * verboden). `domain/comparison.ts`s kernberekeningen lezen toch enkel
+ * `AnalysisArticleRow`s waarde-/identiteitsvelden (nooit sessie-review-
+ * specifieke velden zoals `SessionReviewSummary`), dus deze ene
+ * synthese-stap volstaat — geen enkele wijziging nodig aan
+ * `buildArticleComparisonRows`/`buildKpis`/e.a.
+ *
+ * BEWUST enkel de artikelen die effectief een brondata-rij hadden in DEZE
+ * periode (geen gefabriceerde OVERGENOMEN-doorrekening zoals een echte
+ * sessie die wel doet, spec: "geen normale CountSession-semantiek
+ * fabriceren") — een artikel zonder rij in deze periode is hier gewoon
+ * ONBEKEND, niet stilzwijgend "ongewijzigd overgenomen".
+ *
+ * `resolvedArticlesById` moet de HUIDIGE (levende) artikelstam van dit
+ * kantoor zijn — hetzelfde principe als `toAnalysisArticleRow`/
+ * `getStockClassification`: de canonieke Productgamma/classificatie mag,
+ * zoals afgesproken, retroactief toegepast worden. `articleNumber`/
+ * `description`/`productGroup` worden WEL bevroren op de historische
+ * bronwaarden van deze regel (frozen facts) — nooit de eventueel intussen
+ * gewijzigde huidige waarden.
+ */
+export function buildLegacyPeriodSnapshot(
+  sessionId: string,
+  periodLabel: string,
+  isoDate: string,
+  entries: StockHistoryEntry[],
+  resolvedArticlesById: ReadonlyMap<string, Article>,
+): StockSnapshot {
+  const articles: ArticleSnapshot[] = [];
+  for (const entry of entries) {
+    const resolvedArticle = resolvedArticlesById.get(entry.articleId);
+    // Defensief: elke legacy-rij kreeg bij import altijd een levend of
+    // nieuw historisch/inactief `Article`-record (zie
+    // `LegacyImportService.commit`) — dit zou dus nooit mogen voorkomen,
+    // maar een ontbrekend artikel mag hier nooit een crash veroorzaken; de
+    // rij wordt dan gewoon overgeslagen (geen fictief artikel verzinnen).
+    if (!resolvedArticle) continue;
+    const totalCount = entry.totalCount;
+    const costPrice = entry.costPrice;
+    const amount = totalCount !== null && costPrice !== null ? totalCount * costPrice : null;
+    const article: Article = {
+      ...resolvedArticle,
+      articleNumber: entry.articleNumber,
+      description: entry.description,
+      productGroup: entry.sourceProductGroup ?? resolvedArticle.productGroup,
+    };
+    articles.push({
+      articleId: entry.articleId,
+      article,
+      status: "LEGACY",
+      totalCount,
+      previousCount: null,
+      differenceQuantity: null,
+      costPrice,
+      previousValue: null,
+      amount,
+      differenceAmount: null,
+      perLocation: [],
+      note: null,
+    });
+  }
+  return {
+    sessionId,
+    sessionType: "FULL",
+    sessionName: legacySnapshotSessionName(periodLabel),
+    snapshotDate: isoDate,
+    articles,
+    provenance: "LEGACY_IMPORT",
+  };
+}
+
+/**
+ * Zelfde naamgevingsconventie als `domain/legacyImport.ts#legacySessionName`
+ * — hier lokaal herhaald (i.p.v. geïmporteerd) om een circulaire
+ * afhankelijkheid tussen `stockSnapshot.ts` en `legacyImport.ts` te
+ * vermijden (`legacyImport.ts` importeert zelf al `historyEntryKey` uit dit
+ * bestand). Beide functies MOETEN letterlijk identiek blijven — zie de
+ * test die dit expliciet afdwingt.
+ */
+function legacySnapshotSessionName(periodLabel: string): string {
+  return `LEGACY ${periodLabel}`;
 }
 
 /**

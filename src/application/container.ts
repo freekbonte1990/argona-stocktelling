@@ -9,6 +9,7 @@ import { ComparisonService } from "./services/ComparisonService";
 import { LocationAssignmentService } from "./services/LocationAssignmentService";
 import { NewArticleService } from "./services/NewArticleService";
 import { ProductCategoryService } from "./services/ProductCategoryService";
+import { LegacyImportService } from "./services/LegacyImportService";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -40,4 +41,5 @@ export const newArticleService = new NewArticleService(
   countingService,
   productCategoryService,
 );
+export const legacyImportService = new LegacyImportService(repository);
 export const countingRepository = repository;

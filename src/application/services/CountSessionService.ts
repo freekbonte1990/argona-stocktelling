@@ -1,4 +1,4 @@
-import { selectArticlesForSessionType } from "../../domain/frequency";
+import { selectArticlesForNewCount } from "../../domain/countScope";
 import { activeLocationsInOrder } from "../../domain/locations";
 import {
   buildNextPreviousCounts,
@@ -6,6 +6,7 @@ import {
   isSessionReadyToComplete,
 } from "../../domain/review";
 import type { SessionReviewSummary } from "../../domain/review";
+import { recomputePreviousCountsAfterDeletion } from "../../domain/sessionDeletion";
 import {
   buildHistoryEntriesFromSnapshot,
   buildSessionSnapshot,
@@ -13,7 +14,7 @@ import {
 } from "../../domain/stockSnapshot";
 import type { Article, CountEntry, CountSession, CountSessionType } from "../../domain/types";
 import { generateSessionId } from "../../shared/ids";
-import type { CountingRepository } from "../ports/CountingRepository";
+import type { CountingRepository, FinalizedSessionResult } from "../ports/CountingRepository";
 
 export interface SessionScopePreview {
   sessionType: CountSessionType;
@@ -114,6 +115,27 @@ export class SessionNotActiveError extends Error {
 }
 
 /**
+ * Gegooid door `deleteSession` wanneer de sessie niet (meer) COMPLETED is —
+ * spec Sprint 3.3 §5: enkel afgeronde tellingen mogen verwijderd worden. Een
+ * nog ACTIVE sessie hoort bij "Annuleren" (`cancelSession`), en een reeds
+ * CANCELLED sessie heeft nooit meegeteld in HISTORIE/previousCount en is dus
+ * niets om te "verwijderen" in deze zin.
+ */
+export class SessionNotDeletableError extends Error {
+  readonly sessionId: string;
+  readonly actualStatus: string;
+
+  constructor(sessionId: string, actualStatus: string) {
+    super(
+      `Sessie ${sessionId} heeft status ${actualStatus} — enkel een afgeronde (COMPLETED) telling kan verwijderd worden.`,
+    );
+    this.name = "SessionNotDeletableError";
+    this.sessionId = sessionId;
+    this.actualStatus = actualStatus;
+  }
+}
+
+/**
  * Bepaalt en start telsessies, en berekent/valideert de resultatenreview
  * die aan het afronden voorafgaat (spec v0.2 §1-4).
  */
@@ -130,7 +152,7 @@ export class CountSessionService {
     const types: CountSessionType[] = ["MONTHLY", "QUARTERLY", "YEARLY", "FULL"];
     return types.map((sessionType) => ({
       sessionType,
-      articleCount: selectArticlesForSessionType(articles, sessionType).length,
+      articleCount: selectArticlesForNewCount(articles, sessionType).length,
     }));
   }
 
@@ -152,7 +174,7 @@ export class CountSessionService {
     }
 
     const articles = await this.repository.getArticles(officeId);
-    const scopeArticles = selectArticlesForSessionType(articles, sessionType);
+    const scopeArticles = selectArticlesForNewCount(articles, sessionType);
     const importMeta = await this.repository.getImportMeta(officeId);
     const office = await this.repository.getOffice(officeId);
 
@@ -361,6 +383,87 @@ export class CountSessionService {
   /** Alle sessies van een kantoor, nieuwste eerst — voor het raadplegen van afgeronde tellingen. */
   async getSessionsForOffice(officeId: string): Promise<CountSession[]> {
     return this.repository.getSessionsForOffice(officeId);
+  }
+
+  /**
+   * Sprint 3.3 §5: verwijdert een afgeronde (COMPLETED) telling, met
+   * expliciete bevestiging in de UI vooraf (niet hier). Enkel COMPLETED mag
+   * verwijderd worden — zie `SessionNotDeletableError`.
+   *
+   * Herberekent daarna, via de PURE `domain/sessionDeletion.ts#
+   * recomputePreviousCountsAfterDeletion`, welke artikelen hun
+   * `previousCount`-baseline moeten herstellen: de overblijvende afgeronde
+   * sessies van dit kantoor (chronologisch, oudste eerst — enkel die met een
+   * eigen bevroren `FinalizedSessionResult`) plus de te verwijderen sessie's
+   * eigen bevroren snapshot zijn daarvoor voldoende, want elke sessie draagt
+   * enkel bij aan `previousCount` via haar eigen bevroren `snapshot`
+   * (dezelfde bron als `finalize()` hierboven gebruikt) — nooit via
+   * `stockHistoryEntries` of enige andere afgeleide data.
+   *
+   * Een sessie van vóór data-integriteit-sprint §3 heeft nooit een
+   * `FinalizedSessionResult` gehad (bekende, aanvaarde legacy-beperking) —
+   * die wordt hier gewoon verwijderd zonder recompute, want er is dan ook
+   * geen betrouwbare bevroren snapshot om een baseline uit af te leiden.
+   *
+   * Verwijdert NOOIT artikelen of andere mastergegevens — enkel hun
+   * `previousCount` kan wijzigen (zie `CountingRepository#deleteSession`).
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessie ${sessionId} niet gevonden.`);
+    }
+    if (session.status !== "COMPLETED") {
+      throw new SessionNotDeletableError(sessionId, session.status);
+    }
+
+    const finalizedResult = await this.repository.getFinalizedSessionResult(sessionId);
+    if (!finalizedResult) {
+      await this.repository.deleteSession({
+        officeId: session.officeId,
+        sessionId,
+        sessionName: "",
+        updatedArticles: [],
+      });
+      return;
+    }
+
+    const [articles, allSessions] = await Promise.all([
+      this.repository.getArticles(session.officeId),
+      this.repository.getSessionsForOffice(session.officeId),
+    ]);
+
+    const otherCompletedSessions = allSessions.filter(
+      (candidate) => candidate.id !== sessionId && candidate.status === "COMPLETED",
+    );
+    const otherResults = await Promise.all(
+      otherCompletedSessions.map((candidate) => this.repository.getFinalizedSessionResult(candidate.id)),
+    );
+    const remainingSnapshotsChronological = otherCompletedSessions
+      .map((candidate, index) => ({ session: candidate, result: otherResults[index] }))
+      .filter(
+        (entry): entry is { session: CountSession; result: FinalizedSessionResult } =>
+          entry.result !== undefined,
+      )
+      .sort((a, b) =>
+        (a.session.completedAt ?? a.session.startedAt).localeCompare(
+          b.session.completedAt ?? b.session.startedAt,
+        ),
+      )
+      .map((entry) => entry.result.snapshot);
+
+    const updatedArticles = recomputePreviousCountsAfterDeletion(
+      finalizedResult.snapshot,
+      remainingSnapshotsChronological,
+      articles,
+    );
+
+    await this.repository.deleteSession({
+      officeId: session.officeId,
+      sessionId,
+      sessionName: finalizedResult.snapshot.sessionName,
+      updatedArticles,
+    });
   }
 
   /**

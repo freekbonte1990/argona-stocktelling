@@ -68,6 +68,24 @@ export interface FinalizeSessionInput {
 }
 
 /**
+ * Sprint 3.3 §5 (veilig verwijderen van tellingen): alles wat
+ * `CountSessionService#deleteSession` in ÉÉN transactie moet wegschrijven om
+ * een afgeronde (COMPLETED) sessie volledig en veilig te verwijderen —
+ * `sessionName` is de bevroren snapshotnaam van de sessie (spec §5, om haar
+ * eigen HISTORIE-regels en eventuele zelf-gegenereerde historische sheet
+ * terug te vinden), `updatedArticles` de reeds herberekende
+ * `previousCount`-baselines (zie `domain/sessionDeletion.ts`,
+ * leeg wanneer er niets te herberekenen viel, bv. een legacy sessie zonder
+ * bevroren snapshot).
+ */
+export interface DeleteSessionInput {
+  officeId: string;
+  sessionId: string;
+  sessionName: string;
+  updatedArticles: Article[];
+}
+
+/**
  * Persistentie voor alles wat met tellen te maken heeft: kantoren/locaties,
  * artikelen, telsessies, individuele tellingen en geleerde artikel-locatie
  * koppelingen.
@@ -132,6 +150,35 @@ export interface CountingRepository {
    * `ExportService#exportSessionResults`.
    */
   getFinalizedSessionResult(sessionId: string): Promise<FinalizedSessionResult | undefined>;
+  /**
+   * Sprint 3.3 §5: verwijdert een afgeronde (COMPLETED) app-telling volledig
+   * en cascadeert naar alle afgeleide data — de sessie zelf, haar
+   * CountEntries, haar LocationSessionStatuses, haar FinalizedSessionResult,
+   * haar eigen HISTORIE-regels (`stockHistoryEntries`, gematcht op
+   * `(officeId, sessionName)`), en — enkel wanneer de bewaarde
+   * `HistoricalSheetRecord` op die (officeId, sessionName) ECHT door DEZE
+   * sessie zelf gegenereerd werd (`record.sessionId === input.sessionId`) —
+   * ook die sheet. Een geïmporteerde sheet die toevallig dezelfde naam draagt
+   * (`sessionId: null` of een ANDERE sessie) wordt hierdoor nooit per
+   * ongeluk meeverwijderd. Schrijft ook meteen `input.updatedArticles` weg
+   * (de reeds herberekende `previousCount`-baselines, zie
+   * `domain/sessionDeletion.ts`) — alles in ÉÉN transactie: verwijdert een
+   * onderdeel, maar wordt de transactie onderbroken, dan blijft de sessie
+   * gewoon volledig ongewijzigd bestaan (nooit een half verwijderde sessie).
+   * Verwijdert NOOIT artikelen/mastergegevens zelf — enkel hun
+   * `previousCount` kan wijzigen.
+   */
+  deleteSession(input: DeleteSessionInput): Promise<void>;
+  /**
+   * Sprint 3.3 §5: verwijdert één legacy historische snapshot (`LEGACY_IMPORT`,
+   * item 3) — eenvoudiger dan `deleteSession` hierboven: een legacy snapshot
+   * heeft nooit een `FinalizedSessionResult`, `CountEntry` of
+   * `LocationSessionStatus`, en beïnvloedt (per ontwerp, spec §3/§4) nooit
+   * `Article.previousCount` — dus geen artikel-herberekening nodig. Verwijdert
+   * enkel de bewaarde `HistoricalSheetRecord` (indien aanwezig) en haar
+   * HISTORIE-regels voor deze (officeId, sessionName).
+   */
+  deleteHistoricalSnapshot(officeId: string, sessionName: string): Promise<void>;
   /**
    * Annuleert een sessie (sessielogica-fix): zet status CANCELLED en
    * `cancelledAt`. Deze methode zelf voert geen validatie uit (bv. of de

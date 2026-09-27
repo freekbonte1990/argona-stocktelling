@@ -3,7 +3,7 @@ import { normalizeStockClassification } from "../../domain/stockClassification";
 import type { Article } from "../../domain/types";
 import { ExcelValidationError } from "./excelErrors";
 import { extractDataRows, findHeaderRow, findOptionalColumnIndex } from "./excelHeaderUtils";
-import { toNumberOrNull, toStringOrNull } from "./excelValues";
+import { toBooleanFlag, toNumberOrNull, toStringOrNull } from "./excelValues";
 
 export const ARTIKEL_SHEET_NAME = "ARTIKEL";
 
@@ -49,6 +49,22 @@ export const STOCK_CLASSIFICATION_HEADER = "Voorraadclassificatie";
 export const CATEGORY_ID_HEADER = "Productgamma ID";
 
 /**
+ * Sprint 3.3 §1/§6 (Excel portability): "Assortiment actief" — of dit
+ * artikel actief is in het huidige assortiment van zijn kantoor (zie
+ * `Article.assortmentActive`/`domain/articleAssortment.ts`). Bewust
+ * OPTIONEEL, zelfde precedent als `STOCK_CLASSIFICATION_HEADER`/
+ * `CATEGORY_ID_HEADER` hierboven: een origineel bronmasterbestand (zonder
+ * dit begrip) kent deze kolom niet — ontbreekt ze, dan wordt bij import elk
+ * artikel in dit bestand simpelweg beschouwd als "actief" (spec §1:
+ * "aanwezig in het huidige master = actief"), zie
+ * `ApplicationService/ImportService`s assortiment-diff. Is de kolom wél
+ * aanwezig (een EIGEN eerdere export), dan wordt haar waarde vertrouwd —
+ * zo overleeft een reeds inactief gemaakt (historisch) artikel een
+ * export/herimport-cyclus zonder terug "actief" te worden.
+ */
+export const ASSORTMENT_ACTIVE_HEADER = "Assortiment actief";
+
+/**
  * Leest sheet ARTIKEL in en zet elke rij om naar een domein-Article.
  * Tijdelijke artikelnummers (bv. "TMP-DAM-0001") zijn gewoon geldige,
  * niet-lege strings en worden niet geweigerd.
@@ -65,17 +81,27 @@ export function parseArtikelSheet(rows: unknown[][], officeId: string): Article[
     STOCK_CLASSIFICATION_HEADER,
   );
   const categoryIdColIndex = findOptionalColumnIndex(rows, headerRowIndex, CATEGORY_ID_HEADER);
+  const assortmentActiveColIndex = findOptionalColumnIndex(rows, headerRowIndex, ASSORTMENT_ACTIVE_HEADER);
   const columnIndexByNameWithOptional = {
     ...columnIndexByName,
     ...(stockClassificationColIndex !== null
       ? { [STOCK_CLASSIFICATION_HEADER]: stockClassificationColIndex }
       : {}),
     ...(categoryIdColIndex !== null ? { [CATEGORY_ID_HEADER]: categoryIdColIndex } : {}),
+    ...(assortmentActiveColIndex !== null
+      ? { [ASSORTMENT_ACTIVE_HEADER]: assortmentActiveColIndex }
+      : {}),
   };
   const dataRows = extractDataRows(rows, headerRowIndex, columnIndexByNameWithOptional);
 
   return dataRows.map((row, index) =>
-    buildArticle(row, officeId, headerRowIndex + 2 + index, categoryIdColIndex !== null),
+    buildArticle(
+      row,
+      officeId,
+      headerRowIndex + 2 + index,
+      categoryIdColIndex !== null,
+      assortmentActiveColIndex !== null,
+    ),
   );
 }
 
@@ -84,6 +110,7 @@ function buildArticle(
   officeId: string,
   excelRowNumber: number,
   hasCategoryIdColumn: boolean,
+  hasAssortmentActiveColumn: boolean,
 ): Article {
   const articleNumber = toStringOrNull(row["Artikelnr."]);
   if (!articleNumber) {
@@ -122,5 +149,15 @@ function buildArticle(
     // effectief in dit bestand aanwezig is — anders blijft `categoryId`
     // `undefined`, zie de toelichting bij `CATEGORY_ID_HEADER` hierboven.
     ...(hasCategoryIdColumn ? { categoryId: toStringOrNull(row[CATEGORY_ID_HEADER]) } : {}),
+    // Sprint 3.3 §1/§6: enkel zetten wanneer de kolom effectief aanwezig is
+    // — anders blijft `assortmentActive` `undefined`, en lost
+    // `ImportService`s assortiment-diff (`computeAssortmentImportDiff`) de
+    // waarde zelf op (spec §1: aanwezig in een bestand zonder dit begrip =
+    // actief). Is de kolom wél aanwezig, dan geldt haar waarde (default
+    // `true` bij een lege cel — zelfde conventie als ARTIKEL_LOCATIES/
+    // PRODUCTGAMMAS' "Actief"-kolom, zie `toBooleanFlag`).
+    ...(hasAssortmentActiveColumn
+      ? { assortmentActive: toBooleanFlag(row[ASSORTMENT_ACTIVE_HEADER], true) }
+      : {}),
   };
 }

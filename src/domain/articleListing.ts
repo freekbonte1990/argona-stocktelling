@@ -1,3 +1,4 @@
+import { isArticleActiveInAssortment } from "./articleAssortment";
 import { PRODUCT_CATEGORY_FALLBACK } from "./productCategory";
 import type { Article, ArticleActiveStatus, ArticleCountFrequency } from "./types";
 
@@ -48,6 +49,20 @@ export const FREQUENCY_FILTER_LABELS: Record<ArticleCountFrequency, string> = {
 export const ARTICLE_STATUS_FILTER_LABELS: Record<ArticleActiveStatus, string> = {
   ACTIVE: "Actief",
   INACTIVE: "Inactief",
+};
+
+/**
+ * Sprint 3.3 §1: filter op de assortiment-as (`Article.assortmentActive`) —
+ * een APARTE as t.o.v. `ArticleActiveStatus` hierboven, zie
+ * `domain/articleAssortment.ts`. "ALL" toont alles (het standaardgedrag —
+ * historische/inactieve artikelen blijven altijd zichtbaar in dit overzicht,
+ * enkel NIEUWE tellingen sluiten ze uit, zie `domain/countScope.ts`).
+ */
+export type ArticleAssortmentFilterValue = "ALL" | "ACTIVE" | "INACTIVE";
+
+export const ARTICLE_ASSORTMENT_FILTER_LABELS: Record<Exclude<ArticleAssortmentFilterValue, "ALL">, string> = {
+  ACTIVE: "Actief in assortiment",
+  INACTIVE: "Inactief (historisch)",
 };
 
 /** Standaard sortering van het Artikels-overzicht (spec §5): Productgroep → Omschrijving. */
@@ -114,6 +129,7 @@ export interface ArticleListFilters {
   countPeriod: ArticleCountFrequency | null;
   status: ArticleActiveStatus | null;
   location: ArticleLocationFilterValue;
+  assortment: ArticleAssortmentFilterValue;
 }
 
 export const DEFAULT_ARTICLE_LIST_FILTERS: ArticleListFilters = {
@@ -122,6 +138,7 @@ export const DEFAULT_ARTICLE_LIST_FILTERS: ArticleListFilters = {
   countPeriod: null,
   status: null,
   location: "ALL",
+  assortment: "ALL",
 };
 
 /**
@@ -137,6 +154,7 @@ export function countActiveArticleListFilters(filters: ArticleListFilters): numb
   if (filters.countPeriod !== null) count += 1;
   if (filters.status !== null) count += 1;
   if (filters.location !== "ALL") count += 1;
+  if (filters.assortment !== "ALL") count += 1;
   return count;
 }
 
@@ -160,6 +178,11 @@ export function filterArticlesForList(
     }
     if (filters.countPeriod && article.countPeriod !== filters.countPeriod) return false;
     if (filters.status && article.status !== filters.status) return false;
+    if (filters.assortment !== "ALL") {
+      const active = isArticleActiveInAssortment(article);
+      if (filters.assortment === "ACTIVE" && !active) return false;
+      if (filters.assortment === "INACTIVE" && active) return false;
+    }
 
     if (filters.location === "NONE") {
       const locations = locationIdsByArticle.get(article.id);

@@ -9,6 +9,7 @@ import type {
 } from "../../domain/types";
 import type {
   CountingRepository,
+  DeleteSessionInput,
   FinalizedSessionResult,
   FinalizeSessionInput,
   HistoricalSheetRecord,
@@ -125,6 +126,67 @@ export class IndexedDbCountingRepository implements CountingRepository {
 
   async getFinalizedSessionResult(sessionId: string): Promise<FinalizedSessionResult | undefined> {
     return this.db.finalizedSessionResults.get(sessionId);
+  }
+
+  /**
+   * Sprint 3.3 §5: alles in ÉÉN Dexie-transactie, zelfde discipline als
+   * `finalizeSession` hierboven — faalt één van de schrijfacties, dan blijft
+   * de sessie gewoon volledig bestaan (nooit een half verwijderde sessie).
+   */
+  async deleteSession(input: DeleteSessionInput): Promise<void> {
+    const sheetId = `${input.officeId}:${input.sessionName}`;
+    await this.db.transaction(
+      "rw",
+      [
+        this.db.sessions,
+        this.db.countEntries,
+        this.db.locationSessionStatuses,
+        this.db.finalizedSessionResults,
+        this.db.historicalSheets,
+        this.db.stockHistoryEntries,
+        this.db.articles,
+      ],
+      async () => {
+        await this.db.sessions.delete(input.sessionId);
+        await this.db.countEntries.where("sessionId").equals(input.sessionId).delete();
+        await this.db.locationSessionStatuses.where("sessionId").equals(input.sessionId).delete();
+        await this.db.finalizedSessionResults.delete(input.sessionId);
+
+        // Enkel de eigen, door DEZE sessie gegenereerde historische sheet
+        // verwijderen — nooit een geïmporteerde sheet die toevallig dezelfde
+        // naam draagt (sessionId: null of een ANDERE sessie).
+        const sheet = await this.db.historicalSheets.get(sheetId);
+        if (sheet && sheet.sessionId === input.sessionId) {
+          await this.db.historicalSheets.delete(sheetId);
+        }
+
+        await this.db.stockHistoryEntries
+          .where("officeId")
+          .equals(input.officeId)
+          .and((entry) => entry.sessionName === input.sessionName)
+          .delete();
+
+        if (input.updatedArticles.length > 0) {
+          await this.db.articles.bulkPut(input.updatedArticles);
+        }
+      },
+    );
+  }
+
+  async deleteHistoricalSnapshot(officeId: string, sessionName: string): Promise<void> {
+    const sheetId = `${officeId}:${sessionName}`;
+    await this.db.transaction(
+      "rw",
+      [this.db.historicalSheets, this.db.stockHistoryEntries],
+      async () => {
+        await this.db.historicalSheets.delete(sheetId);
+        await this.db.stockHistoryEntries
+          .where("officeId")
+          .equals(officeId)
+          .and((entry) => entry.sessionName === sessionName)
+          .delete();
+      },
+    );
   }
 
   async cancelSession(sessionId: string, reason: string | null = null): Promise<void> {

@@ -1,6 +1,6 @@
 import type { ArticleSnapshotStatus, StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { CountSessionType } from "../../domain/types";
-import { extractDataRows, findHeaderRow } from "./excelHeaderUtils";
+import { extractDataRows, findHeaderRow, findOptionalColumnIndex } from "./excelHeaderUtils";
 import { toIsoDateString, toNumberOrNull, toStringOrNull } from "./excelValues";
 
 export const HISTORIE_SHEET_NAME = "HISTORIE";
@@ -25,12 +25,16 @@ export const HISTORIE_REQUIRED_HEADERS = [
   "Locaties",
 ] as const;
 
+/** Sprint 3.3 §3: optionele kolom (backward-compat, net als "Assortiment actief" in ARTIKEL) — enkel geschreven/gelezen wanneer aanwezig. */
+export const HISTORIE_SOURCE_HEADER = "Bron";
+
 const VALID_SESSION_TYPES: CountSessionType[] = ["MONTHLY", "QUARTERLY", "YEARLY", "FULL"];
 const VALID_STATUSES: ArticleSnapshotStatus[] = [
   "GETELD",
   "0 BEVESTIGD",
   "OVERGENOMEN",
   "OVERGENOMEN - NIET GETELD",
+  "LEGACY",
 ];
 
 function normalizeSessionType(raw: string | null): CountSessionType {
@@ -68,8 +72,15 @@ export function parseHistorieSheet(rows: unknown[][], officeId: string): StockHi
     HISTORIE_SHEET_NAME,
   );
   const dataRows = extractDataRows(rows, headerRowIndex, columnIndexByName);
+  const sourceColIndex = findOptionalColumnIndex(rows, headerRowIndex, HISTORIE_SOURCE_HEADER);
+  const extendedColumnIndexByName = {
+    ...columnIndexByName,
+    ...(sourceColIndex !== null ? { [HISTORIE_SOURCE_HEADER]: sourceColIndex } : {}),
+  };
+  const extendedDataRows =
+    sourceColIndex !== null ? extractDataRows(rows, headerRowIndex, extendedColumnIndexByName) : dataRows;
 
-  return dataRows.map((row) => ({
+  return extendedDataRows.map((row) => ({
     countDate: toIsoDateString(row["Teldatum"]) ?? "",
     sessionType: normalizeSessionType(toStringOrNull(row["Tellingtype"])),
     sessionName: toStringOrNull(row["Tellingnaam"]) ?? "",
@@ -87,5 +98,8 @@ export function parseHistorieSheet(rows: unknown[][], officeId: string): StockHi
     differenceAmount: toNumberOrNull(row["Verschil €"]),
     status: normalizeStatus(toStringOrNull(row["Status telling"])),
     locationNames: parseLocationNames(row["Locaties"]),
+    ...(sourceColIndex !== null
+      ? { source: toStringOrNull(row[HISTORIE_SOURCE_HEADER]) === "LEGACY_IMPORT" ? ("LEGACY_IMPORT" as const) : ("APP" as const) }
+      : {}),
   }));
 }

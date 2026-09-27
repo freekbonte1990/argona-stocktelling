@@ -4,6 +4,7 @@ import type {
   StockResultExportInput,
   StockResultExporter,
 } from "../../application/ports/StockResultExporter";
+import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { buildNextPreviousCounts, type ArticleReviewResult } from "../../domain/review";
 import { computeFrequencyBreakdown } from "../../domain/frequency";
 import { allLocationsInOrder } from "../../domain/locations";
@@ -11,9 +12,14 @@ import { getStockClassification, STOCK_CLASSIFICATION_TO_RAW } from "../../domai
 import type { ArticleSnapshot, StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
 import type { Article, ArticleLocationAssignment, Location, ProductCategory } from "../../domain/types";
 import { buildExportFileName } from "../../shared/exportFileName";
-import { ARTIKEL_REQUIRED_HEADERS, CATEGORY_ID_HEADER, STOCK_CLASSIFICATION_HEADER } from "./parseArtikel";
+import {
+  ARTIKEL_REQUIRED_HEADERS,
+  ASSORTMENT_ACTIVE_HEADER,
+  CATEGORY_ID_HEADER,
+  STOCK_CLASSIFICATION_HEADER,
+} from "./parseArtikel";
 import { ARTIKEL_LOCATIES_REQUIRED_HEADERS, ARTIKEL_LOCATIES_SHEET_NAME } from "./parseArtikelLocaties";
-import { HISTORIE_REQUIRED_HEADERS } from "./parseHistorie";
+import { HISTORIE_REQUIRED_HEADERS, HISTORIE_SOURCE_HEADER } from "./parseHistorie";
 import { PRODUCTGAMMAS_REQUIRED_HEADERS, PRODUCTGAMMAS_SHEET_NAME } from "./parseProductGammas";
 import { buildTellingRequiredHeaders } from "./parseTelling";
 import {
@@ -284,8 +290,13 @@ function buildArtikelSheet(
   nextPreviousCounts: Map<string, number | null>,
 ): void {
   const sheet = workbook.addWorksheet("ARTIKEL");
-  const headers = [...ARTIKEL_REQUIRED_HEADERS, STOCK_CLASSIFICATION_HEADER, CATEGORY_ID_HEADER];
-  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10, 20, 24]);
+  const headers = [
+    ...ARTIKEL_REQUIRED_HEADERS,
+    STOCK_CLASSIFICATION_HEADER,
+    CATEGORY_ID_HEADER,
+    ASSORTMENT_ACTIVE_HEADER,
+  ];
+  setColumnWidths(sheet, [18, 20, 12, 60, 24, 24, 12, 14, 16, 20, 15, 10, 20, 24, 16]);
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   const header = sheet.addRow(headers);
@@ -320,6 +331,13 @@ function buildArtikelSheet(
       // zonder deze kolom te herkennen (zie parseArtikel.ts), niet om apart
       // te exporteren.
       article.categoryId ?? null,
+      // Sprint 3.3 §1/§6: "Assortiment actief" — altijd expliciete Ja/Nee-
+      // tekst (nooit leeg), zelfde conventie als "Voorraadclassificatie"
+      // hierboven, zodat een herimport op een leeg toestel exact dezelfde
+      // assortimentsstatus terugkrijgt (incl. een reeds inactief/historisch
+      // artikel, dat anders bij een kolomloze herimport terug "actief" zou
+      // worden — zie ImportService's assortiment-diff).
+      isArticleActiveInAssortment(article) ? "Ja" : "Nee",
     ]);
     row.getCell(8).numFmt = CURRENCY_FORMAT; // Kostprijs
     row.getCell(11).numFmt = QUANTITY_FORMAT; // Vorige telling
@@ -696,7 +714,12 @@ function buildNamedSnapshotSheet(workbook: ExcelJS.Workbook, sheetName: string, 
  */
 function buildHistorieSheet(workbook: ExcelJS.Workbook, entries: StockHistoryEntry[]): void {
   const sheet = workbook.addWorksheet("HISTORIE");
-  const header = [...HISTORIE_REQUIRED_HEADERS];
+  // Sprint 3.3 §3/§6: "Bron" is een optionele, additieve kolom (backward-
+  // compat, zelfde idioom als "Assortiment actief" in ARTIKEL) — altijd MEE
+  // geschreven (deze sheet wordt bij elke export volledig vers herschreven,
+  // zie de doc-comment hierboven), maar bij het LEZEN enkel verwacht wanneer
+  // aanwezig, zodat een ouder bestand zonder deze kolom gewoon blijft werken.
+  const header = [...HISTORIE_REQUIRED_HEADERS, HISTORIE_SOURCE_HEADER];
   setColumnWidths(sheet, widthsForHeader(header));
   const headerRow = sheet.addRow(header);
   styleHeaderRow(headerRow, HEADER_FILL_BLUE, header.length);
@@ -716,6 +739,7 @@ function buildHistorieSheet(workbook: ExcelJS.Workbook, entries: StockHistoryEnt
       entry.differenceAmount,
       entry.status,
       entry.locationNames.length > 0 ? entry.locationNames.join(", ") : null,
+      entry.source ?? "APP",
     ]);
     row.getCell(6).numFmt = QUANTITY_FORMAT; // Totale voorraad
     row.getCell(7).numFmt = QUANTITY_FORMAT; // Vorige voorraad

@@ -216,6 +216,7 @@ describe("countActiveArticleListFilters (v0.2.1 correctieronde §1: 'Filters (N)
         countPeriod: "MONTHLY",
         status: "ACTIVE",
         location: "loc-1",
+        assortment: "ALL",
       }),
     ).toBe(4);
   });

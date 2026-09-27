@@ -142,3 +142,78 @@ describe("ImportService — meerdere kantoren, niet stilletjes overschrijven", (
     expect((await repository.getOffice("lokeren"))?.name).toBe("Lokeren");
   });
 });
+
+describe("ImportService — Sprint 3.3 §1: assortiment-diff bij herimport", () => {
+  let repository: InMemoryCountingRepository;
+  let importService: ImportService;
+
+  beforeEach(() => {
+    repository = new InMemoryCountingRepository();
+    importService = new ImportService(repository);
+  });
+
+  it("een artikel dat verdwijnt uit een nieuw mastermodel wordt inactief (niet verwijderd)", async () => {
+    const first = new FakeStockSource(
+      makeOffice("antwerpen", "Antwerpen", ["Magazijn"]),
+      [makeArticle("antwerpen", "A1"), makeArticle("antwerpen", "A2")],
+      "antwerpen.xlsx",
+    );
+    await importService.commitImport(await importService.prepareImport(first));
+
+    // Nieuw mastermodel: A2 komt er niet meer in voor (uitgefaseerd product), A3 is nieuw.
+    const second = new FakeStockSource(
+      makeOffice("antwerpen", "Antwerpen", ["Magazijn"]),
+      [makeArticle("antwerpen", "A1"), makeArticle("antwerpen", "A3")],
+      "antwerpen-v2.xlsx",
+    );
+    const summary = await importService.commitImport(await importService.prepareImport(second));
+    expect(summary.newlyInactiveArticleCount).toBe(1);
+
+    const articles = await repository.getArticles("antwerpen");
+    expect(articles).toHaveLength(3); // A1, A2 (nu inactief), A3 — nooit verwijderd.
+    const a1 = articles.find((a) => a.articleNumber === "A1");
+    const a2 = articles.find((a) => a.articleNumber === "A2");
+    const a3 = articles.find((a) => a.articleNumber === "A3");
+    expect(a1?.assortmentActive).toBe(true);
+    expect(a2?.assortmentActive).toBe(false);
+    expect(a3?.assortmentActive).toBe(true);
+  });
+
+  it("een herimport van een volledig eigen export (alle artikelen aanwezig, incl. al-inactieve) maakt niemand stilzwijgend terug actief", async () => {
+    const first = new FakeStockSource(
+      makeOffice("antwerpen", "Antwerpen", ["Magazijn"]),
+      [makeArticle("antwerpen", "A1"), { ...makeArticle("antwerpen", "A2"), assortmentActive: false }],
+      "antwerpen.xlsx",
+    );
+    await importService.commitImport(await importService.prepareImport(first));
+
+    // Een "eigen export" bevat het VOLLEDIGE lokale artikelbestand, met de
+    // assortimentswaarde expliciet meegegeven (zoals de "Assortiment
+    // actief"-Excelkolom dat zou doen) — A2 blijft hier dus expliciet inactief.
+    const reimport = new FakeStockSource(
+      makeOffice("antwerpen", "Antwerpen", ["Magazijn"]),
+      [
+        { ...makeArticle("antwerpen", "A1"), assortmentActive: true },
+        { ...makeArticle("antwerpen", "A2"), assortmentActive: false },
+      ],
+      "antwerpen-export.xlsx",
+    );
+    const summary = await importService.commitImport(await importService.prepareImport(reimport));
+    expect(summary.newlyInactiveArticleCount).toBe(0);
+
+    const articles = await repository.getArticles("antwerpen");
+    expect(articles.find((a) => a.articleNumber === "A2")?.assortmentActive).toBe(false);
+    expect(articles.find((a) => a.articleNumber === "A1")?.assortmentActive).toBe(true);
+  });
+
+  it("een gloednieuw kantoor krijgt gewoon 0 nieuw-inactieve artikelen (niets was eerder gekend)", async () => {
+    const source = new FakeStockSource(
+      makeOffice("damme", "Damme", ["Magazijn"]),
+      [makeArticle("damme", "D1")],
+      "damme.xlsx",
+    );
+    const summary = await importService.commitImport(await importService.prepareImport(source));
+    expect(summary.newlyInactiveArticleCount).toBe(0);
+    expect((await repository.getArticles("damme"))[0]?.assortmentActive).toBe(true);
+  });
+});

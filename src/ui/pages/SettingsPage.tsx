@@ -10,11 +10,27 @@ import {
   setLocationActive,
 } from "../../domain/locations";
 import { allProductCategoriesInOrder, countArticlesInCategory } from "../../domain/productCategory";
-import type { Location, Office, ProductCategory } from "../../domain/types";
+import { sessionSnapshotName } from "../../domain/stockSnapshot";
+import type { CountSession, Location, Office, ProductCategory } from "../../domain/types";
 import { generateLocationId } from "../../shared/ids";
-import { countingRepository, productCategoryService } from "../../application/container";
+import { countSessionService, countingRepository, productCategoryService } from "../../application/container";
 import { BigButton } from "../components/BigButton";
-import { useAllArticles, useAssignments, useOffice, useProductCategories } from "../hooks/useLiveData";
+import { LegacyImportSection } from "./LegacyImportSection";
+import {
+  useAllArticles,
+  useAssignments,
+  useOffice,
+  useProductCategories,
+  useSessionsForOffice,
+} from "../hooks/useLiveData";
+
+/** Sprint 3.3 §5: NL-labels voor de sessietypes, voor de "Tellingen"-lijst hieronder. */
+const SESSION_TYPE_LABELS: Record<CountSession["type"], string> = {
+  MONTHLY: "Maandtelling",
+  QUARTERLY: "Kwartaaltelling",
+  YEARLY: "Jaartelling",
+  FULL: "Volledige telling",
+};
 
 interface SettingsPageProps {
   officeId: string;
@@ -63,6 +79,15 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
+
+  // Sprint 3.3 §5 — "Tellingen": veilig verwijderen van afgeronde app-tellingen,
+  // met expliciete bevestiging (tweestapspatroon, zelfde als het
+  // samenvoegen van productgamma's hierboven).
+  const sessions = useSessionsForOffice(officeId) ?? [];
+  const completedSessions = sessions.filter((s) => s.status === "COMPLETED");
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [deletingSession, setDeletingSession] = useState(false);
 
   if (!officeOrUndefined) {
     return <p className="screen-subtitle">Bezig met laden...</p>;
@@ -188,6 +213,22 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   const mergeSource = categories.find((c) => c.id === mergeSourceId) ?? null;
   const mergeSourceCount = mergeSource ? countArticlesInCategory(articles, mergeSource.id) : 0;
 
+  const sessionToDelete = completedSessions.find((s) => s.id === deleteSessionId) ?? null;
+
+  const handleConfirmDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setSessionError(null);
+    setDeletingSession(true);
+    try {
+      await countSessionService.deleteSession(sessionToDelete.id);
+      setDeleteSessionId(null);
+    } catch (err) {
+      setSessionError(err instanceof Error ? err.message : "Onbekende fout.");
+    } finally {
+      setDeletingSession(false);
+    }
+  };
+
   return (
     <div className="stack">
       <h1 className="screen-title">Instellingen</h1>
@@ -201,6 +242,8 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <LegacyImportSection officeId={officeId} />
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Stocklocaties</h2>
@@ -432,6 +475,72 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           </BigButton>
         </div>
       </div>
+
+      <div className="card stack">
+        <h2 style={{ margin: 0 }}>Tellingen</h2>
+        <p className="screen-subtitle" style={{ margin: 0 }}>
+          Afgeronde stocktellingen van dit kantoor. Verwijderen is definitief: de telling, haar
+          resultaten en HISTORIE-regels verdwijnen, en de vorige-tellingbaseline van de betrokken
+          artikelen wordt automatisch hersteld. Artikelen/mastergegevens zelf blijven altijd behouden.
+        </p>
+
+        {sessionError && <div className="error-banner">{sessionError}</div>}
+
+        <div className="stack stack--tight">
+          {completedSessions.length === 0 && (
+            <p className="empty-state">Nog geen afgeronde tellingen voor dit kantoor.</p>
+          )}
+          {completedSessions.map((session) => (
+            <div key={session.id} className="card stack stack--tight location-settings-row">
+              <div className="stack stack--tight stack--row">
+                <span className="location-settings-row__name">{sessionSnapshotName(session)}</span>
+                <span className="screen-subtitle" style={{ margin: 0 }}>
+                  {SESSION_TYPE_LABELS[session.type]} · afgerond op{" "}
+                  {session.completedAt ? new Date(session.completedAt).toLocaleDateString("nl-BE") : "—"}
+                </span>
+              </div>
+              <div className="location-settings-row__actions">
+                <div className="filter-row">
+                  <button
+                    type="button"
+                    className="chip chip--settings"
+                    onClick={() => {
+                      setSessionError(null);
+                      setDeleteSessionId(session.id);
+                    }}
+                  >
+                    Verwijderen
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {sessionToDelete && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>
+              "{sessionSnapshotName(sessionToDelete)}" verwijderen?
+            </p>
+            <p className="screen-subtitle" style={{ margin: 0 }}>
+              Deze telling, haar resultaten en HISTORIE-regels worden definitief verwijderd. De
+              vorige-tellingbaseline van artikelen die enkel hier het laatst fysiek geteld werden,
+              wordt automatisch teruggezet naar hun vorige betrouwbare telling. Deze actie kan niet
+              ongedaan gemaakt worden.
+            </p>
+            <div className="stack">
+              <BigButton variant="primary" disabled={deletingSession} onClick={handleConfirmDeleteSession}>
+                {deletingSession ? "Bezig met verwijderen..." : "Verwijderen bevestigen"}
+              </BigButton>
+              <BigButton variant="ghost" disabled={deletingSession} onClick={() => setDeleteSessionId(null)}>
+                Annuleren
+              </BigButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       {mergeSource && (
         <div className="modal-overlay">

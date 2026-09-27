@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
-import { locationAssignmentService, productCategoryService } from "../../application/container";
+import { countingRepository, locationAssignmentService, productCategoryService } from "../../application/container";
+import { applyAssortmentActive, isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { resolveCategoryLabel } from "../../domain/productCategory";
 import type { Article, Location, ProductCategory } from "../../domain/types";
 import { BigButton } from "./BigButton";
 
-type BulkAction = "ADD" | "REMOVE" | "MOVE" | "SET_CATEGORY";
+type BulkAction = "ADD" | "REMOVE" | "MOVE" | "SET_CATEGORY" | "SET_ASSORTMENT";
 
 const BULK_ACTION_TITLES: Record<BulkAction, string> = {
   ADD: "Locatie toevoegen",
   REMOVE: "Locatie verwijderen",
   MOVE: "Verplaatsen naar",
   SET_CATEGORY: "Productgamma wijzigen",
+  SET_ASSORTMENT: "Assortiment wijzigen",
 };
 
 interface ArticleBulkListProps {
@@ -53,6 +55,7 @@ export function ArticleBulkList({
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
   const [categoryTarget, setCategoryTarget] = useState<string | null>(null);
+  const [assortmentTarget, setAssortmentTarget] = useState<boolean | null>(null);
   const [quickAddArticleId, setQuickAddArticleId] = useState<string | null>(null);
   const [quickAddLocationId, setQuickAddLocationId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +88,7 @@ export function ArticleBulkList({
     setBulkAction(null);
     setMoveTarget(null);
     setCategoryTarget(null);
+    setAssortmentTarget(null);
   }
 
   async function runCategoryBulkAction(categoryId: string) {
@@ -96,6 +100,30 @@ export function ArticleBulkList({
       setSelectedIds(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Onbekende fout bij het wijzigen van het productgamma.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Sprint 3.3 §1: bulk "office assignment" — de geselecteerde artikelen in
+   * één keer actief/inactief maken in het assortiment van dit kantoor. Zelfde
+   * directe-repository-precedent als ArticleDetailPage's "Algemeen"-kaart
+   * (geen apart service-object nodig voor één simpele veldwijziging); de pure
+   * berekening zelf zit in `domain/articleAssortment.ts#applyAssortmentActive`.
+   */
+  async function runAssortmentBulkAction(active: boolean) {
+    setError(null);
+    setBusy(true);
+    try {
+      const updated = applyAssortmentActive(articles, selectedIds, active);
+      if (updated.length > 0) {
+        await countingRepository.saveArticles(updated);
+      }
+      closeBulkModal();
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout bij het wijzigen van het assortiment.");
     } finally {
       setBusy(false);
     }
@@ -191,6 +219,9 @@ export function ArticleBulkList({
             <button type="button" className="chip" onClick={() => setBulkAction("SET_CATEGORY")}>
               Productgamma wijzigen
             </button>
+            <button type="button" className="chip" onClick={() => setBulkAction("SET_ASSORTMENT")}>
+              Assortiment wijzigen
+            </button>
             <button type="button" className="chip" onClick={() => setSelectedIds(new Set())}>
               Selectie wissen
             </button>
@@ -262,6 +293,42 @@ export function ArticleBulkList({
                   </BigButton>
                   <BigButton variant="ghost" disabled={busy} onClick={() => setCategoryTarget(null)}>
                     Terug
+                  </BigButton>
+                </div>
+              </>
+            ) : bulkAction === "SET_ASSORTMENT" && assortmentTarget !== null ? (
+              <>
+                <p style={{ margin: 0, fontWeight: 700 }}>Assortiment wijzigen bevestigen</p>
+                <p className="screen-subtitle" style={{ margin: 0 }}>
+                  {selectedIds.size} artikel(en) worden {assortmentTarget ? "actief" : "inactief"} gemaakt in het
+                  assortiment van dit kantoor.
+                  {!assortmentTarget &&
+                    " Ze blijven volledig zichtbaar in historische tellingen en analyses, maar worden vanaf nu niet meer opgenomen in nieuwe tellingen."}
+                </p>
+                <div className="stack">
+                  <BigButton
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => runAssortmentBulkAction(assortmentTarget)}
+                  >
+                    Bevestigen
+                  </BigButton>
+                  <BigButton variant="ghost" disabled={busy} onClick={() => setAssortmentTarget(null)}>
+                    Terug
+                  </BigButton>
+                </div>
+              </>
+            ) : bulkAction === "SET_ASSORTMENT" ? (
+              <>
+                <p style={{ margin: 0, fontWeight: 700 }}>
+                  {BULK_ACTION_TITLES[bulkAction]} — {selectedIds.size} artikel(en) geselecteerd
+                </p>
+                <div className="stack stack--tight">
+                  <BigButton variant="secondary" disabled={busy} onClick={() => setAssortmentTarget(true)}>
+                    Actief in assortiment
+                  </BigButton>
+                  <BigButton variant="secondary" disabled={busy} onClick={() => setAssortmentTarget(false)}>
+                    Inactief (historisch)
                   </BigButton>
                 </div>
               </>
@@ -383,6 +450,9 @@ function ArticleRow({
             <span>{categoryLabel}</span>
             <span>Telfrequentie: {article.rawCountPeriod ?? "—"}</span>
             <span>Vorige telling: {article.previousCount ?? "—"}</span>
+            {!isArticleActiveInAssortment(article) && (
+              <span className="review-row__badge review-row__badge--not-counted">Inactief (historisch)</span>
+            )}
           </div>
         </button>
 

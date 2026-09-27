@@ -8,7 +8,9 @@ import {
 import { CountSessionService } from "./CountSessionService";
 import { CountingService } from "./CountingService";
 import { InMemoryCountingRepository } from "./InMemoryCountingRepository";
+import { LegacyImportService } from "./LegacyImportService";
 import { ProductCategoryService } from "./ProductCategoryService";
+import type { LegacyStockRow } from "../../domain/legacyImport";
 import type { Article, Office } from "../../domain/types";
 
 /**
@@ -91,9 +93,9 @@ describe("ComparisonService", () => {
 
   it("gooit ComparisonSessionNotFoundError voor een onbestaande sessie", async () => {
     const sessionB = await completeSession(5);
-    await expect(comparisonService.compareSessions("does-not-exist", sessionB.id)).rejects.toBeInstanceOf(
-      ComparisonSessionNotFoundError,
-    );
+    await expect(
+      comparisonService.compareSessions("office-1", "does-not-exist", sessionB.id),
+    ).rejects.toBeInstanceOf(ComparisonSessionNotFoundError);
   });
 
   it("gooit ComparisonOfficeMismatchError wanneer A en B van verschillende kantoren zijn", async () => {
@@ -109,9 +111,9 @@ describe("ComparisonService", () => {
     await countingService.completeLocation(otherOfficeSession.id, "office-2:loc-1");
     await sessionService.completeSession(otherOfficeSession.id);
 
-    await expect(comparisonService.compareSessions(sessionA.id, otherOfficeSession.id)).rejects.toBeInstanceOf(
-      ComparisonOfficeMismatchError,
-    );
+    await expect(
+      comparisonService.compareSessions("office-1", sessionA.id, otherOfficeSession.id),
+    ).rejects.toBeInstanceOf(ComparisonOfficeMismatchError);
   });
 
   it("legacy-sessie (geen FinalizedSessionResult): uitgesloten uit getComparisonOptions, en compareSessions gooit ComparisonNotAvailableError", async () => {
@@ -132,9 +134,9 @@ describe("ComparisonService", () => {
     expect(sessions.map((s) => s.sessionId)).not.toContain(legacySession.id);
     expect(sessions.map((s) => s.sessionId)).toContain(recentSession.id);
 
-    await expect(comparisonService.compareSessions(legacySession.id, recentSession.id)).rejects.toBeInstanceOf(
-      ComparisonNotAvailableError,
-    );
+    await expect(
+      comparisonService.compareSessions("office-1", legacySession.id, recentSession.id),
+    ).rejects.toBeInstanceOf(ComparisonNotAvailableError);
   });
 
   it("getDefaultSelection kiest B = geopende sessie, A = onmiddellijk voorafgaande bruikbare telling", async () => {
@@ -154,7 +156,7 @@ describe("ComparisonService", () => {
     const sessionA = await completeSession(4); // €40
     const sessionB = await completeSession(9); // €90
 
-    const before = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    const before = await comparisonService.compareSessions("office-1", sessionA.id, sessionB.id);
     expect(before.kpis.stockValue.valueA).toBe(40);
     expect(before.kpis.stockValue.valueB).toBe(90);
 
@@ -163,7 +165,7 @@ describe("ComparisonService", () => {
       { ...liveArticle, costPrice: 999, productGroup: "Nieuwe groep", stockClassification: "OBSOLETE" },
     ]);
 
-    const after = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    const after = await comparisonService.compareSessions("office-1", sessionA.id, sessionB.id);
     expect(after).toEqual(before);
     expect(after.kpis.stockValue.valueA).toBe(40);
     expect(after.kpis.stockValue.valueB).toBe(90);
@@ -174,7 +176,7 @@ describe("ComparisonService", () => {
     const sessionA = await completeSession(4);
     const sessionB = await completeSession(9);
 
-    const before = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    const before = await comparisonService.compareSessions("office-1", sessionA.id, sessionB.id);
     // A1 heeft al `productGroup: "GROEP"` -> de eenmalige migratie (spec §4)
     // heeft dit bij deze EERSTE aanroep al gebootstrapt tot een canonieke
     // "GROEP"-categorie.
@@ -188,11 +190,69 @@ describe("ComparisonService", () => {
     )!;
     await productCategoryService.assignArticles("office-1", ["office-1:A1"], batterijen.id);
 
-    const after = await comparisonService.compareSessions(sessionA.id, sessionB.id);
+    const after = await comparisonService.compareSessions("office-1", sessionA.id, sessionB.id);
     expect(after.articles[0].productCategory).toBe("Batterijen");
     expect(after.articles[0].productCategoryId).toBe(batterijen.id);
     // Bevroren hoeveelheid/waarde blijven exact ongewijzigd — enkel de groepering verandert.
     expect(after.kpis.stockValue.valueA).toBe(before.kpis.stockValue.valueA);
     expect(after.kpis.stockValue.valueB).toBe(before.kpis.stockValue.valueB);
+  });
+
+  // ---------------------------------------------------------------------
+  // Sprint 3.3 §1 — legacy snapshots bruikbaar in Vergelijken (test #7 van
+  // de vereiste lijst): "Monday scenario" — 01/09/2026 legacy vs de eerste
+  // echte afgeronde app-telling. Gebruikt de ECHTE `LegacyImportService`
+  // (zelfde testfilosofie als de rest van dit bestand: nooit handgeschreven
+  // FinalizedSessionResult-/StockHistoryEntry-fixtures voor wat een echte
+  // service ook kan opbouwen).
+  // ---------------------------------------------------------------------
+  it("Monday-scenario: legacy periode 01/09/2026 kan vergeleken worden met de eerste echte afgeronde app-telling", async () => {
+    const legacyImportService = new LegacyImportService(repository);
+    const legacyRows: LegacyStockRow[] = [
+      {
+        periodKey: "2026-09-01",
+        sourceProductGroup: "GROEP",
+        description: "Test artikel",
+        articleNumber: "A1",
+        originalCostPrice: 7,
+        quantity: 20,
+        obsolete: false,
+        sourceRef: "legacy-sheet!A1",
+      },
+    ];
+    await legacyImportService.commit("office-1", legacyRows);
+
+    const mondaySession = await completeSession(15); // eerste echte afgeronde app-telling, €150
+
+    const { sessions } = await comparisonService.getComparisonOptions("office-1");
+    const legacyOption = sessions.find((s) => s.provenance === "LEGACY_IMPORT");
+    expect(legacyOption).toBeDefined();
+    expect(legacyOption!.sessionName).toBe("LEGACY 01/09/2026");
+
+    const comparison = await comparisonService.compareSessions(
+      "office-1",
+      legacyOption!.sessionId,
+      mondaySession.id,
+    );
+
+    expect(comparison.headerA.provenance).toBe("LEGACY_IMPORT");
+    expect(comparison.headerB.provenance).toBe("APP_COUNT");
+    // Legacy: 20 stuks × €7 = €140 (oorspronkelijke historische kostprijs,
+    // NOOIT de huidige/afgewaardeerde prijs). Maandag: 15 stuks × €10 = €150.
+    expect(comparison.kpis.stockValue.valueA).toBe(140);
+    expect(comparison.kpis.stockValue.valueB).toBe(150);
+    const row = comparison.articles.find((a) => a.articleId === "office-1:A1")!;
+    expect(row.quantityA).toBe(20);
+    expect(row.quantityB).toBe(15);
+    // De hoeveelheid verschilt tussen de legacy periode (20) en B (15), dus
+    // de opeenvolgende-tellingen-keten stopt onmiddellijk bij B zelf — B is
+    // een ECHTE, fysiek getelde app-telling, dus telt terecht 1 keer mee als
+    // "fysiek geteld" (geen fabricatie: dit is gewoon waar). De keten gaat
+    // hier nooit tot bij de legacy-kant, precies omdat de hoeveelheid
+    // verschilt — zie `comparison.test.ts`s dedicated test voor het geval
+    // waarin de keten wél door een legacy periode loopt (die telt daar
+    // terecht NOOIT mee als fysiek geteld).
+    expect(row.consecutiveUnchangedCount).toBe(1);
+    expect(row.consecutiveUnchangedPhysicallyCountedCount).toBe(1);
   });
 });

@@ -7,9 +7,12 @@ import { ImportService } from "../../application/services/ImportService";
 import { CountSessionService } from "../../application/services/CountSessionService";
 import { CountingService } from "../../application/services/CountingService";
 import { ExportService } from "../../application/services/ExportService";
+import { LegacyImportService } from "../../application/services/LegacyImportService";
 import { InMemoryCountingRepository } from "../../application/services/InMemoryCountingRepository";
+import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { renameLocation, reorderLocations } from "../../domain/locations";
 import { getStockClassification } from "../../domain/stockClassification";
+import type { LegacyStockRow } from "../../domain/legacyImport";
 
 /**
  * Production-pilot-readiness sprint punt 2 ("Fresh repository roundtrip") —
@@ -49,6 +52,7 @@ function makeDevice() {
     sessionService: new CountSessionService(repository),
     countingService: new CountingService(repository),
     exportService: new ExportService(repository, new ExcelStockResultExporter()),
+    legacyImportService: new LegacyImportService(repository),
   };
 }
 
@@ -75,8 +79,47 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
       );
       await deviceA.repository.saveOffice(reordered);
 
+      // Sprint 3.3 §6 ("Excel portability"): office-assortment-vlaggen
+      // (§1) moeten dezelfde export/import-cyclus overleven als
+      // stockClassification/categoryId — additief, via de kolom
+      // "Assortiment actief" in ARTIKEL (zie `parseArtikel.ts`/
+      // `ExcelStockResultExporter.ts`). Bewust VÓÓR het starten van de
+      // sessie inactief gemaakt, zodat het meteen ook buiten de scope van
+      // de nieuwe sessie valt (spec §2, `selectArticlesForNewCount`).
+      const articlesBeforeSession = await deviceA.repository.getArticles("lokeren");
+      const historicalOnlyArticle = articlesBeforeSession[articlesBeforeSession.length - 1];
+      if (!historicalOnlyArticle) throw new Error("geen artikelen gevonden voor kantoor 'lokeren'");
+      await deviceA.repository.saveArticles([{ ...historicalOnlyArticle, assortmentActive: false }]);
+
+      // Sprint 3.3 §3/§6 ("legacy historische import" + "Excel portability"):
+      // een legacy-snapshot (status LEGACY, source LEGACY_IMPORT — nooit een
+      // echte CountSession) moet dezelfde export/import-cyclus overleven als
+      // elke andere HISTORIE-regel, inclusief haar eigen nieuwe "Bron"-kolom
+      // (zie `parseHistorie.ts#HISTORIE_SOURCE_HEADER`). Bewust een rij ZONDER
+      // artikelnummer (dus onopgelost -> eigen nieuw, historisch/inactief
+      // artikel) — dat dekt meteen ook `plan.newArticles` in dit end-to-end pad.
+      const legacyRows: LegacyStockRow[] = [
+        {
+          periodKey: "2025-03-31",
+          sourceProductGroup: "Legacy testgroep",
+          description: "Legacy testartikel vóór deze app",
+          articleNumber: null,
+          originalCostPrice: 12.5,
+          quantity: 4,
+          obsolete: false,
+          sourceRef: "TEST-LEGACY!A1",
+        },
+      ];
+      await deviceA.legacyImportService.commit("lokeren", legacyRows);
+      const legacyEntryBeforeExport = (await deviceA.repository.getStockHistoryEntries("lokeren")).find(
+        (e) => e.status === "LEGACY",
+      );
+      expect(legacyEntryBeforeExport).toBeDefined();
+      expect(legacyEntryBeforeExport!.source).toBe("LEGACY_IMPORT");
+
       const session = await deviceA.sessionService.startSession("lokeren", "MONTHLY");
       expect(session.articleIds.length).toBeGreaterThan(0);
+      expect(session.articleIds).not.toContain(historicalOnlyArticle.id);
 
       const allArticlesA = await deviceA.repository.getArticles("lokeren");
       const articleByIdA = new Map(allArticlesA.map((a) => [a.id, a]));
@@ -158,6 +201,13 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
       const articlesB = await deviceB.repository.getArticles("lokeren");
       expect(articlesB).toHaveLength(allArticlesA.length);
 
+      // --- Sprint 3.3 §6: office-assortment-vlag hersteld, artikel blijft
+      // wél gewoon raadpleegbaar (spec: "historical appearances must remain
+      // visible even if the article is now inactive") ---
+      const historicalOnlyArticleB = articlesB.find((a) => a.id === historicalOnlyArticle.id);
+      expect(historicalOnlyArticleB).toBeDefined();
+      expect(isArticleActiveInAssortment(historicalOnlyArticleB!)).toBe(false);
+
       // --- Voorraadclassificatie hersteld (Sprint 2 §14) ---
       const targetArticleClassificationCheck = articlesB.find((a) => a.id === targetArticleId);
       expect(targetArticleClassificationCheck).toBeDefined();
@@ -173,6 +223,21 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
       expect(historyB.length).toBeGreaterThan(0);
       expect(importSummaryB.lastHistoricalCount).not.toBeNull();
 
+      // --- Sprint 3.3 §3/§6: de legacy-HISTORIE-regel (status LEGACY, source
+      // LEGACY_IMPORT) en haar bijhorende nieuwe historisch/inactieve artikel
+      // overleven de volledige export/import-cyclus, met haar eigen "Bron"-
+      // kolom correct hersteld — nooit stilzwijgend gedegradeerd tot een
+      // gewone "APP"-regel/GETELD-status. ---
+      const legacyEntryB = historyB.find((e) => e.status === "LEGACY");
+      expect(legacyEntryB).toBeDefined();
+      expect(legacyEntryB!.source).toBe("LEGACY_IMPORT");
+      expect(legacyEntryB!.sessionName).toBe("LEGACY 31/03/2025");
+      expect(legacyEntryB!.totalCount).toBe(4);
+      const legacyArticleB = articlesB.find((a) => a.id === legacyEntryB!.articleId);
+      expect(legacyArticleB).toBeDefined();
+      expect(legacyArticleB!.status).toBe("INACTIVE");
+      expect(legacyArticleB!.assortmentActive).toBe(false);
+
       // --- Geleerde ArticleLocationAssignment hersteld (punt 1: kernvereiste) ---
       const assignmentsB = await deviceB.repository.getArticleLocationAssignments("lokeren");
       const targetAssignmentB = assignmentsB.find(
@@ -183,6 +248,9 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
 
       // --- Nieuwe telling starten: artikel wordt op de juiste locatie verwacht ---
       const nextSession = await deviceB.sessionService.startSession("lokeren", "MONTHLY");
+      // Het assortiment-inactieve artikel blijft ook op dit VERSE toestel
+      // buiten de scope van een nieuwe telling.
+      expect(nextSession.articleIds).not.toContain(historicalOnlyArticle.id);
       const expectedAtRenamedLocation = await deviceB.countingService.getExpectedArticleIds(
         "lokeren",
         "lokeren:loc-3",

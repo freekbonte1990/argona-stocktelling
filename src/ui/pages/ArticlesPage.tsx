@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ARTICLE_ASSORTMENT_FILTER_LABELS,
   ARTICLE_LIST_SORT_MODE_LABELS,
   ARTICLE_STATUS_FILTER_LABELS,
   DEFAULT_ARTICLE_LIST_FILTERS,
@@ -8,6 +9,7 @@ import {
   countActiveArticleListFilters,
   filterArticlesForList,
   sortArticlesForList,
+  type ArticleAssortmentFilterValue,
   type ArticleCategoryFilterValue,
   type ArticleListFilters,
   type ArticleListSortMode,
@@ -172,6 +174,12 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
               onRemove={() => setFilters((prev) => ({ ...prev, status: null }))}
             />
           )}
+          {filters.assortment !== "ALL" && (
+            <RemovableChip
+              label={ARTICLE_ASSORTMENT_FILTER_LABELS[filters.assortment]}
+              onRemove={() => setFilters((prev) => ({ ...prev, assortment: "ALL" }))}
+            />
+          )}
         </div>
       )}
 
@@ -279,6 +287,29 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
                       {ARTICLE_STATUS_FILTER_LABELS[status]}
                     </option>
                   ))}
+                </select>
+              </label>
+
+              <label className="filter-field">
+                <span className="filter-field__label">Assortiment</span>
+                <select
+                  className="search-input"
+                  value={filters.assortment}
+                  onChange={(e) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      assortment: e.target.value as ArticleAssortmentFilterValue,
+                    }))
+                  }
+                >
+                  <option value="ALL">Alle artikelen</option>
+                  {(Object.keys(ARTICLE_ASSORTMENT_FILTER_LABELS) as Exclude<ArticleAssortmentFilterValue, "ALL">[]).map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {ARTICLE_ASSORTMENT_FILTER_LABELS[value]}
+                      </option>
+                    ),
+                  )}
                 </select>
               </label>
             </div>

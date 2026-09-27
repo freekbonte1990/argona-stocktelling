@@ -11,7 +11,8 @@ import {
   type ReliableHistoryEntry,
 } from "./comparison";
 import { PRODUCT_CATEGORY_FALLBACK, type ArticleCategoryResolution } from "./productCategory";
-import type { ArticleSnapshot, ArticleSnapshotStatus, StockSnapshot } from "./stockSnapshot";
+import { buildLegacyPeriodSnapshot } from "./stockSnapshot";
+import type { ArticleSnapshot, ArticleSnapshotStatus, StockHistoryEntry, StockSnapshot } from "./stockSnapshot";
 import type { Article } from "./types";
 
 /** Testhelper (Sprint 3.2 §12), zelfde patroon als analysis.test.ts: expliciete `articleId -> categorie`-resolutiemap. */
@@ -90,6 +91,7 @@ function makeInput(sessionId: string, sessionName: string, snapshot: StockSnapsh
     snapshotDate: snapshot.snapshotDate,
     completedAt: `${snapshot.snapshotDate}T12:00:00.000Z`,
     snapshot,
+    provenance: "APP_COUNT",
   };
 }
 
@@ -610,5 +612,222 @@ describe("Filters/sortering van de volledige detailtabel (spec §12)", () => {
     expect(byValue[0].articleNumber).toBe("N2");
     const byDescription = sortArticleComparisonRows(rows, "DESCRIPTION");
     expect(byDescription[0].articleNumber).toBe("N2"); // "Alfa" < "Beta"
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sprint 3.3 §1 — legacy snapshots bruikbaar in Analyse/Vergelijken, ZONDER
+// legacy periodes als fake CountSessions te modelleren. `buildLegacyPeriodSnapshot`
+// (stockSnapshot.ts) synthetiseert een `StockSnapshot`-vormig object uit
+// reeds geïmporteerde `StockHistoryEntry`-rijen; vanaf dat punt is een legacy
+// periode voor `buildSessionComparison` gewoon een `ComparisonSnapshotInput`
+// zoals elke andere — vandaar dat deze tests rechtstreeks tegen
+// `buildSessionComparison` draaien, exact zoals de rest van dit bestand.
+// ---------------------------------------------------------------------------
+
+function makeLegacyHistoryEntry(
+  periodLabel: string,
+  isoDate: string,
+  articleId: string,
+  articleNumber: string,
+  overrides: Partial<StockHistoryEntry> = {},
+): StockHistoryEntry {
+  return {
+    countDate: isoDate,
+    sessionType: "FULL",
+    sessionName: `LEGACY ${periodLabel}`,
+    articleId,
+    articleNumber,
+    description: `Legacy ${articleNumber}`,
+    totalCount: 10,
+    previousCount: null,
+    differenceQuantity: null,
+    costPrice: 5,
+    differenceAmount: null,
+    status: "LEGACY",
+    locationNames: [],
+    source: "LEGACY_IMPORT",
+    sourceProductGroup: "OUDE BRON GROEP",
+    ...overrides,
+  };
+}
+
+function makeLegacyInput(
+  periodLabel: string,
+  isoDate: string,
+  entries: StockHistoryEntry[],
+  articlesById: ReadonlyMap<string, Article>,
+): ComparisonSnapshotInput {
+  const sessionId = `legacy:${isoDate}`;
+  const snapshot = buildLegacyPeriodSnapshot(sessionId, periodLabel, isoDate, entries, articlesById);
+  return {
+    sessionId,
+    sessionName: snapshot.sessionName,
+    sessionType: "FULL",
+    snapshotDate: isoDate,
+    completedAt: isoDate,
+    snapshot,
+    provenance: "LEGACY_IMPORT",
+  };
+}
+
+describe("Sprint 3.3 §1 — legacy snapshots in Analyse/Vergelijken (zonder fake CountSessions)", () => {
+  it("test 1: LEGACY A -> APP B vergelijking werkt, A duidelijk gelabeld met provenance LEGACY_IMPORT", () => {
+    const article = makeArticle("A1", { costPrice: 2 }); // huidige levende kostprijs — mag nooit de legacy-kant beïnvloeden
+    const articlesById = new Map([[article.id, article]]);
+    const inputA = makeLegacyInput(
+      "30/06/2026",
+      "2026-06-30",
+      [makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { totalCount: 10, costPrice: 7 })],
+      articlesById,
+    );
+    const snapB = makeSnapshot("s-b", "2026-09 Maand", [makeRow(article, { quantity: 15 })]);
+    const inputB = makeInput("s-b", "2026-09 Maand", snapB);
+    const categoryResolution = resolution({ [article.id]: "G1" });
+
+    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), categoryResolution);
+
+    expect(comparison.headerA.provenance).toBe("LEGACY_IMPORT");
+    expect(comparison.headerB.provenance).toBe("APP_COUNT");
+    const row = comparison.articles.find((r) => r.articleId === article.id)!;
+    expect(row.quantityA).toBe(10);
+    expect(row.quantityB).toBe(15);
+    expect(row.costPriceA).toBe(7);
+  });
+
+  it("test 2: LEGACY A -> LEGACY B vergelijking werkt, zonder enige echte sessie aan beide kanten", () => {
+    const article = makeArticle("A1", { costPrice: 2 });
+    const articlesById = new Map([[article.id, article]]);
+    const inputA = makeLegacyInput(
+      "31/03/2026",
+      "2026-03-31",
+      [makeLegacyHistoryEntry("31/03/2026", "2026-03-31", article.id, "A1", { totalCount: 8, costPrice: 6 })],
+      articlesById,
+    );
+    const inputB = makeLegacyInput(
+      "30/06/2026",
+      "2026-06-30",
+      [makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { totalCount: 10, costPrice: 7 })],
+      articlesById,
+    );
+    const history: ReliableHistoryEntry[] = [
+      {
+        sessionId: inputB.sessionId,
+        sessionName: inputB.sessionName,
+        articlesById: new Map(inputB.snapshot.articles.map((a) => [a.articleId, { totalCount: a.totalCount, status: a.status }])),
+      },
+      {
+        sessionId: inputA.sessionId,
+        sessionName: inputA.sessionName,
+        articlesById: new Map(inputA.snapshot.articles.map((a) => [a.articleId, { totalCount: a.totalCount, status: a.status }])),
+      },
+    ];
+    const categoryResolution = resolution({ [article.id]: "G1" });
+
+    const comparison = buildSessionComparison(inputA, inputB, history, categoryResolution);
+
+    expect(comparison.headerA.provenance).toBe("LEGACY_IMPORT");
+    expect(comparison.headerB.provenance).toBe("LEGACY_IMPORT");
+    const row = comparison.articles.find((r) => r.articleId === article.id)!;
+    expect(row.quantityA).toBe(8);
+    expect(row.quantityB).toBe(10);
+    expect(row.quantityDifference).toBe(2);
+  });
+
+  it("test 3: gebruikt ALTIJD de oorspronkelijke historische kostprijs van de legacy-rij, nooit de huidige levende kostprijs", () => {
+    const article = makeArticle("A1", { costPrice: 999 }); // intussen compleet gewijzigde huidige kostprijs
+    const articlesById = new Map([[article.id, article]]);
+    const entries = [makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { totalCount: 4, costPrice: 12.5 })];
+    const snapshot = buildLegacyPeriodSnapshot("legacy:2026-06-30", "30/06/2026", "2026-06-30", entries, articlesById);
+
+    const row = snapshot.articles.find((a) => a.articleId === article.id)!;
+    expect(row.costPrice).toBe(12.5); // bevroren historische kostprijs
+    expect(row.amount).toBe(50); // 4 x 12.5, nooit herberekend met de huidige 999
+    expect(row.article.costPrice).toBe(999); // het onderliggende (huidige) Article-record blijft zelf ongewijzigd
+  });
+
+  it("test 4: Productgamma wordt canoniek/retroactief opgelost via categoryResolution, nooit via de bevroren bron-productgroep", () => {
+    const article = makeArticle("A1", { productGroup: "HUIDIGE GROEP" });
+    const articlesById = new Map([[article.id, article]]);
+    const inputA = makeLegacyInput(
+      "30/06/2026",
+      "2026-06-30",
+      [makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { sourceProductGroup: "OUDE BRON GROEP" })],
+      articlesById,
+    );
+    const snapB = makeSnapshot("s-b", "2026-09 Maand", [makeRow(article, { quantity: 5 })]);
+    const inputB = makeInput("s-b", "2026-09 Maand", snapB);
+    const categoryResolution = resolution({ [article.id]: "Kabels" }); // de HUIDIGE, canonieke categorie
+
+    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), categoryResolution);
+
+    const row = comparison.articles.find((r) => r.articleId === article.id)!;
+    // Canoniek/retroactief (spec: expliciet toegestaan) — nooit "OUDE BRON GROEP" of "HUIDIGE GROEP".
+    expect(row.productCategory).toBe("Kabels");
+  });
+
+  it("test 5: ontbrekende legacy-waarden (hoeveelheid/kostprijs) blijven onbekend, worden nooit fictief 0", () => {
+    const article = makeArticle("A1");
+    const articlesById = new Map([[article.id, article]]);
+    const inputA = makeLegacyInput(
+      "30/06/2026",
+      "2026-06-30",
+      [makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { totalCount: null, costPrice: null })],
+      articlesById,
+    );
+    const snapB = makeSnapshot("s-b", "2026-09 Maand", [makeRow(article, { quantity: 5 })]);
+    const inputB = makeInput("s-b", "2026-09 Maand", snapB);
+    const categoryResolution = resolution({ [article.id]: "G1" });
+
+    const comparison = buildSessionComparison(inputA, inputB, historyWithOnlyB(inputB), categoryResolution);
+
+    const row = comparison.articles.find((r) => r.articleId === article.id)!;
+    expect(row.quantityA).toBeNull();
+    expect(row.costPriceA).toBeNull();
+    expect(row.stockValueA).toBeNull();
+    // Enkel gekend wanneer BEIDE kanten gekend zijn — nooit fictief 0/berekend met een ontbrekende zijde.
+    expect(row.quantityDifference).toBeNull();
+    expect(row.valueDifference).toBeNull();
+    expect(row.priceDifferencePerUnit).toBeNull();
+  });
+
+  it("test 6: een legacy periode draagt nooit fysiek-getelde metadata bij aan de opeenvolgende-tellingen-keten", () => {
+    const article = makeArticle("A1");
+    const articlesById = new Map([[article.id, article]]);
+    const legacyOld = makeLegacyHistoryEntry("31/03/2026", "2026-03-31", article.id, "A1", { totalCount: 10 });
+    const legacyMid = makeLegacyHistoryEntry("30/06/2026", "2026-06-30", article.id, "A1", { totalCount: 10 });
+    const inputA = makeLegacyInput("30/06/2026", "2026-06-30", [legacyMid], articlesById);
+    // B is een ECHTE, fysiek getelde app-sessie met dezelfde hoeveelheid (10) —
+    // de keten (B, legacyMid, legacyOld) is dus 3 opeenvolgend-ongewijzigd,
+    // maar ENKEL B mag als "fysiek geteld" meetellen.
+    const snapB = makeSnapshot("s-b", "2026-09 Maand", [makeRow(article, { quantity: 10, status: "GETELD" })]);
+    const inputB = makeInput("s-b", "2026-09 Maand", snapB);
+    const history: ReliableHistoryEntry[] = [
+      {
+        sessionId: inputB.sessionId,
+        sessionName: inputB.sessionName,
+        articlesById: new Map([[article.id, { totalCount: 10, status: "GETELD" as const }]]),
+      },
+      {
+        sessionId: inputA.sessionId,
+        sessionName: inputA.sessionName,
+        articlesById: new Map(inputA.snapshot.articles.map((a) => [a.articleId, { totalCount: a.totalCount, status: a.status }])),
+      },
+      {
+        sessionId: "legacy:2026-03-31",
+        sessionName: legacyOld.sessionName,
+        articlesById: new Map([[article.id, { totalCount: legacyOld.totalCount, status: legacyOld.status }]]),
+      },
+    ];
+    const categoryResolution = resolution({ [article.id]: "G1" });
+
+    const comparison = buildSessionComparison(inputA, inputB, history, categoryResolution);
+
+    const row = comparison.articles.find((r) => r.articleId === article.id)!;
+    expect(row.consecutiveUnchangedCount).toBe(3);
+    // Geen enkele gefabriceerde telkwaliteit voor de 2 legacy-periodes in de
+    // keten: enkel de ene ECHTE app-sessie (B) telt mee als "fysiek geteld".
+    expect(row.consecutiveUnchangedPhysicallyCountedCount).toBe(1);
+    expect(row.isObsoleteCandidate).toBe(true);
   });
 });
