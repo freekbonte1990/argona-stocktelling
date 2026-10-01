@@ -112,6 +112,66 @@ describe("sessionSnapshotName", () => {
   });
 });
 
+describe("sessionSnapshotName — coulanceperiode (telling kort na een periodegrens sluit de VORIGE periode af)", () => {
+  /**
+   * Gerapporteerde bug: een kwartaaltelling gestart/afgerond op 01/10 kreeg
+   * "2026-Q4 Kwartaal" i.p.v. het verwachte "2026-Q3 Kwartaal" — in de
+   * praktijk vindt de fysieke Q3-telling plaats BEGIN oktober, niet op
+   * 30 september, en moet dus nog Q3 heten. Bevestigde regel: de eerste 14
+   * kalenderdagen na een periodegrens horen nog bij de vorige periode, voor
+   * MONTHLY/QUARTERLY/YEARLY (niet voor FULL, dat kent geen periode-cyclus).
+   */
+  it("kwartaaltelling op 01/10 (dag 1 van Q4) -> '2026-Q3 Kwartaal' (de gerapporteerde bug)", () => {
+    const session = makeSession({ type: "QUARTERLY", completedAt: "2026-10-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-Q3 Kwartaal");
+  });
+
+  it("kwartaaltelling op 14/10 (laatste dag van de coulance) -> nog steeds '2026-Q3 Kwartaal'", () => {
+    const session = makeSession({ type: "QUARTERLY", completedAt: "2026-10-14T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-Q3 Kwartaal");
+  });
+
+  it("kwartaaltelling op 15/10 (net buiten de coulance) -> '2026-Q4 Kwartaal'", () => {
+    const session = makeSession({ type: "QUARTERLY", completedAt: "2026-10-15T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-Q4 Kwartaal");
+  });
+
+  it("kwartaaltelling op 01/01 (jaarovergang, dag 1 van Q1) -> Q4 van het VORIGE jaar", () => {
+    const session = makeSession({ type: "QUARTERLY", completedAt: "2027-01-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-Q4 Kwartaal");
+  });
+
+  it("maandtelling op 01/10 (dag 1 van de maand) -> '2026-09 Maand'", () => {
+    const session = makeSession({ type: "MONTHLY", completedAt: "2026-10-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-09 Maand");
+  });
+
+  it("maandtelling op 15/10 (net buiten de coulance) -> '2026-10 Maand'", () => {
+    const session = makeSession({ type: "MONTHLY", completedAt: "2026-10-15T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-10 Maand");
+  });
+
+  it("maandtelling op 01/01 (jaarovergang) -> december van het vorige jaar", () => {
+    const session = makeSession({ type: "MONTHLY", completedAt: "2027-01-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-12 Maand");
+  });
+
+  it("jaartelling op 01/01 (dag 1 van het nieuwe jaar) -> het VORIGE jaar", () => {
+    const session = makeSession({ type: "YEARLY", completedAt: "2027-01-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026 Jaar");
+  });
+
+  it("jaartelling op 15/01 (net buiten de coulance) -> het nieuwe jaar", () => {
+    const session = makeSession({ type: "YEARLY", completedAt: "2027-01-15T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2027 Jaar");
+  });
+
+  it("volledige/ad-hoc telling kent GEEN coulanceperiode — blijft zuiver kalenderdatum, ook op dag 1", () => {
+    const session = makeSession({ type: "FULL", completedAt: "2026-10-01T10:00:00.000Z" });
+    expect(sessionSnapshotName(session)).toBe("2026-10 Volledig");
+  });
+});
+
 describe("buildSessionSnapshot — maandtelling maakt een volledige snapshot", () => {
   it("bevat ALLE artikelen van het kantoor, niet enkel de sessiescope", () => {
     const monthlyArticle = makeArticle("A1", { countPeriod: "MONTHLY", previousCount: 10 });

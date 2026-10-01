@@ -193,8 +193,28 @@ function isoDateFromLocalDate(date: Date): string {
 }
 
 /**
+ * Een periodieke telling gebeurt in de praktijk NIET op de kalendergrens
+ * zelf, maar kort ERNA (de fysieke telling van Q3 vindt begin oktober
+ * plaats, niet op 30 september; een maandtelling van september begin
+ * oktober; een jaartelling van 2026 begin januari 2027) — zo'n telling
+ * sluit de ZONET AFGESLOTEN periode af en moet dus nog diens naam dragen,
+ * niet die van de nieuwe periode waar de kalenderdatum toevallig al in
+ * valt. Vastgesteld (bug): een kwartaaltelling gestart/afgerond op 01/10
+ * kreeg voorheen "Q4" i.p.v. het verwachte "Q3" — en dezelfde coulance is
+ * ook gevraagd voor MONTHLY/YEARLY. Coulanceperiode: de eerste 14
+ * kalenderdagen ná het begin van een nieuwe periode tellen nog mee als
+ * afsluiting van de VORIGE periode; vanaf dag 15 is het een telling van de
+ * nieuwe periode. Geldt voor MONTHLY (elke maandgrens), QUARTERLY (enkel de
+ * eerste maand van een kwartaal: januari/april/juli/oktober) en YEARLY
+ * (enkel januari). Bewust NIET voor FULL — dat is een ad-hoc/volledige
+ * telling zonder vaste periode-cyclus, geen gevraagde wijziging daar.
+ */
+const PERIOD_GRACE_DAYS = 14;
+
+/**
  * Genereert de vaste naamgevingsconventie voor tellingtabbladen, uitsluitend
- * op basis van `CountSession.type` en `completedAt` (spec):
+ * op basis van `CountSession.type` en `completedAt` (spec), met de
+ * coulanceperiode hierboven als enige uitzondering:
  *   MONTHLY   -> "2026-09 Maand"
  *   QUARTERLY -> "2026-Q3 Kwartaal"
  *   YEARLY    -> "2026 Jaar"
@@ -206,15 +226,33 @@ export function sessionSnapshotName(
   const date = resolveSnapshotDate(session);
   const year = date.getFullYear();
   const month = date.getMonth() + 1; // 1-12
+  const dayOfMonth = date.getDate();
+  const withinGraceDays = dayOfMonth <= PERIOD_GRACE_DAYS;
   switch (session.type) {
-    case "MONTHLY":
+    case "MONTHLY": {
+      if (withinGraceDays) {
+        const previousMonth = month === 1 ? 12 : month - 1;
+        const previousYear = month === 1 ? year - 1 : year;
+        return `${previousYear}-${String(previousMonth).padStart(2, "0")} Maand`;
+      }
       return `${year}-${String(month).padStart(2, "0")} Maand`;
+    }
     case "QUARTERLY": {
       const quarter = Math.floor((month - 1) / 3) + 1;
+      const isFirstMonthOfQuarter = (month - 1) % 3 === 0;
+      if (isFirstMonthOfQuarter && withinGraceDays) {
+        const previousQuarter = quarter === 1 ? 4 : quarter - 1;
+        const previousYear = quarter === 1 ? year - 1 : year;
+        return `${previousYear}-Q${previousQuarter} Kwartaal`;
+      }
       return `${year}-Q${quarter} Kwartaal`;
     }
-    case "YEARLY":
+    case "YEARLY": {
+      if (month === 1 && withinGraceDays) {
+        return `${year - 1} Jaar`;
+      }
       return `${year} Jaar`;
+    }
     case "FULL":
       return `${year}-${String(month).padStart(2, "0")} Volledig`;
   }
