@@ -36,6 +36,35 @@ function readLegacyWorkbook(buffer: ArrayBuffer, fileName: string): XLSX.WorkBoo
   }
 }
 
+/**
+ * Bewaking tegen het stilzwijgend "0 rijen"-gedrag van `extractRows` hieronder
+ * (`if (!sheet) return [];`): die stilte is bedoeld voor het LEGITIEME geval
+ * waarin een bepaald kantoor/periode-tabblad ontbreekt (bv. geen C4U-tabblad
+ * voor de latere periodes — zie de doc-comment hierboven), maar mag NOOIT het
+ * geval verbergen waarin de gebruiker een volledig ANDER/verkeerd bestand
+ * koos (bv. het gewone/recente exportbestand van de app i.p.v. het originele
+ * historische Excelbestand) — dan matcht GEEN ENKEL verwacht tabblad, en
+ * zouden alle `extractRows`-aanroepen stil [] teruggeven, resulterend in een
+ * misleidend "geldig maar leeg" preview-rapport (0 rijen, 0 periodes, zonder
+ * foutmelding). Daarom: gooi hier expliciet zodra ZERO van de verwachte
+ * tabbladen aanwezig zijn — ontbreekt slechts een DEEL ervan, dan is dat nog
+ * steeds het legitieme, stille geval hierboven.
+ */
+function assertRecognizableLegacyWorkbook(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+  expectedSheetNames: string[],
+): void {
+  const foundCount = expectedSheetNames.filter((name) => workbook.Sheets[name] !== undefined).length;
+  if (foundCount > 0) return;
+  throw new ExcelValidationError(
+    `"${fileName}" bevat geen van de verwachte tabbladen van dit historische stockbestand ` +
+      `(bv. "${expectedSheetNames[0]}"). ` +
+      `Aanwezige tabbladen in dit bestand: ${workbook.SheetNames.join(", ") || "(geen)"}. ` +
+      `Kies het juiste, originele historische Excelbestand voor dit kantoor — dit lijkt een ander bestand te zijn.`,
+  );
+}
+
 function sheetToRows(sheet: XLSX.WorkSheet): unknown[][] {
   return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null }) as unknown[][];
 }
@@ -121,8 +150,8 @@ function extractRows(workbook: XLSX.WorkBook, spec: SheetExtractionSpec): Legacy
  */
 export function parseLegacyStockLokeren(buffer: ArrayBuffer, fileName: string): LegacyStockRow[] {
   const workbook = readLegacyWorkbook(buffer, fileName);
-  return [
-    ...extractRows(workbook, {
+  const specs: SheetExtractionSpec[] = [
+    {
       sheetName: "DATA",
       fixedPeriodKey: null,
       periodColumn: "DATUM",
@@ -132,8 +161,8 @@ export function parseLegacyStockLokeren(buffer: ArrayBuffer, fileName: string): 
       articleNumberColumn: "cArticlenumber",
       costPriceColumn: "cPurchaseprice",
       quantityColumn: "Quantity Total",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "01 09 2026",
       fixedPeriodKey: "2026-09-01",
       productGroupColumn: "cProducttype",
@@ -142,8 +171,14 @@ export function parseLegacyStockLokeren(buffer: ArrayBuffer, fileName: string): 
       articleNumberColumn: "cArticlenumber",
       costPriceColumn: "Kostprijs",
       quantityColumn: "AANTAL TELLING",
-    }),
+    },
   ];
+  assertRecognizableLegacyWorkbook(
+    workbook,
+    fileName,
+    specs.map((spec) => spec.sheetName),
+  );
+  return specs.flatMap((spec) => extractRows(workbook, spec));
 }
 
 /**
@@ -165,8 +200,8 @@ export function parseLegacyStockLokeren(buffer: ArrayBuffer, fileName: string): 
  */
 export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): LegacyStockRow[] {
   const workbook = readLegacyWorkbook(buffer, fileName);
-  return [
-    ...extractRows(workbook, {
+  const specs: SheetExtractionSpec[] = [
+    {
       sheetName: "Stock 31.03.2025",
       fixedPeriodKey: "2025-03-31",
       productGroupColumn: "Producttype",
@@ -175,8 +210,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Aankoopprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "C4U Stock 31.03.2025",
       fixedPeriodKey: "2025-03-31",
       fixedProductGroup: "C4U",
@@ -186,8 +221,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: null,
       costPriceColumn: "Aankoopprijs",
       quantityColumn: "Voorraad",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 30.06.2025",
       fixedPeriodKey: "2025-06-30",
       productGroupColumn: "Producttype",
@@ -196,8 +231,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Aankoopprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "C4U Stock 30.06.2025",
       fixedPeriodKey: "2025-06-30",
       fixedProductGroup: "C4U",
@@ -207,8 +242,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: null,
       costPriceColumn: "Aankoopprijs",
       quantityColumn: "Voorraad",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 30.09.2025",
       fixedPeriodKey: "2025-09-30",
       productGroupColumn: "Producttype",
@@ -217,8 +252,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Eenheidsprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 31.12.2025",
       fixedPeriodKey: "2025-12-31",
       productGroupColumn: "Producttype",
@@ -227,8 +262,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Eenheidsprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 31.03.2026",
       fixedPeriodKey: "2026-03-31",
       productGroupColumn: "Producttype",
@@ -237,8 +272,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Eenheidsprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 30.06.2026",
       fixedPeriodKey: "2026-06-30",
       productGroupColumn: "Producttype",
@@ -247,8 +282,8 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Eenheidsprijs",
       quantityColumn: "Aantal",
-    }),
-    ...extractRows(workbook, {
+    },
+    {
       sheetName: "Stock 01.09.2026 ",
       fixedPeriodKey: "2026-09-01",
       productGroupColumn: "Producttype",
@@ -257,6 +292,12 @@ export function parseLegacyStockDamme(buffer: ArrayBuffer, fileName: string): Le
       articleNumberColumn: "Artikelnummer",
       costPriceColumn: "Eenheidsprijs",
       quantityColumn: "Aantal",
-    }),
+    },
   ];
+  assertRecognizableLegacyWorkbook(
+    workbook,
+    fileName,
+    specs.map((spec) => spec.sheetName),
+  );
+  return specs.flatMap((spec) => extractRows(workbook, spec));
 }
