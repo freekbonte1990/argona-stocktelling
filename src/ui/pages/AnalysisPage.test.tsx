@@ -12,10 +12,16 @@ import type { Article, CountSession, Office } from "../../domain/types";
  * Sprint 2 (Historical Count Analysis) §17 (UI-tests): een COMPLETED sessie
  * moet de nieuwe "Analyse telling" openen, de kern-KPI's moeten renderen, de
  * productgroep-/obsolete-filters moeten de detaillijst filteren, en er mag
- * NERGENS een telactie (tellen/bevestigen/afronden/exporteren) op dit
- * scherm staan — dit is strikt een alleen-lezen historische view. Zelfde
- * testpatroon (echte IndexedDB via fake-indexeddb + de echte
- * application/container-services) als ReviewPage.test.tsx.
+ * geen enkele telactie (tellen/bevestigen/afronden) op dit scherm staan —
+ * dit blijft strikt een alleen-lezen historische view. Zelfde testpatroon
+ * (echte IndexedDB via fake-indexeddb + de echte application/container-
+ * services) als ReviewPage.test.tsx.
+ *
+ * Aanvulling (production-pilot-readiness): "Exporteren naar Excel" is hier
+ * WEL beschikbaar — dit is het enige scherm waar een reeds afgeronde sessie
+ * nog bereikbaar is, dus zonder deze knop zou zo'n sessie nooit meer
+ * geëxporteerd kunnen worden (bv. om op een ander toestel te heropenen/
+ * delen). Zie het commentaar bovenaan `AnalysisPage`.
  */
 
 const office: Office = {
@@ -156,13 +162,19 @@ describe("AnalysisPage — Analyse telling (Sprint 2, alleen-lezen historische v
     expect(within(articleList).queryByText(/BAT1/)).not.toBeInTheDocument();
   });
 
-  it("bevat NERGENS een telactie — geen tellen/bevestigen/afronden/exporteren op dit alleen-lezen scherm", async () => {
+  it("bevat geen telactie (tellen/bevestigen/afronden) op dit alleen-lezen scherm", async () => {
     render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
     await waitUntilLoaded();
 
     expect(screen.queryByText("Telling afronden")).not.toBeInTheDocument();
-    expect(screen.queryByText("Exporteren naar Excel")).not.toBeInTheDocument();
     expect(screen.queryByText(/Niet aanwezig/)).not.toBeInTheDocument();
     expect(screen.queryByText(/voorraad 0/)).not.toBeInTheDocument();
+  });
+
+  it("toont wel 'Exporteren naar Excel' — enige bereikbare plek om een afgeronde sessie opnieuw te exporteren", async () => {
+    render(<AnalysisPage sessionId={session.id} onOpenArticle={() => {}} onOpenComparison={() => {}} />);
+    await waitUntilLoaded();
+
+    expect(screen.getByRole("button", { name: "Exporteren naar Excel" })).toBeInTheDocument();
   });
 });

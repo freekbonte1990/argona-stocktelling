@@ -10,8 +10,10 @@ import {
 } from "../../domain/analysis";
 import { STOCK_CLASSIFICATION_LABELS } from "../../domain/stockClassification";
 import type { StockClassification } from "../../domain/types";
-import { analysisService } from "../../application/container";
+import { analysisService, exportService } from "../../application/container";
 import { SessionNotAnalyzableError } from "../../application/services/AnalysisService";
+import { SheetNameConflictError, type SheetNameConflictResolution } from "../../application/services/ExportService";
+import { BigButton } from "../components/BigButton";
 import { SummaryTile } from "../components/SummaryTile";
 import { useOffice, useSession } from "../hooks/useLiveData";
 import { SESSION_TYPE_LABELS } from "../sessionTypeLabels";
@@ -37,9 +39,15 @@ const ARTICLE_LIST_ANCHOR_ID = "analysis-article-list";
  * classificatiewijziging op het artikeldetailscherm kan deze cijfers dus
  * nooit meer beïnvloeden.
  *
- * Geen enkele telactie (tellen/bevestigen/afronden/exporteren) staat op dit
- * scherm — dat blijft allemaal bij `ReviewPage`, dat de LOPENDE (ACTIVE)
- * sessie bedient.
+ * Geen enkele telactie (tellen/bevestigen/afronden) staat op dit scherm —
+ * dat blijft allemaal bij `ReviewPage`, dat de LOPENDE (ACTIVE) sessie
+ * bedient. "Exporteren naar Excel" is hier wel beschikbaar (aanvulling):
+ * het is geen telactie — het wijzigt nooit de bevroren cijfers van deze
+ * sessie, het serialiseert ze enkel (zie `ExportService`) — en dit scherm is
+ * net de ENIGE plek waar een reeds AFGERONDE sessie nog bereikbaar is (spec
+ * v0.2 §4/Sprint 2): zonder deze knop hier kan een afgeronde telling nooit
+ * meer geëxporteerd worden, ook niet wanneer ze op een ander toestel verder
+ * gebruikt moet worden (bv. een Excel-export om elders te heropenen/te delen).
  */
 export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: AnalysisPageProps) {
   const session = useSession(sessionId);
@@ -81,6 +89,44 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
   const [sortMode, setSortMode] = useState<AnalysisArticleSortMode>("GROUP_THEN_DESCRIPTION");
   const [showAllNegative, setShowAllNegative] = useState(false);
   const [showAllPositive, setShowAllPositive] = useState(false);
+
+  // Aanvulling: "Exporteren naar Excel" ook vanaf dit (alleen-lezen) scherm —
+  // zelfde patroon/foutafhandeling als `ReviewPage#handleExport`, zodat een
+  // reeds afgeronde telling altijd opnieuw te exporteren blijft, ook nadat
+  // je Home/Vorige tellingen verlaten hebt.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [conflictSheetName, setConflictSheetName] = useState<string | null>(null);
+  const [customSheetName, setCustomSheetName] = useState("");
+
+  async function handleExport(resolution?: SheetNameConflictResolution) {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const file = await exportService.exportSessionResults(sessionId, resolution);
+      const blob = new Blob([file.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setConflictSheetName(null);
+    } catch (err) {
+      if (err instanceof SheetNameConflictError) {
+        setConflictSheetName(err.sheetName);
+        setCustomSheetName(`${err.sheetName} (2)`);
+      } else {
+        setExportError(err instanceof Error ? err.message : "Onbekende fout bij het exporteren.");
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const filteredArticles = useMemo(
     () => (analysis ? sortAnalysisArticles(filterAnalysisArticles(analysis.articles, filters), sortMode) : []),
@@ -150,6 +196,16 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
         <button type="button" className="mode-toggle__button" onClick={() => onOpenComparison(sessionId)}>
           Vergelijken
         </button>
+      </div>
+
+      {/* Aanvulling: export blijft bereikbaar voor een afgeronde telling,
+          ook nadat je dit scherm al eens verlaten hebt — zie het commentaar
+          bovenaan deze component. */}
+      <div className="stack stack--tight">
+        <BigButton variant="secondary" disabled={exporting} onClick={() => handleExport()}>
+          {exporting ? "Bezig met exporteren..." : "Exporteren naar Excel"}
+        </BigButton>
+        {exportError && <div className="error-banner">{exportError}</div>}
       </div>
 
       {/* KPI's (spec §2). Visuele-hiërarchiepatch (v0.5.1): drie duidelijke
@@ -585,6 +641,44 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
           </table>
         </div>
       </div>
+
+      {conflictSheetName && (
+        <div className="modal-overlay">
+          <div className="modal-card stack">
+            <p style={{ margin: 0, fontWeight: 700 }}>Tabbladnaam bestaat al</p>
+            <p style={{ margin: 0 }}>
+              Er bestaat al een tellingtabblad met de naam "{conflictSheetName}" (van een andere telling of
+              import). Dit tabblad wordt nooit stilzwijgend overschreven — kies hieronder wat er moet gebeuren.
+            </p>
+            {exportError && <div className="error-banner">{exportError}</div>}
+            <div className="stack">
+              <BigButton
+                variant="primary"
+                disabled={exporting}
+                onClick={() => handleExport({ action: "overwrite" })}
+              >
+                {exporting ? "Bezig..." : "Overschrijven"}
+              </BigButton>
+              <input
+                className="search-input"
+                value={customSheetName}
+                onChange={(e) => setCustomSheetName(e.target.value)}
+                placeholder="Andere naam voor dit tabblad"
+              />
+              <BigButton
+                variant="secondary"
+                disabled={exporting}
+                onClick={() => handleExport({ action: "rename", sheetName: customSheetName })}
+              >
+                {exporting ? "Bezig..." : "Exporteren onder deze naam"}
+              </BigButton>
+              <BigButton variant="ghost" disabled={exporting} onClick={() => setConflictSheetName(null)}>
+                Annuleren
+              </BigButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
