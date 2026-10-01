@@ -3,9 +3,11 @@ import { computeSessionReview } from "./review";
 import {
   buildHistoryEntriesFromSnapshot,
   buildSessionSnapshot,
+  buildSnapshotAndReviewFromHistory,
   mergeHistoryEntries,
   sessionSnapshotName,
 } from "./stockSnapshot";
+import type { StockHistoryEntry } from "./stockSnapshot";
 import type { Article, CountEntry, CountSession, Location } from "./types";
 
 const locations: Location[] = [1, 2].map((n) => ({
@@ -333,5 +335,144 @@ describe("mergeHistoryEntries — export -> reimport -> export behoudt alle hist
     const augustusEntry = merged.find((e) => e.sessionName === "2026-08 Maand")!;
     expect(augustusEntry.totalCount).toBe(999); // incoming versie wint
     expect(merged.map((e) => e.sessionName)).toEqual(["2026-08 Maand", "2026-09 Maand"]);
+  });
+});
+
+describe("buildSnapshotAndReviewFromHistory — makkelijk vergelijken tussen toestellen", () => {
+  function makeHistoryEntry(overrides: Partial<StockHistoryEntry> = {}): StockHistoryEntry {
+    return {
+      countDate: "2026-09-30",
+      sessionType: "MONTHLY",
+      sessionName: "2026-09 Maand",
+      articleId: "office:A1",
+      articleNumber: "A1",
+      description: "Artikel A1",
+      totalCount: 8,
+      previousCount: 5,
+      differenceQuantity: 3,
+      costPrice: 2,
+      differenceAmount: 6,
+      status: "GETELD",
+      locationNames: ["Locatie 1"],
+      ...overrides,
+    };
+  }
+
+  const articlesById = new Map([
+    ["office:A1", makeArticle("A1")],
+    ["office:A2", makeArticle("A2")],
+    ["office:A3", makeArticle("A3")],
+  ]);
+
+  it("GETELD/0 BEVESTIGD tellen mee als geteld, OVERGENOMEN nooit (noch in scope, noch in resultaten)", () => {
+    const entries = [
+      makeHistoryEntry({ articleId: "office:A1", status: "GETELD" }),
+      makeHistoryEntry({
+        articleId: "office:A2",
+        status: "0 BEVESTIGD",
+        totalCount: 0,
+        differenceQuantity: -5,
+        differenceAmount: -10,
+      }),
+      makeHistoryEntry({
+        articleId: "office:A3",
+        status: "OVERGENOMEN",
+        totalCount: 10,
+        previousCount: 10,
+        differenceQuantity: 0,
+        differenceAmount: 0,
+      }),
+    ];
+
+    const { snapshot, review } = buildSnapshotAndReviewFromHistory("recon-1", entries, articlesById);
+
+    // Snapshot bevat ALTIJD alle drie (ook OVERGENOMEN) — zelfde regel als
+    // een echte sessie.
+    expect(snapshot.articles).toHaveLength(3);
+    expect(snapshot.sessionName).toBe("2026-09 Maand");
+    expect(snapshot.sessionType).toBe("MONTHLY");
+    expect(snapshot.snapshotDate).toBe("2026-09-30");
+    expect(snapshot.provenance).toBe("APP_COUNT");
+
+    // Review-scope/resultaten bevatten OVERGENOMEN nooit.
+    expect(review.totalArticlesInScope).toBe(2);
+    expect(review.countedArticles).toBe(2);
+    expect(review.notCountedArticles).toBe(0);
+    expect(review.results).toHaveLength(2);
+    expect(review.results.map((r) => r.articleId)).toEqual(["office:A1", "office:A2"]);
+    expect(review.results.every((r) => r.isManualAddition === false)).toBe(true);
+  });
+
+  it("OVERGENOMEN - NIET GETELD komt wel in scope maar telt niet als geteld, en heeft geen entry", () => {
+    const entries = [
+      makeHistoryEntry({ articleId: "office:A1", status: "GETELD" }),
+      makeHistoryEntry({
+        articleId: "office:A2",
+        status: "OVERGENOMEN - NIET GETELD",
+        totalCount: 7,
+        previousCount: 7,
+        differenceQuantity: 0,
+        differenceAmount: 0,
+      }),
+    ];
+
+    const { review } = buildSnapshotAndReviewFromHistory("recon-2", entries, articlesById);
+
+    expect(review.totalArticlesInScope).toBe(2);
+    expect(review.countedArticles).toBe(1);
+    expect(review.notCountedArticles).toBe(1);
+    const a2 = review.results.find((r) => r.articleId === "office:A2")!;
+    expect(a2.fullyCounted).toBe(false);
+    expect(a2.hasAnyEntry).toBe(false);
+    expect(review.notFoundAnywhere.map((r) => r.articleId)).toEqual(["office:A2"]);
+  });
+
+  it("som van verschillen/bedragen (positief/negatief apart) klopt, net als computeSessionReview", () => {
+    const entries = [
+      makeHistoryEntry({
+        articleId: "office:A1",
+        status: "GETELD",
+        totalCount: 8,
+        previousCount: 5,
+        differenceQuantity: 3,
+        differenceAmount: 6,
+      }),
+      makeHistoryEntry({
+        articleId: "office:A2",
+        status: "0 BEVESTIGD",
+        totalCount: 0,
+        previousCount: 5,
+        differenceQuantity: -5,
+        differenceAmount: -10,
+      }),
+    ];
+
+    const { review } = buildSnapshotAndReviewFromHistory("recon-3", entries, articlesById);
+
+    expect(review.articlesWithDifference).toBe(2);
+    expect(review.totalPositiveCorrectionQuantity).toBe(3);
+    expect(review.totalNegativeCorrectionQuantity).toBe(-5);
+    expect(review.totalPositiveCorrectionAmount).toBe(6);
+    expect(review.totalNegativeCorrectionAmount).toBe(-10);
+  });
+
+  it("bevriest articleNumber/description op de HISTORIE-regel, nooit het levende artikel", () => {
+    const entries = [
+      makeHistoryEntry({
+        articleId: "office:A1",
+        articleNumber: "OUD-NUMMER",
+        description: "Oude omschrijving",
+      }),
+    ];
+    const { snapshot } = buildSnapshotAndReviewFromHistory("recon-4", entries, articlesById);
+    expect(snapshot.articles[0].article.articleNumber).toBe("OUD-NUMMER");
+    expect(snapshot.articles[0].article.description).toBe("Oude omschrijving");
+  });
+
+  it("een ontbrekend artikel (verwijderd/nooit gekend) wordt defensief overgeslagen, geen crash", () => {
+    const entries = [makeHistoryEntry({ articleId: "office:ONBEKEND" })];
+    const { snapshot, review } = buildSnapshotAndReviewFromHistory("recon-5", entries, articlesById);
+    expect(snapshot.articles).toHaveLength(0);
+    expect(review.results).toHaveLength(0);
   });
 });

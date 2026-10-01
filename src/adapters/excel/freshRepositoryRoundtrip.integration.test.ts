@@ -8,10 +8,14 @@ import { CountSessionService } from "../../application/services/CountSessionServ
 import { CountingService } from "../../application/services/CountingService";
 import { ExportService } from "../../application/services/ExportService";
 import { LegacyImportService } from "../../application/services/LegacyImportService";
+import { AnalysisService } from "../../application/services/AnalysisService";
+import { ComparisonService } from "../../application/services/ComparisonService";
+import { ProductCategoryService } from "../../application/services/ProductCategoryService";
 import { InMemoryCountingRepository } from "../../application/services/InMemoryCountingRepository";
 import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { renameLocation, reorderLocations } from "../../domain/locations";
 import { getStockClassification } from "../../domain/stockClassification";
+import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { LegacyStockRow } from "../../domain/legacyImport";
 
 /**
@@ -46,6 +50,7 @@ function loadFixtureBuffer(fileName: string): ArrayBuffer {
 /** Bouwt een volledig bedraad "toestel" (repository + services) — gebruikt voor zowel A als B. */
 function makeDevice() {
   const repository = new InMemoryCountingRepository();
+  const productCategoryService = new ProductCategoryService(repository);
   return {
     repository,
     importService: new ImportService(repository),
@@ -53,6 +58,8 @@ function makeDevice() {
     countingService: new CountingService(repository),
     exportService: new ExportService(repository, new ExcelStockResultExporter()),
     legacyImportService: new LegacyImportService(repository),
+    analysisService: new AnalysisService(repository, productCategoryService),
+    comparisonService: new ComparisonService(repository, productCategoryService),
   };
 }
 
@@ -238,6 +245,54 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
       expect(legacyArticleB!.status).toBe("INACTIVE");
       expect(legacyArticleB!.assortmentActive).toBe(false);
 
+      // --- Vervolg ("makkelijk vergelijken tussen toestellen"): de sessie
+      // zelf (niet enkel haar HISTORIE-regels) wordt op Repository B
+      // gereconstrueerd als een volwaardige, lokale COMPLETED CountSession —
+      // ze verschijnt dus gewoon als "Vorige telling", is analyseerbaar én
+      // vergelijkbaar, net zoals op Repository A zelf. ---
+      const sessionAFinal = await deviceA.repository.getSession(session.id);
+      if (!sessionAFinal) throw new Error("sessie niet gevonden in Repository A");
+      const expectedSessionName = sessionSnapshotName(sessionAFinal);
+
+      const sessionsB = await deviceB.repository.getSessionsForOffice("lokeren");
+      const reconstructedSessionB = sessionsB.find((s) => sessionSnapshotName(s) === expectedSessionName);
+      expect(reconstructedSessionB).toBeDefined();
+      expect(reconstructedSessionB!.status).toBe("COMPLETED");
+      // Stabiele identiteit over toestellen heen (zie
+      // StockHistoryEntry#sourceSessionId): Repository B heeft deze sessie
+      // nooit zelf geteld, maar herkent haar via het meegeëxporteerde
+      // originele CountSession.id — niet enkel via de (zwakkere)
+      // sessienaam/datum-heuristiek.
+      expect(reconstructedSessionB!.id).toBe(session.id);
+
+      const finalizedB = await deviceB.repository.getFinalizedSessionResult(reconstructedSessionB!.id);
+      expect(finalizedB).toBeDefined();
+
+      // Analyseerbaar — exact dezelfde kern-KPI (voorraadwaarde) als op
+      // Repository A zelf, ondanks dat Repository B deze sessie nooit zelf
+      // geteld heeft.
+      const analysisA = await deviceA.analysisService.getSessionAnalysis(session.id);
+      const analysisB = await deviceB.analysisService.getSessionAnalysis(reconstructedSessionB!.id);
+      expect(analysisB.kpis.totalStockValue).toBe(analysisA.kpis.totalStockValue);
+
+      // Vergelijkbaar — gewoon een normale optie in "Vergelijken", niet enkel
+      // een legacy-achtige uitzondering.
+      const comparisonOptionsB = await deviceB.comparisonService.getComparisonOptions("lokeren");
+      const optionB = comparisonOptionsB.sessions.find((o) => o.sessionId === reconstructedSessionB!.id);
+      expect(optionB).toBeDefined();
+      expect(optionB!.provenance).toBe("APP_COUNT");
+
+      // Vergelijken tegen de bestaande legacy-snapshot (van dezelfde import)
+      // werkt ook gewoon, zonder enige speciale behandeling.
+      const legacyOptionB = comparisonOptionsB.sessions.find((o) => o.provenance === "LEGACY_IMPORT");
+      expect(legacyOptionB).toBeDefined();
+      const comparisonVsLegacy = await deviceB.comparisonService.compareSessions(
+        "lokeren",
+        legacyOptionB!.sessionId,
+        reconstructedSessionB!.id,
+      );
+      expect(comparisonVsLegacy.headerB.sessionId).toBe(reconstructedSessionB!.id);
+
       // --- Geleerde ArticleLocationAssignment hersteld (punt 1: kernvereiste) ---
       const assignmentsB = await deviceB.repository.getArticleLocationAssignments("lokeren");
       const targetAssignmentB = assignmentsB.find(
@@ -273,6 +328,26 @@ describe("Fresh repository roundtrip (production-pilot-readiness sprint punt 2 �
       const nextReview = await deviceB.sessionService.getReview(nextSession.id);
       const targetReviewResult = nextReview.results.find((r) => r.articleId === targetArticleId);
       expect(targetReviewResult?.previousCount).toBe(newQuantityForTarget);
+
+      // --- Expliciet gevraagde eindcheck ("makkelijk vergelijken tussen
+      // toestellen", punt 1/5): exact hetzelfde geëxporteerde bestand NOG EEN
+      // KEER importeren op Repository B (bv. een gebruiker die per ongeluk
+      // twee keer op "Importeer" klikt) creëert nooit een tweede/dubbele
+      // telling — nog steeds exact één sessie voor deze tellingnaam, met
+      // dezelfde stabiele id. ---
+      const sourceBAgain = createExcelStockSourceFromBuffer(exported.data, exported.fileName);
+      await deviceB.importService.commitImport(await deviceB.importService.prepareImport(sourceBAgain));
+      const sessionsBAfterReimport = await deviceB.repository.getSessionsForOffice("lokeren");
+      // Scope bewust tot COMPLETED: Repository B heeft intussen ook zelf een
+      // eigen, nog ACTIEVE "volgende telling" (`nextSession`, hierboven) die
+      // toevallig dezelfde kalendermaand-naam kan dragen — dat is een
+      // volledig ANDERE, echte sessie, geen dubbele reconstructie, en mag
+      // deze check dus niet vervuilen.
+      const matchingAfterReimport = sessionsBAfterReimport.filter(
+        (s) => s.status === "COMPLETED" && sessionSnapshotName(s) === expectedSessionName,
+      );
+      expect(matchingAfterReimport).toHaveLength(1);
+      expect(matchingAfterReimport[0].id).toBe(reconstructedSessionB!.id);
     },
     30000,
   );

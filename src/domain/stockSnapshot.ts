@@ -153,6 +153,21 @@ export interface StockHistoryEntry {
    * `domain/legacyImport.ts`) — die regels hebben altijd `status: "LEGACY"`.
    */
   source?: "APP" | "LEGACY_IMPORT";
+  /**
+   * Vervolg ("makkelijk vergelijken tussen toestellen" — stabiele identiteit
+   * over toestellen heen): het originele `CountSession.id` van de echte
+   * app-sessie die deze regel produceerde — UITSLUITEND gezet door
+   * `buildHistoryEntriesFromSnapshot` hieronder (dus nooit voor een
+   * `LEGACY_IMPORT`-regel, die geen echte `CountSession` heeft). Laat
+   * `ImportService` een op een ANDER toestel afgeronde en herimporteerde
+   * sessie herkennen aan haar ECHTE, stabiele ID — in plaats van enkel op
+   * de (in theorie dubbelzinnige) combinatie sessienaam+kantoor te moeten
+   * vertrouwen. BEWUST optioneel: een bestand geëxporteerd vóór deze
+   * uitbreiding kent deze kolom nog niet — ontbrekend/`undefined` betekent
+   * dan gewoon "onbekend, val terug op de sessienaam-heuristiek" (exact
+   * hetzelfde backward-compat-idioom als `source` hierboven).
+   */
+  sourceSessionId?: string;
 }
 
 /**
@@ -405,6 +420,169 @@ function legacySnapshotSessionName(periodLabel: string): string {
 }
 
 /**
+ * Vervolg op "makkelijk vergelijken tussen toestellen": reconstrueert een
+ * volledige `StockSnapshot` + bijhorende `SessionReviewSummary` voor een
+ * sessie waarvan dit toestel de oorspronkelijke `CountSession`/`CountEntry`-
+ * data NOOIT lokaal gehad heeft — enkel de reeds geïmporteerde,
+ * machinevriendelijke HISTORIE-regels (`StockHistoryEntry[]`, `source` ≠
+ * `"LEGACY_IMPORT"`, dus een ECHTE, vroeger op een ANDER toestel afgeronde
+ * app-sessie, niet een legacy periode van vóór deze app). `ImportService`
+ * gebruikt dit om zo'n sessie als een volwaardige, lokale `CountSession`
+ * (status COMPLETED) + `FinalizedSessionResult` te bewaren — waarna ZOWEL
+ * "Vorige tellingen" (Home) als "Analyse telling" als "Vergelijken" haar
+ * ONGEWIJZIGD gewoon behandelen als eender welke andere afgeronde sessie van
+ * dit kantoor (geen enkele wijziging nodig aan
+ * HomePage/AnalysisService/ComparisonService/ExportService).
+ *
+ * BEWUSTE PRECISIE-BEPERKING (zie `StockSource.ts#HistoricalSheetSnapshot`:
+ * "rows is bewust ondoorzichtig voor het domein"): de machinevriendelijke
+ * HISTORIE-regel is de enige structured bron die een geïmporteerd bestand op
+ * eender welk toestel leesbaar houdt, maar bewaart nooit per-locatie-detail
+ * of welke artikelen destijds via "+ Bestaand artikel opzoeken" buiten de
+ * sessiescope geteld werden. Voor zo'n gereconstrueerde sessie betekent dit
+ * onvermijdelijk:
+ *   - `perLocation` is altijd leeg (geen "op welk rek geteld").
+ *   - `isManualAddition` is altijd `false` ("nieuwe artikelen gevonden" toont
+ *     dus 0 voor zo'n sessie, ook al waren er destijds mogelijk enkele).
+ *   - `note`/`flaggedForControl` zijn altijd leeg/`false`.
+ * Alle AANTALLEN/WAARDES/VERSCHILLEN (en dus elke Analyse-KPI, elke
+ * Vergelijken-berekening, en een eventuele volgende export) blijven wél
+ * 100% exact — die komen rechtstreeks uit de reeds bevroren HISTORIE-cijfers,
+ * nooit herberekend of geraden.
+ *
+ * Artikelen met status `"OVERGENOMEN"` (nooit in de sessiescope, zie
+ * `ArticleSnapshotStatus`) komen wel in de snapshot terecht (zoals elke
+ * snapshot altijd alle artikelen van het kantoor bevat), maar bewust niet in
+ * `review.results`/de scope-totalen — exact dezelfde regel als
+ * `computeSessionReview` voor een echte sessie.
+ *
+ * `entries` moet minstens 1 regel bevatten en volledig tot ÉÉN sessienaam
+ * behoren (`sessionType`/`sessionName`/`countDate` worden van de eerste
+ * regel afgeleid — de aanroeper groepeert hierop al, zie `ImportService`).
+ */
+export function buildSnapshotAndReviewFromHistory(
+  sessionId: string,
+  entries: StockHistoryEntry[],
+  resolvedArticlesById: ReadonlyMap<string, Article>,
+): { snapshot: StockSnapshot; review: SessionReviewSummary } {
+  const articles: ArticleSnapshot[] = [];
+  const results: ArticleReviewResult[] = [];
+
+  let countedArticles = 0;
+  let articlesWithDifference = 0;
+  let totalPositiveCorrectionQuantity = 0;
+  let totalNegativeCorrectionQuantity = 0;
+  let totalPositiveCorrectionAmount = 0;
+  let totalNegativeCorrectionAmount = 0;
+
+  for (const entry of entries) {
+    const resolvedArticle = resolvedArticlesById.get(entry.articleId);
+    // Defensief, zoals buildLegacyPeriodSnapshot hierboven: zou nooit mogen
+    // voorkomen (elke HISTORIE-regel kreeg bij import altijd een bestaand of
+    // nieuw Article-record), maar nooit crashen op een ontbrekend artikel.
+    if (!resolvedArticle) continue;
+
+    const article: Article = {
+      ...resolvedArticle,
+      articleNumber: entry.articleNumber,
+      description: entry.description,
+    };
+    const totalCount = entry.totalCount;
+    const costPrice = entry.costPrice;
+    const previousCount = entry.previousCount;
+    const previousValue = previousCount !== null && costPrice !== null ? previousCount * costPrice : null;
+    const amount = totalCount !== null && costPrice !== null ? totalCount * costPrice : null;
+
+    articles.push({
+      articleId: entry.articleId,
+      article,
+      status: entry.status,
+      totalCount,
+      previousCount,
+      differenceQuantity: entry.differenceQuantity,
+      costPrice,
+      previousValue,
+      amount,
+      differenceAmount: entry.differenceAmount,
+      perLocation: [],
+      note: null,
+    });
+
+    if (entry.status === "OVERGENOMEN") continue; // nooit in sessiescope, zie hierboven.
+
+    const fullyCounted = entry.status === "GETELD" || entry.status === "0 BEVESTIGD";
+    results.push({
+      articleId: entry.articleId,
+      article,
+      previousCount,
+      perLocation: [],
+      fullyCounted,
+      newTotalCount: totalCount,
+      differenceQuantity: entry.differenceQuantity,
+      costPrice,
+      previousValue,
+      amount,
+      differenceAmount: entry.differenceAmount,
+      note: null,
+      isManualAddition: false,
+      hasAnyEntry: fullyCounted,
+      confirmedAbsent: entry.status === "0 BEVESTIGD",
+      flaggedForControl: false,
+    });
+
+    if (fullyCounted) countedArticles += 1;
+    if (entry.differenceQuantity !== null && entry.differenceQuantity !== 0) {
+      articlesWithDifference += 1;
+      if (entry.differenceQuantity > 0) {
+        totalPositiveCorrectionQuantity += entry.differenceQuantity;
+      } else {
+        totalNegativeCorrectionQuantity += entry.differenceQuantity;
+      }
+    }
+    if (entry.differenceAmount !== null && entry.differenceAmount !== 0) {
+      if (entry.differenceAmount > 0) {
+        totalPositiveCorrectionAmount += entry.differenceAmount;
+      } else {
+        totalNegativeCorrectionAmount += entry.differenceAmount;
+      }
+    }
+  }
+
+  const first = entries[0];
+  const snapshot: StockSnapshot = {
+    sessionId,
+    sessionType: first.sessionType,
+    sessionName: first.sessionName,
+    snapshotDate: first.countDate,
+    articles,
+    provenance: "APP_COUNT",
+  };
+  const review: SessionReviewSummary = {
+    totalArticlesInScope: results.length,
+    countedArticles,
+    notCountedArticles: results.length - countedArticles,
+    articlesWithDifference,
+    totalPositiveCorrectionQuantity,
+    totalNegativeCorrectionQuantity,
+    totalPositiveCorrectionAmount,
+    totalNegativeCorrectionAmount,
+    results,
+    // Deze sessie was elders al volledig afgerond — er is hier lokaal geen
+    // enkele locatie om nog "af te ronden", dus bewust neutrale/lege
+    // waarden: niets leest dit voor een COMPLETED sessie (zie AnalysisService/
+    // ComparisonService, die uitsluitend totalArticlesInScope/countedArticles/
+    // results lezen), dit bestaat puur om het SessionReviewSummary-type
+    // volledig in te vullen.
+    allLocationsCompleted: true,
+    totalActiveLocations: 0,
+    completedActiveLocationsCount: 0,
+    incompleteActiveLocations: [],
+    notFoundAnywhere: results.filter((r) => !r.hasAnyEntry),
+  };
+  return { snapshot, review };
+}
+
+/**
  * Leidt de machinevriendelijke HISTORIE-regels af uit een snapshot — één
  * regel per artikel, inclusief OVERGENOMEN-artikelen (spec: het
  * kwartaalartikel-voorbeeld toont expliciet dat OVERGENOMEN-maanden ook in
@@ -436,6 +614,11 @@ export function buildHistoryEntriesFromSnapshot(
       differenceAmount: articleSnapshot.differenceAmount,
       status: articleSnapshot.status,
       locationNames,
+      // Stabiele identiteit over toestellen heen (zie StockHistoryEntry#sourceSessionId
+      // hierboven) — `snapshot.sessionId` is hier altijd het echte, originele
+      // CountSession.id (deze functie wordt nooit voor een legacy periode
+      // aangeroepen, enkel voor een echte of eerder al herstelde app-sessie).
+      sourceSessionId: snapshot.sessionId,
     };
   });
 }

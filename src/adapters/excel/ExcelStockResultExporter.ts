@@ -19,7 +19,7 @@ import {
   STOCK_CLASSIFICATION_HEADER,
 } from "./parseArtikel";
 import { ARTIKEL_LOCATIES_REQUIRED_HEADERS, ARTIKEL_LOCATIES_SHEET_NAME } from "./parseArtikelLocaties";
-import { HISTORIE_REQUIRED_HEADERS, HISTORIE_SOURCE_HEADER } from "./parseHistorie";
+import { HISTORIE_REQUIRED_HEADERS, HISTORIE_SESSION_ID_HEADER, HISTORIE_SOURCE_HEADER } from "./parseHistorie";
 import { PRODUCTGAMMAS_REQUIRED_HEADERS, PRODUCTGAMMAS_SHEET_NAME } from "./parseProductGammas";
 import { buildTellingRequiredHeaders } from "./parseTelling";
 import {
@@ -719,7 +719,7 @@ function buildHistorieSheet(workbook: ExcelJS.Workbook, entries: StockHistoryEnt
   // geschreven (deze sheet wordt bij elke export volledig vers herschreven,
   // zie de doc-comment hierboven), maar bij het LEZEN enkel verwacht wanneer
   // aanwezig, zodat een ouder bestand zonder deze kolom gewoon blijft werken.
-  const header = [...HISTORIE_REQUIRED_HEADERS, HISTORIE_SOURCE_HEADER];
+  const header = [...HISTORIE_REQUIRED_HEADERS, HISTORIE_SOURCE_HEADER, HISTORIE_SESSION_ID_HEADER];
   setColumnWidths(sheet, widthsForHeader(header));
   const headerRow = sheet.addRow(header);
   styleHeaderRow(headerRow, HEADER_FILL_BLUE, header.length);
@@ -740,6 +740,7 @@ function buildHistorieSheet(workbook: ExcelJS.Workbook, entries: StockHistoryEnt
       entry.status,
       entry.locationNames.length > 0 ? entry.locationNames.join(", ") : null,
       entry.source ?? "APP",
+      entry.sourceSessionId ?? null,
     ]);
     row.getCell(6).numFmt = QUANTITY_FORMAT; // Totale voorraad
     row.getCell(7).numFmt = QUANTITY_FORMAT; // Vorige voorraad
