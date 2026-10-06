@@ -82,13 +82,14 @@ describe("Artikeldetail — centraal beheerd artikel", () => {
 });
 
 describe("Artikels — bulkacties", () => {
-  it("bulk 'Productgamma wijzigen', 'Assortiment wijzigen' en 'Verplaatsen naar' zijn verborgen; 'Locatie toevoegen' blijft", async () => {
+  it("bulk 'Productgamma wijzigen', 'Assortiment wijzigen', 'Verplaatsen naar' en 'Locatie verwijderen' zijn verborgen; 'Locatie toevoegen' blijft", async () => {
     const user = userEvent.setup();
     render(<ArticlesPage officeId="damme" onOpenArticle={() => {}} />);
     await waitFor(() => expect(screen.queryByText("Bezig met laden...")).not.toBeInTheDocument());
     await user.click(await screen.findByRole("checkbox", { name: "Selecteer alle gefilterde artikelen" }));
     const bar = (await screen.findByRole("button", { name: "Locatie toevoegen" })).parentElement as HTMLElement;
     expect(within(bar).queryByRole("button", { name: /Verplaatsen naar/ })).not.toBeInTheDocument();
+    expect(within(bar).queryByRole("button", { name: "Locatie verwijderen" })).not.toBeInTheDocument();
     expect(within(bar).queryByRole("button", { name: "Productgamma wijzigen" })).not.toBeInTheDocument();
     expect(within(bar).queryByRole("button", { name: "Assortiment wijzigen" })).not.toBeInTheDocument();
   });

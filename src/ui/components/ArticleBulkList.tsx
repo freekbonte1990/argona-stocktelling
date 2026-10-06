@@ -225,11 +225,11 @@ export function ArticleBulkList({
             <button type="button" className="chip" onClick={() => setBulkAction("ADD")}>
               Locatie toevoegen
             </button>
-            <button type="button" className="chip" onClick={() => setBulkAction("REMOVE")}>
-              Locatie verwijderen
-            </button>
             {!centrallyManaged && (
               <>
+                <button type="button" className="chip" onClick={() => setBulkAction("REMOVE")}>
+                  Locatie verwijderen
+                </button>
                 <button type="button" className="chip" onClick={() => setBulkAction("MOVE")}>
                   Verplaatsen naar
                 </button>
