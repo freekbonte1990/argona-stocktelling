@@ -29,6 +29,11 @@ export default defineConfig({
         // Alles precachen zodat de app na de eerste load ook zonder netwerk
         // (bv. dieper in een magazijn) blijft werken.
         globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
+        // De serverless API (o.a. de beveiligde centrale historiek) mag NOOIT
+        // door de SPA-navigatiefallback naar index.html omgeleid worden, en
+        // wordt ook nooit gecachet/geprecachet: de data zit na één geslaagde
+        // sync gewoon in IndexedDB (offline-gedrag), niet in de service worker.
+        navigateFallbackDenylist: [/^\/api\//],
       },
     }),
   ],

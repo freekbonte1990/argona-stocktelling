@@ -15,6 +15,7 @@ import type {
   HistoricalSheetRecord,
   ImportMeta,
 } from "../ports/CountingRepository";
+import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 
 /**
@@ -213,5 +214,22 @@ export class InMemoryCountingRepository implements CountingRepository {
   }
   async deleteProductCategory(categoryId: string): Promise<void> {
     this.productCategories.delete(categoryId);
+  }
+
+  private centralHistoryStatuses = new Map<string, CentralHistoryStatus>();
+  async getCentralHistoryStatus(officeId: string): Promise<CentralHistoryStatus | undefined> {
+    const status = this.centralHistoryStatuses.get(officeId);
+    return status ? { ...status, centralSessionIds: [...status.centralSessionIds] } : undefined;
+  }
+  async saveCentralHistoryStatus(status: CentralHistoryStatus): Promise<void> {
+    this.centralHistoryStatuses.set(status.officeId, { ...status, centralSessionIds: [...status.centralSessionIds] });
+  }
+
+  private centralHistoryAccessCode: string | undefined;
+  async getCentralHistoryAccessCode(): Promise<string | undefined> {
+    return this.centralHistoryAccessCode;
+  }
+  async setCentralHistoryAccessCode(code: string | null): Promise<void> {
+    this.centralHistoryAccessCode = code ?? undefined;
   }
 }

@@ -194,3 +194,11 @@ export function useArticleHistory(officeId: string | undefined, articleId: strin
     [],
   );
 }
+
+/**
+ * Centrale read-only historiek: status van de laatste sync voor dit kantoor
+ * (`undefined` zolang er nog nooit een poging gebeurde, of nog aan het laden).
+ */
+export function useCentralHistoryStatus(officeId: string | undefined) {
+  return useLiveQuery(() => (officeId ? db.centralHistoryStatus.get(officeId) : undefined), [officeId]);
+}

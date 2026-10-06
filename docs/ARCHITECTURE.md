@@ -267,3 +267,11 @@ echte testbestanden waarschijnlijk niet aan het licht gekomen, want de
 synthetische testdata in `testWorkbook.ts` gebruikte tot dan toe geen echte
 `Date`-objecten. Zie `excelValues.test.ts` voor een regressietest die dit
 onafhankelijk van de tijdzone van de machine verifieert.
+
+## Centrale read-only historiek
+
+Een tweede, kleine "poort" naast `StockSource`: `CentralHistorySource` (alleen lezen) levert afgeronde historische
+tellingen aan `CentralHistorySyncService`, die ze additief in IndexedDB samenvoegt en als echte afgeronde sessies
+reconstrueert (gedeelde logica met de Excel-import: `historyReconstruction.ts`). De data staat bewust achter een
+beveiligd endpoint (`api/central-history.ts`, toegangscode), niet in `public/`. Zie `docs/CENTRAL_HISTORY.md`.
+

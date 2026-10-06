@@ -10,15 +10,18 @@ import {
   setLocationActive,
 } from "../../domain/locations";
 import { allProductCategoriesInOrder, countArticlesInCategory } from "../../domain/productCategory";
+import { isCentralSessionIn } from "../../domain/centralHistoryFile";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { CountSession, Location, Office, ProductCategory } from "../../domain/types";
 import { generateLocationId } from "../../shared/ids";
 import { countSessionService, countingRepository, productCategoryService } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { LegacyImportSection } from "./LegacyImportSection";
+import { CentralHistorySection } from "./CentralHistorySection";
 import {
   useAllArticles,
   useAssignments,
+  useCentralHistoryStatus,
   useOffice,
   useProductCategories,
   useSessionsForOffice,
@@ -85,6 +88,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   // samenvoegen van productgamma's hierboven).
   const sessions = useSessionsForOffice(officeId) ?? [];
   const completedSessions = sessions.filter((s) => s.status === "COMPLETED");
+  const centralHistoryStatus = useCentralHistoryStatus(officeId);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState(false);
@@ -244,6 +248,8 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
       {error && <div className="error-banner">{error}</div>}
 
       <LegacyImportSection officeId={officeId} />
+
+      <CentralHistorySection officeId={officeId} />
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Stocklocaties</h2>
@@ -501,16 +507,22 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
               </div>
               <div className="location-settings-row__actions">
                 <div className="filter-row">
-                  <button
-                    type="button"
-                    className="chip chip--settings"
-                    onClick={() => {
-                      setSessionError(null);
-                      setDeleteSessionId(session.id);
-                    }}
-                  >
-                    Verwijderen
-                  </button>
+                  {isCentralSessionIn(centralHistoryStatus, session) ? (
+                    <span className="screen-subtitle" style={{ margin: 0 }}>
+                      Centrale telling — alleen-lezen (correctie aan de centrale bron)
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      onClick={() => {
+                        setSessionError(null);
+                        setDeleteSessionId(session.id);
+                      }}
+                    >
+                      Verwijderen
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

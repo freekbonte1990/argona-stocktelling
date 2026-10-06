@@ -13,7 +13,7 @@ import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
 import { useOffice, useSession } from "./ui/hooks/useLiveData";
-import { countSessionService, countingRepository } from "./application/container";
+import { centralHistorySyncService, countSessionService, countingRepository } from "./application/container";
 
 type Route =
   | { screen: "import"; fromOfficeId?: string }
@@ -168,6 +168,17 @@ export default function App() {
       cancelled = true;
     };
   }, [route]);
+
+  // Centrale read-only historiek: bij het openen van de app en bij elke
+  // kantoorwissel (route "home" met een ander kantoor) STIL en op de
+  // achtergrond synchroniseren. Fire-and-forget: `syncOffice` gooit nooit,
+  // wacht nooit op de UI en blokkeert dus nooit het tellen — offline of bij
+  // een fout blijft gewoon alle lokale data beschikbaar. Zie docs/CENTRAL_HISTORY.md.
+  const homeOfficeId = route?.screen === "home" ? route.officeId : null;
+  useEffect(() => {
+    if (!homeOfficeId) return;
+    void centralHistorySyncService.syncOffice(homeOfficeId);
+  }, [homeOfficeId]);
 
   // v0.3-hotfix: elke navigatie meteen bewaren, zodat een onverwachte
   // herlaad (zie hierboven) je exact terugbrengt naar dezelfde route.

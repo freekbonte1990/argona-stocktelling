@@ -15,6 +15,7 @@ import type {
   HistoricalSheetRecord,
   ImportMeta,
 } from "../../application/ports/CountingRepository";
+import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { AppDatabase } from "./db";
 import { db as defaultDb } from "./db";
@@ -275,5 +276,22 @@ export class IndexedDbCountingRepository implements CountingRepository {
 
   async deleteProductCategory(categoryId: string): Promise<void> {
     await this.db.productCategories.delete(categoryId);
+  }
+
+  async getCentralHistoryStatus(officeId: string): Promise<CentralHistoryStatus | undefined> {
+    return this.db.centralHistoryStatus.get(officeId);
+  }
+
+  async saveCentralHistoryStatus(status: CentralHistoryStatus): Promise<void> {
+    await this.db.centralHistoryStatus.put(status);
+  }
+
+  async getCentralHistoryAccessCode(): Promise<string | undefined> {
+    const row = await this.db.centralHistoryConfig.get("singleton");
+    return row?.accessCode ?? undefined;
+  }
+
+  async setCentralHistoryAccessCode(code: string | null): Promise<void> {
+    await this.db.centralHistoryConfig.put({ id: "singleton", accessCode: code });
   }
 }

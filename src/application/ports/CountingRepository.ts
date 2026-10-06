@@ -1,3 +1,4 @@
+import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { SessionReviewSummary } from "../../domain/review";
 import type { StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
 import type {
@@ -254,4 +255,20 @@ export interface CountingRepository {
    * enig artikel toegewezen is.
    */
   deleteProductCategory(categoryId: string): Promise<void>;
+
+  /**
+   * Centrale read-only historiek: status van de laatste sync per kantoor
+   * (laatste succes, discrete waarschuwing, en de lokale sessies die
+   * centraal bestaan — zie `CentralHistoryStatus`). Puur app-metadata, geen
+   * businessdata; `saveCentralHistoryStatus` is een upsert op `officeId`.
+   */
+  getCentralHistoryStatus(officeId: string): Promise<CentralHistoryStatus | undefined>;
+  saveCentralHistoryStatus(status: CentralHistoryStatus): Promise<void>;
+  /**
+   * Toestel-lokale toegangscode voor de centrale bron (vandaag: het beveiligde
+   * Vercel-endpoint). `null`/`undefined` = niet ingesteld. Wordt nooit
+   * meegeëxporteerd naar Excel of gelogd.
+   */
+  getCentralHistoryAccessCode(): Promise<string | undefined>;
+  setCentralHistoryAccessCode(code: string | null): Promise<void>;
 }

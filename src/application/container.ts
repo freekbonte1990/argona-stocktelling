@@ -10,6 +10,8 @@ import { LocationAssignmentService } from "./services/LocationAssignmentService"
 import { NewArticleService } from "./services/NewArticleService";
 import { ProductCategoryService } from "./services/ProductCategoryService";
 import { LegacyImportService } from "./services/LegacyImportService";
+import { CentralHistorySyncService } from "./services/CentralHistorySyncService";
+import { HttpCentralHistorySource } from "../adapters/centralHistory/HttpCentralHistorySource";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -42,4 +44,11 @@ export const newArticleService = new NewArticleService(
   productCategoryService,
 );
 export const legacyImportService = new LegacyImportService(repository);
+// Centrale read-only historiek (docs/CENTRAL_HISTORY.md). Migratie naar eBuddy =
+// ENKEL deze ene regel: `new EBuddyCentralHistorySource(...)` i.p.v. de
+// HTTP-adapter; sync-service, repository, Analyse en Vergelijken blijven gelijk.
+export const centralHistorySyncService = new CentralHistorySyncService(
+  repository,
+  new HttpCentralHistorySource({ getAccessCode: () => repository.getCentralHistoryAccessCode() }),
+);
 export const countingRepository = repository;

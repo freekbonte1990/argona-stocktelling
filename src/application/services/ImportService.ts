@@ -1,12 +1,12 @@
 import { computeAssortmentImportDiff } from "../../domain/articleAssortment";
 import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain/frequency";
 import { activeLocationsInOrder, mergeArticleLocationAssignments } from "../../domain/locations";
-import { buildSnapshotAndReviewFromHistory, mergeHistoryEntries, sessionSnapshotName } from "../../domain/stockSnapshot";
+import { mergeHistoryEntries } from "../../domain/stockSnapshot";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
-import type { Article, ArticleLocationAssignment, CountSession, Office, ProductCategory } from "../../domain/types";
-import { generateSessionId } from "../../shared/ids";
+import type { Article, ArticleLocationAssignment, Office, ProductCategory } from "../../domain/types";
 import type { CountingRepository } from "../ports/CountingRepository";
 import type { HistoricalSheetSnapshot, StockSource } from "../ports/StockSource";
+import { reconstructMissingSessionsFromHistory } from "./historyReconstruction";
 
 export interface ExistingOfficeInfo {
   office: Office;
@@ -210,91 +210,16 @@ export class ImportService {
     // Vervolg (production-pilot-readiness, "makkelijk vergelijken tussen
     // toestellen"): elke sessie uit de (al samengevoegde) telhistoriek die
     // hier NOG NIET lokaal als een echte CountSession bekend is, wordt
-    // gereconstrueerd als een volwaardige, afgeronde sessie — zodat ze
-    // voortaan gewoon als "Vorige telling" verschijnt, en in "Analyse"/
-    // "Vergelijken" selecteerbaar is, exact zoals een sessie die wél op dit
-    // toestel liep (zie domain/stockSnapshot.ts#buildSnapshotAndReviewFromHistory
-    // voor de precisie-afweging die dit onvermijdelijk met zich meebrengt).
-    // Legacy periodes (`source: "LEGACY_IMPORT"`) hebben hun eigen, al
-    // bestaand pad (ComparisonService) en worden hier bewust overgeslagen —
-    // nooit als CountSession gemodelleerd.
-    //
-    // Identiteit/idempotentie: een regel draagt, indien het bronbestand dat
-    // al ondersteunt, haar ECHTE originele `CountSession.id`
-    // (`sourceSessionId`, zie domain/stockSnapshot.ts) — die wordt dan
-    // HERGEBRUIKT als id van de gereconstrueerde sessie, zodat twee
-    // toestellen die onafhankelijk dezelfde sessie importeren (of hetzelfde
-    // toestel dat tweemaal hetzelfde bestand importeert) altijd op exact
-    // dezelfde, stabiele CountSession.id uitkomen — nooit enkel een
-    // heuristische match op sessienaam/datum. Ontbreekt die kolom (bestand
-    // van vóór deze uitbreiding), dan valt dit terug op een vers gegenereerd
-    // id, met de sessienaam als (zwakkere, maar reeds bestaande) dedup-sleutel.
-    // In beide gevallen geldt: eenmaal lokaal bekend (op id ÓF op naam),
-    // wordt een sessie bij een volgende (her)import nooit opnieuw aangemaakt.
+    // gereconstrueerd als een volwaardige, afgeronde sessie — zie
+    // `historyReconstruction.ts` (gedeeld met de centrale historiek-sync) voor
+    // de volledige uitleg over identiteit/idempotentie en legacy-regels.
     if (mergedHistory.length > 0) {
-      const existingSessions = await this.repository.getSessionsForOffice(office.id);
-      // Een id-match is altijd ondubbelzinnig (en moet ELKE bestaande sessie
-      // blokkeren, ongeacht status — nooit twee CountSession-records met
-      // hetzelfde id). De (zwakkere) naam-heuristiek is enkel zinvol tegen
-      // reeds AFGERONDE sessies: een toevallig gelijknamige ACTIEVE sessie
-      // (bv. een nieuwe telling die toevallig in dezelfde kalendermaand
-      // gestart werd) mag de reconstructie van een echt andere, elders
-      // afgeronde telling nooit stilzwijgend blokkeren.
-      const knownSessionIds = new Set(existingSessions.map((s) => s.id));
-      const knownSessionNames = new Set(
-        existingSessions.filter((s) => s.status === "COMPLETED").map((s) => sessionSnapshotName(s)),
+      await reconstructMissingSessionsFromHistory(
+        this.repository,
+        office.id,
+        mergedHistory,
+        `Hersteld bij import (${preview.sourceLabel})`,
       );
-      const currentArticles = await this.repository.getArticles(office.id);
-      const articlesById = new Map(currentArticles.map((a) => [a.id, a]));
-
-      const entriesBySessionName = new Map<string, StockHistoryEntry[]>();
-      for (const entry of mergedHistory) {
-        if (entry.source === "LEGACY_IMPORT") continue;
-        if (entry.sourceSessionId && knownSessionIds.has(entry.sourceSessionId)) continue;
-        if (knownSessionNames.has(entry.sessionName)) continue;
-        const list = entriesBySessionName.get(entry.sessionName) ?? [];
-        list.push(entry);
-        entriesBySessionName.set(entry.sessionName, list);
-      }
-
-      for (const sessionEntries of entriesBySessionName.values()) {
-        const first = sessionEntries[0];
-        // Stabiele identiteit (zie hierboven): hergebruik `sourceSessionId`
-        // wanneer elke regel van deze sessie dezelfde draagt — defensief
-        // terugvallen op een vers id zodra dat ontbreekt of, in theorie,
-        // inconsistent is (zou nooit mogen gebeuren: alle regels van één
-        // sessie komen altijd uit dezelfde `buildHistoryEntriesFromSnapshot`-
-        // aanroep, dus altijd hetzelfde `sourceSessionId`).
-        const stableSessionId = sessionEntries.every((e) => e.sourceSessionId === first.sourceSessionId)
-          ? first.sourceSessionId
-          : undefined;
-        const sessionId = stableSessionId ?? generateSessionId();
-        // Enkel de lokale kalenderdag is gekend (StockHistoryEntry.countDate)
-        // — zelfde precedent als ComparisonService#legacySortKey: middernacht
-        // UTC van die datum, zodat sorteer-/datumlogica die een volledige
-        // ISO-timestamp verwacht (sessionSnapshotName, localeCompare-sortering)
-        // correct blijft werken.
-        const completedAt = `${first.countDate}T00:00:00.000Z`;
-        const session: CountSession = {
-          id: sessionId,
-          officeId: office.id,
-          type: first.sessionType,
-          status: "COMPLETED",
-          startedAt: completedAt,
-          completedAt,
-          sourceFileName: `Hersteld bij import (${preview.sourceLabel})`,
-          sourceBaseDate: null,
-          articleIds: sessionEntries.filter((e) => e.status !== "OVERGENOMEN").map((e) => e.articleId),
-        };
-        const { snapshot, review } = buildSnapshotAndReviewFromHistory(session.id, sessionEntries, articlesById);
-        await this.repository.finalizeSession({
-          session,
-          updatedArticles: [],
-          historyEntries: [],
-          review,
-          snapshot,
-        });
-      }
     }
 
     // Production-pilot-readiness sprint punt 1 ("Excel portability"): geleerde

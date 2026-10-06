@@ -1,3 +1,4 @@
+import { isCentralSessionIn } from "../../domain/centralHistoryFile";
 import { selectArticlesForNewCount } from "../../domain/countScope";
 import { activeLocationsInOrder } from "../../domain/locations";
 import {
@@ -132,6 +133,27 @@ export class SessionNotDeletableError extends Error {
     this.name = "SessionNotDeletableError";
     this.sessionId = sessionId;
     this.actualStatus = actualStatus;
+  }
+}
+
+/**
+ * Gegooid door `deleteSession` voor een sessie die ook in de CENTRALE,
+ * read-only historiek bestaat. Zo'n sessie zou bij de eerstvolgende
+ * synchronisatie gewoon terugkeren ("verwarrend telkens opnieuw
+ * verschijnen"), en correctie/verwijdering van centrale historiek hoort aan
+ * de centrale bron te gebeuren (zie docs/CENTRAL_HISTORY.md). Service-laag-
+ * controle, niet enkel een verborgen knop in de UI.
+ */
+export class CentralSessionDeletionNotAllowedError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string) {
+    super(
+      `Sessie ${sessionId} komt uit de centrale historiek en kan hier niet verwijderd worden — ` +
+        "correctie of verwijdering gebeurt aan de centrale bron.",
+    );
+    this.name = "CentralSessionDeletionNotAllowedError";
+    this.sessionId = sessionId;
   }
 }
 
@@ -415,6 +437,10 @@ export class CountSessionService {
     }
     if (session.status !== "COMPLETED") {
       throw new SessionNotDeletableError(sessionId, session.status);
+    }
+    const centralStatus = await this.repository.getCentralHistoryStatus(session.officeId);
+    if (isCentralSessionIn(centralStatus, session)) {
+      throw new CentralSessionDeletionNotAllowedError(sessionId);
     }
 
     const finalizedResult = await this.repository.getFinalizedSessionResult(sessionId);
