@@ -3,7 +3,7 @@ import { countingRepository, locationAssignmentService, productCategoryService }
 import { applyAssortmentActive, isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { isCentrallyManaged } from "../../domain/centralMasterFile";
 import { resolveCategoryLabel } from "../../domain/productCategory";
-import { useCentralMasterStatus } from "../hooks/useLiveData";
+import { useAssignments, useCentralMasterStatus } from "../hooks/useLiveData";
 import type { Article, Location, ProductCategory } from "../../domain/types";
 import { BigButton } from "./BigButton";
 
@@ -55,7 +55,18 @@ export function ArticleBulkList({
 }: ArticleBulkListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Centraal beheerd kantoor: productgamma en assortiment komen uit de master (read-only bulkacties verborgen).
-  const centrallyManaged = isCentrallyManaged(useCentralMasterStatus(officeId));
+  const masterStatus = useCentralMasterStatus(officeId);
+  const centrallyManaged = isCentrallyManaged(masterStatus);
+  // Centraal aangeleverde artikel-locatiekoppelingen (uit de master) mogen niet via "×" weggehaald worden;
+  // lokaal geleerde koppelingen blijven wel verwijderbaar.
+  const assignments = useAssignments(officeId) ?? [];
+  const centralChipKeys = useMemo(() => {
+    const central = new Set(masterStatus?.assignmentIds ?? []);
+    const keys = new Set<string>();
+    if (!centrallyManaged) return keys;
+    for (const a of assignments) if (central.has(a.id)) keys.add(`${a.articleId}|${a.locationId}`);
+    return keys;
+  }, [assignments, masterStatus, centrallyManaged]);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
   const [categoryTarget, setCategoryTarget] = useState<string | null>(null);
@@ -217,11 +228,11 @@ export function ArticleBulkList({
             <button type="button" className="chip" onClick={() => setBulkAction("REMOVE")}>
               Locatie verwijderen
             </button>
-            <button type="button" className="chip" onClick={() => setBulkAction("MOVE")}>
-              Verplaatsen naar
-            </button>
             {!centrallyManaged && (
               <>
+                <button type="button" className="chip" onClick={() => setBulkAction("MOVE")}>
+                  Verplaatsen naar
+                </button>
                 <button type="button" className="chip" onClick={() => setBulkAction("SET_CATEGORY")}>
                   Productgamma wijzigen
                 </button>
@@ -263,6 +274,7 @@ export function ArticleBulkList({
             onQuickAddLocationChange={setQuickAddLocationId}
             onQuickAddConfirm={() => handleQuickAdd(article.id)}
             onRemoveChip={(locationId) => handleRemoveChip(article.id, locationId)}
+            isCentralChip={(locationId) => centralChipKeys.has(`${article.id}|${locationId}`)}
           />
         ))}
       </div>
@@ -411,6 +423,8 @@ interface ArticleRowProps {
   onQuickAddLocationChange: (locationId: string) => void;
   onQuickAddConfirm: () => void;
   onRemoveChip: (locationId: string) => void;
+  /** Koppeling komt uit de centrale master → geen "×". */
+  isCentralChip: (locationId: string) => boolean;
 }
 
 /**
@@ -440,6 +454,7 @@ function ArticleRow({
   onQuickAddLocationChange,
   onQuickAddConfirm,
   onRemoveChip,
+  isCentralChip,
 }: ArticleRowProps) {
   return (
     <div className={`article-row ${selected ? "article-row--selected" : ""}`}>
@@ -468,14 +483,16 @@ function ArticleRow({
           {locations.map((location) => (
             <span key={location.id} className="chip chip--active location-chip">
               <span>{location.name}</span>
-              <button
-                type="button"
-                className="location-chip__remove"
-                aria-label={`${location.name} verwijderen van dit artikel`}
-                onClick={() => onRemoveChip(location.id)}
-              >
-                ×
-              </button>
+              {!isCentralChip(location.id) && (
+                <button
+                  type="button"
+                  className="location-chip__remove"
+                  aria-label={`${location.name} verwijderen van dit artikel`}
+                  onClick={() => onRemoveChip(location.id)}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
           <button type="button" className="chip" onClick={quickAddOpen ? onCloseQuickAdd : onOpenQuickAdd}>

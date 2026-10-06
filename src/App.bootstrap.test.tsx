@@ -50,6 +50,8 @@ describe("App — eerste start", () => {
     render(<App />);
     expect((await screen.findAllByText("Damme")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: "Kies je kantoor" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ander kantoor toevoegen/ })).toBeInTheDocument();
+    // "+ Ander kantoor toevoegen" staat niet meer prominent op Home (enkel nog in Instellingen → Geavanceerd beheer).
+    expect(screen.queryByRole("button", { name: /Ander kantoor toevoegen/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Nieuwe telling" })).toBeInTheDocument();
   });
 });

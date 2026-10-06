@@ -38,6 +38,8 @@ const SESSION_TYPE_LABELS: Record<CountSession["type"], string> = {
 
 interface SettingsPageProps {
   officeId: string;
+  /** Verborgen fallback (Geavanceerd beheer): een kantoor via Excel toevoegen. */
+  onImportNewOffice?: () => void;
 }
 
 /**
@@ -46,7 +48,7 @@ interface SettingsPageProps {
  * op het domeinmodel (domain/locations.ts) en slaat het bijgewerkte kantoor
  * meteen op — geen apart "Opslaan"-moment nodig, dit is bewust geen wizard.
  */
-export function SettingsPage({ officeId }: SettingsPageProps) {
+export function SettingsPage({ officeId, onImportNewOffice }: SettingsPageProps) {
   const officeOrUndefined = useOffice(officeId);
   const assignments = useAssignments(officeId) ?? [];
   const [newLocationName, setNewLocationName] = useState("");
@@ -90,6 +92,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   const sessions = useSessionsForOffice(officeId) ?? [];
   const completedSessions = sessions.filter((s) => s.status === "COMPLETED");
   const centralHistoryStatus = useCentralHistoryStatus(officeId);
+  const localSessions = completedSessions.filter((x) => !isCentralSessionIn(centralHistoryStatus, x));
   // Centraal beheerd kantoor: locaties en productgamma's komen uit de centrale master en zijn hier alleen-lezen.
   const masterStatus = useCentralMasterStatus(officeId);
   const centrallyManaged = isCentrallyManaged(masterStatus);
@@ -237,6 +240,109 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
     }
   };
 
+  const visibleCategories = categories.filter((c) => countArticlesInCategory(articles, c.id) > 0);
+  const emptyCategories = categories.filter((c) => countArticlesInCategory(articles, c.id) === 0);
+  const renderCategory = (category: ProductCategory, index: number, list: ProductCategory[]) => {
+            const assignedCount = countArticlesInCategory(articles, category.id);
+            const canDelete = assignedCount === 0;
+            const isEditing = editingCategoryId === category.id;
+            const categoryReadOnly = isCentralCategory(masterStatus, category.id);
+            return (
+              <div
+                key={category.id}
+                className={`card stack stack--tight location-settings-row ${
+                  !category.active ? "location-settings-row--inactive" : ""
+                }`}
+              >
+                <div className="stack stack--tight stack--row">
+                  {isEditing ? (
+                    <input
+                      key={category.id}
+                      className="search-input"
+                      style={{ flex: 1 }}
+                      defaultValue={category.name}
+                      autoFocus
+                      onBlur={(e) => handleRenameCategory(category.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="location-settings-row__name">{category.name}</span>
+                      {!categoryReadOnly && (
+                        <button
+                          type="button"
+                          className="chip chip--settings"
+                          onClick={() => setEditingCategoryId(category.id)}
+                        >
+                          Naam wijzigen
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <span className="screen-subtitle" style={{ margin: 0 }}>
+                    {assignedCount} artikel(en)
+                  </span>
+                  {!category.active && (
+                    <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
+                  )}
+                </div>
+                {!categoryReadOnly && (
+                <div className="location-settings-row__actions">
+                  <div className="filter-row location-settings-row__order">
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omhoog verplaatsen"
+                      disabled={index === 0}
+                      onClick={() => handleMoveCategory(category.id, -1)}
+                    >
+                      ↑ Omhoog
+                    </button>
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      aria-label="Omlaag verplaatsen"
+                      disabled={index === list.length - 1}
+                      onClick={() => handleMoveCategory(category.id, 1)}
+                    >
+                      ↓ Omlaag
+                    </button>
+                  </div>
+                  <div className="filter-row">
+                    <button
+                      type="button"
+                      className="chip chip--settings"
+                      onClick={() => handleToggleCategoryActive(category)}
+                    >
+                      {category.active ? "Inactief maken" : "Activeren"}
+                    </button>
+                    {canDelete ? (
+                      <button type="button" className="chip chip--settings" onClick={() => handleDeleteCategory(category)}>
+                        Verwijderen
+                      </button>
+                    ) : (
+                      categories.length > 1 && (
+                        <button
+                          type="button"
+                          className="chip chip--settings"
+                          onClick={() => {
+                            setMergeSourceId(category.id);
+                            setMergeTargetId("");
+                          }}
+                        >
+                          Samenvoegen met...
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+                )}
+              </div>
+            );
+  };
+
   return (
     <div className="stack">
       <h1 className="screen-title">Instellingen</h1>
@@ -244,27 +350,15 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
         <div>
           <strong>Kantoor:</strong> {office.name}
         </div>
-        <div>
-          <strong>Basisdatum:</strong> {office.baseDate ?? "—"}
-        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      <LegacyImportSection officeId={officeId} />
-
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Stocklocaties</h2>
         <p className="screen-subtitle" style={{ margin: 0 }}>
-          {activeCount} actieve locatie(s) van {orderedLocations.length} totaal. Een reeds gebruikte
-          locatie kan niet verwijderd worden — enkel inactief gemaakt (historische tellingen blijven
-          zo altijd leesbaar).
+          {activeCount} actieve locatie{activeCount === 1 ? "" : "s"}
         </p>
-        {centrallyManaged && (
-          <p className="screen-subtitle" style={{ margin: 0 }}>
-            De locaties van dit kantoor worden centraal beheerd en zijn alleen-lezen.
-          </p>
-        )}
 
         <div className="stack stack--tight">
           {orderedLocations.map((location, index) => {
@@ -373,126 +467,29 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Productgamma's</h2>
-        <p className="screen-subtitle" style={{ margin: 0 }}>
-          De huidige, beheerde indeling van artikelen (bv. Zonnepanelen, Batterijen, Kabels...). Een wijziging
-          hier werkt door in alle managementanalyses, ook van reeds afgeronde tellingen — de historische
-          brongegevens per artikel (Bronproductgroep) blijven altijd ongewijzigd.
-        </p>
-        {centrallyManaged && (
-          <p className="screen-subtitle" style={{ margin: 0 }}>
-            De productgamma's worden centraal beheerd en zijn alleen-lezen.
-          </p>
-        )}
-
         {categoryError && <div className="error-banner">{categoryError}</div>}
 
         <div className="stack stack--tight">
           {categories.length === 0 && (
             <p className="empty-state">Nog geen productgamma's aangemaakt.</p>
           )}
-          {categories.map((category, index) => {
-            const assignedCount = countArticlesInCategory(articles, category.id);
-            const canDelete = assignedCount === 0;
-            const isEditing = editingCategoryId === category.id;
-            const categoryReadOnly = isCentralCategory(masterStatus, category.id);
-            return (
-              <div
-                key={category.id}
-                className={`card stack stack--tight location-settings-row ${
-                  !category.active ? "location-settings-row--inactive" : ""
-                }`}
-              >
-                <div className="stack stack--tight stack--row">
-                  {isEditing ? (
-                    <input
-                      key={category.id}
-                      className="search-input"
-                      style={{ flex: 1 }}
-                      defaultValue={category.name}
-                      autoFocus
-                      onBlur={(e) => handleRenameCategory(category.id, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                      }}
-                    />
-                  ) : (
-                    <>
-                      <span className="location-settings-row__name">{category.name}</span>
-                      {!categoryReadOnly && (
-                        <button
-                          type="button"
-                          className="chip chip--settings"
-                          onClick={() => setEditingCategoryId(category.id)}
-                        >
-                          Naam wijzigen
-                        </button>
-                      )}
-                    </>
-                  )}
-                  <span className="screen-subtitle" style={{ margin: 0 }}>
-                    {assignedCount} artikel(en)
-                  </span>
-                  {!category.active && (
-                    <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
-                  )}
-                </div>
-                {!categoryReadOnly && (
-                <div className="location-settings-row__actions">
-                  <div className="filter-row location-settings-row__order">
-                    <button
-                      type="button"
-                      className="chip chip--settings"
-                      aria-label="Omhoog verplaatsen"
-                      disabled={index === 0}
-                      onClick={() => handleMoveCategory(category.id, -1)}
-                    >
-                      ↑ Omhoog
-                    </button>
-                    <button
-                      type="button"
-                      className="chip chip--settings"
-                      aria-label="Omlaag verplaatsen"
-                      disabled={index === categories.length - 1}
-                      onClick={() => handleMoveCategory(category.id, 1)}
-                    >
-                      ↓ Omlaag
-                    </button>
-                  </div>
-                  <div className="filter-row">
-                    <button
-                      type="button"
-                      className="chip chip--settings"
-                      onClick={() => handleToggleCategoryActive(category)}
-                    >
-                      {category.active ? "Inactief maken" : "Activeren"}
-                    </button>
-                    {canDelete ? (
-                      <button type="button" className="chip chip--settings" onClick={() => handleDeleteCategory(category)}>
-                        Verwijderen
-                      </button>
-                    ) : (
-                      categories.length > 1 && (
-                        <button
-                          type="button"
-                          className="chip chip--settings"
-                          onClick={() => {
-                            setMergeSourceId(category.id);
-                            setMergeTargetId("");
-                          }}
-                        >
-                          Samenvoegen met...
-                        </button>
-                      )
-                    )}
-                  </div>
-                </div>
-                )}
-              </div>
-            );
-          })}
+          {visibleCategories.map((category, index) => renderCategory(category, index, visibleCategories))}
         </div>
 
-        {!centrallyManaged && (
+      </div>
+
+      <details className="advanced-settings">
+        <summary className="screen-subtitle advanced-settings__summary">Geavanceerd beheer</summary>
+        <div className="stack">
+          {emptyCategories.length > 0 && (
+            <div className="card stack">
+              <h3 style={{ margin: 0 }}>Lege productgamma's</h3>
+              <div className="stack stack--tight">
+                {emptyCategories.map((category, index) => renderCategory(category, index, emptyCategories))}
+              </div>
+            </div>
+          )}
+          {!centrallyManaged && (
           <div className="stack stack--tight stack--row">
             <input
               className="search-input"
@@ -506,23 +503,18 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
             </BigButton>
           </div>
         )}
-      </div>
 
       <div className="card stack">
-        <h2 style={{ margin: 0 }}>Tellingen</h2>
+        <h3 style={{ margin: 0 }}>Lokale tellingen verwijderen</h3>
         <p className="screen-subtitle" style={{ margin: 0 }}>
-          Afgeronde stocktellingen van dit kantoor. Verwijderen is definitief: de telling, haar
-          resultaten en HISTORIE-regels verdwijnen, en de vorige-tellingbaseline van de betrokken
-          artikelen wordt automatisch hersteld. Artikelen/mastergegevens zelf blijven altijd behouden.
+          Enkel voor een telling die per vergissing op dit toestel werd afgerond. Verwijderen is definitief.
         </p>
 
         {sessionError && <div className="error-banner">{sessionError}</div>}
 
         <div className="stack stack--tight">
-          {completedSessions.length === 0 && (
-            <p className="empty-state">Nog geen afgeronde tellingen voor dit kantoor.</p>
-          )}
-          {completedSessions.map((session) => (
+          {localSessions.length === 0 && <p className="empty-state">Geen lokale tellingen om te verwijderen.</p>}
+          {localSessions.map((session) => (
             <div key={session.id} className="card stack stack--tight location-settings-row">
               <div className="stack stack--tight stack--row">
                 <span className="location-settings-row__name">{sessionSnapshotName(session)}</span>
@@ -533,11 +525,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
               </div>
               <div className="location-settings-row__actions">
                 <div className="filter-row">
-                  {isCentralSessionIn(centralHistoryStatus, session) ? (
-                    <span className="screen-subtitle" style={{ margin: 0 }}>
-                      Centrale telling — alleen-lezen (correctie aan de centrale bron)
-                    </span>
-                  ) : (
+                  {isCentralSessionIn(centralHistoryStatus, session) ? null : (
                     <button
                       type="button"
                       className="chip chip--settings"
@@ -555,6 +543,18 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           ))}
         </div>
       </div>
+
+          <LegacyImportSection officeId={officeId} />
+          {onImportNewOffice && (
+            <div className="card stack stack--tight">
+              <h3 style={{ margin: 0 }}>Kantoor via Excel toevoegen</h3>
+              <BigButton variant="ghost" onClick={onImportNewOffice}>
+                Ander kantoor toevoegen
+              </BigButton>
+            </div>
+          )}
+        </div>
+      </details>
 
       {sessionToDelete && (
         <div className="modal-overlay">

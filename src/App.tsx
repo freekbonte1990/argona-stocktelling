@@ -439,7 +439,12 @@ function RouteBody({
             await countingRepository.setSelectedOfficeId(officeId);
             onNavigate({ screen: "home", officeId });
           }}
-          onImportNewOffice={() => onNavigate({ screen: "bootstrap", fromOfficeId: route.officeId })}
+          onLoadCentralOffice={async (officeId) => {
+            const result = await centralDataSyncService.bootstrapOffice(officeId);
+            if (!result.ok) return result.message ?? "Kantoor kon niet geladen worden.";
+            onNavigate({ screen: "home", officeId });
+            return null;
+          }}
           onOpenReview={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
           onOpenLegacySnapshot={(snapshotId) =>
             onNavigate({ screen: "legacySnapshot", officeId: route.officeId, snapshotId })
@@ -547,6 +552,11 @@ function RouteBody({
     case "articleDetail":
       return <ArticleDetailPage officeId={route.officeId} articleId={route.articleId} />;
     case "settings":
-      return <SettingsPage officeId={route.officeId} />;
+      return (
+        <SettingsPage
+          officeId={route.officeId}
+          onImportNewOffice={() => onNavigate({ screen: "bootstrap", fromOfficeId: route.officeId })}
+        />
+      );
   }
 }

@@ -1631,3 +1631,31 @@ button {
   color: var(--color-text-muted);
   font-weight: 700;
 }
+
+/* UX-cleanup: "Geavanceerd beheer" in Instellingen — standaard ingeklapt, discreet. */
+.advanced-settings {
+  margin-top: var(--space-2);
+}
+.advanced-settings__summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+.advanced-settings__summary::-webkit-details-marker {
+  display: none;
+}
+.advanced-settings__summary::before {
+  content: "▸";
+  font-size: 0.75em;
+}
+.advanced-settings[open] .advanced-settings__summary::before {
+  transform: rotate(90deg);
+}
+.advanced-settings > .stack {
+  margin-top: var(--space-2);
+}

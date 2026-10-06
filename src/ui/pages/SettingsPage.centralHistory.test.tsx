@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { db } from "../../adapters/storage/db";
 import { countingRepository } from "../../application/container";
 import { makeOffice } from "../../application/services/centralHistoryTestUtils";
@@ -65,10 +65,10 @@ describe("Instellingen en centrale historiek", () => {
     await countingRepository.createSession(completed("local-jul", "2026-07-31T10:00:00.000Z"));
     render(<SettingsPage officeId="damme" />);
 
-    const centralRow = (await screen.findByText("2026-08 Maand")).closest(".location-settings-row") as HTMLElement;
+    // De lijst staat onder "Geavanceerd beheer" en toont enkel lokale tellingen — een centrale telling is niet verwijderbaar en staat er niet.
     const localRow = (await screen.findByText("2026-07 Maand")).closest(".location-settings-row") as HTMLElement;
-    expect(within(centralRow).queryByRole("button", { name: "Verwijderen" })).not.toBeInTheDocument();
-    expect(within(centralRow).getByText(/alleen-lezen/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("2026-08 Maand")).not.toBeInTheDocument());
+    expect(screen.queryByText(/alleen-lezen/)).not.toBeInTheDocument();
     expect(within(localRow).getByRole("button", { name: "Verwijderen" })).toBeInTheDocument();
   });
 });

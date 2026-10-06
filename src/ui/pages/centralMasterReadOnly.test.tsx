@@ -38,10 +38,11 @@ afterEach(() => cleanup());
 describe("Instellingen — centraal beheerd kantoor", () => {
   it("locaties en productgamma's zijn alleen-lezen: geen toevoegvelden, geen hernoem-/verwijderknoppen", async () => {
     render(<SettingsPage officeId="damme" />);
-    expect(await screen.findByText(/De locaties van dit kantoor worden centraal beheerd/)).toBeInTheDocument();
-    expect(await screen.findByText(/De productgamma's worden centraal beheerd/)).toBeInTheDocument();
-    expect(screen.getByText("Magazijn")).toBeInTheDocument();
-    expect(screen.getByText("Kabels")).toBeInTheDocument();
+    expect(await screen.findByText("Magazijn")).toBeInTheDocument();
+    expect(await screen.findByText("Kabels")).toBeInTheDocument();
+    // Geen technische uitleg meer in de normale weergave.
+    expect(screen.queryByText(/centraal beheerd/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/alleen-lezen/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Naam wijzigen" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Locatie toevoegen/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Productgamma toevoegen/ })).not.toBeInTheDocument();
@@ -63,9 +64,10 @@ describe("Instellingen — centraal beheerd kantoor", () => {
 });
 
 describe("Artikeldetail — centraal beheerd artikel", () => {
-  it("een centraal artikel is alleen-lezen: geen 'Bewerken', wel de melding", async () => {
+  it("een centraal artikel is alleen-lezen: geen 'Bewerken', geen technische melding", async () => {
     render(<ArticleDetailPage officeId="damme" articleId="damme:A1" />);
-    expect(await screen.findByText("Centraal beheerd — alleen-lezen")).toBeInTheDocument();
+    expect(await screen.findByText("Artikelnummer")).toBeInTheDocument();
+    expect(screen.queryByText("Centraal beheerd — alleen-lezen")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bewerken" })).not.toBeInTheDocument();
   });
 
@@ -80,12 +82,13 @@ describe("Artikeldetail — centraal beheerd artikel", () => {
 });
 
 describe("Artikels — bulkacties", () => {
-  it("bulk 'Productgamma wijzigen' en 'Assortiment wijzigen' zijn verborgen; 'Verplaatsen' blijft (lokale koppelingen)", async () => {
+  it("bulk 'Productgamma wijzigen', 'Assortiment wijzigen' en 'Verplaatsen naar' zijn verborgen; 'Locatie toevoegen' blijft", async () => {
     const user = userEvent.setup();
     render(<ArticlesPage officeId="damme" onOpenArticle={() => {}} />);
     await waitFor(() => expect(screen.queryByText("Bezig met laden...")).not.toBeInTheDocument());
     await user.click(await screen.findByRole("checkbox", { name: "Selecteer alle gefilterde artikelen" }));
-    const bar = (await screen.findByRole("button", { name: /Verplaatsen naar/ })).parentElement as HTMLElement;
+    const bar = (await screen.findByRole("button", { name: "Locatie toevoegen" })).parentElement as HTMLElement;
+    expect(within(bar).queryByRole("button", { name: /Verplaatsen naar/ })).not.toBeInTheDocument();
     expect(within(bar).queryByRole("button", { name: "Productgamma wijzigen" })).not.toBeInTheDocument();
     expect(within(bar).queryByRole("button", { name: "Assortiment wijzigen" })).not.toBeInTheDocument();
   });

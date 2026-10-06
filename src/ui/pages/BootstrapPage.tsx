@@ -48,7 +48,7 @@ export function BootstrapPage({ onBootstrapped, onUseExcel, onCancel }: Bootstra
     void loadOffices().catch(() =>
       setState({
         step: "error",
-        message: "Centrale gegevens niet bereikbaar — probeer opnieuw of importeer een Excelbestand.",
+        message: "Centrale gegevens niet bereikbaar — controleer de internetverbinding en probeer opnieuw.",
         offices: null,
         localOfficeIds: new Set(),
       }),
@@ -70,10 +70,14 @@ export function BootstrapPage({ onBootstrapped, onUseExcel, onCancel }: Bootstra
     });
   }
 
+  // Excel is enkel nog een verborgen fallback (Geavanceerd), geen gewone stap.
   const excelButton = (
-    <BigButton variant="ghost" onClick={onUseExcel}>
-      Liever een Excelbestand importeren
-    </BigButton>
+    <details className="advanced-settings">
+      <summary className="screen-subtitle advanced-settings__summary">Geavanceerd</summary>
+      <BigButton variant="ghost" onClick={onUseExcel}>
+        Liever een Excelbestand importeren
+      </BigButton>
+    </details>
   );
   const cancelButton = onCancel ? (
     <BigButton variant="ghost" onClick={onCancel}>

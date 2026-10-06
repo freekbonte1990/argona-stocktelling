@@ -309,11 +309,6 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
               Bewerken
             </button>
           )}
-          {masterOwned && (
-            <span className="screen-subtitle" style={{ margin: 0 }}>
-              Centraal beheerd — alleen-lezen
-            </span>
-          )}
         </div>
         <div className="article-detail-field">
           <span className="article-detail-field__label">Artikelnummer</span>
@@ -456,10 +451,12 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
                 {resolveCategoryLabel(article.categoryId, categoryByIdMap)}
               </span>
             </div>
-            <div className="article-detail-field">
-              <span className="article-detail-field__label">Bronproductgroep</span>
-              <span className="article-detail-field__value">{article.productGroup ?? "—"}</span>
-            </div>
+            {!masterOwned && (
+              <div className="article-detail-field">
+                <span className="article-detail-field__label">Bronproductgroep</span>
+                <span className="article-detail-field__value">{article.productGroup ?? "—"}</span>
+              </div>
+            )}
             <div className="article-detail-field">
               <span className="article-detail-field__label">Leverancier</span>
               <span className="article-detail-field__value">{article.supplier ?? "—"}</span>

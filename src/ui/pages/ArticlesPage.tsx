@@ -136,14 +136,13 @@ export function ArticlesPage({ officeId, onOpenArticle }: ArticlesPageProps) {
         <button type="button" className="chip articles-toolbar__filters" onClick={() => setFiltersOpen(true)}>
           Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
         </button>
-        <BigButton
-          variant="secondary"
-          style={{ width: "auto" }}
-          className="articles-toolbar__new"
+        <button
+          type="button"
+          className="chip articles-toolbar__new"
           onClick={() => setNewArticleOpen(true)}
         >
           + Nieuw artikel
-        </BigButton>
+        </button>
       </div>
 
       {activeFilterCount > 0 && (

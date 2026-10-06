@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { centralDataSyncService } from "../../application/container";
 import { computeSessionProgress } from "../../domain/progress";
 import { buildPreviousCountList, legacySnapshotTitle } from "../../domain/legacySnapshotView";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
@@ -21,7 +22,13 @@ interface HomePageProps {
   onOpenArticles: () => void;
   onOpenSettings: () => void;
   onSwitchOffice: (officeId: string) => void;
-  onImportNewOffice: () => void;
+  /** Verouderd/optioneel: "Ander kantoor toevoegen" staat niet meer op Home (zie Instellingen → Geavanceerd beheer). */
+  onImportNewOffice?: () => void;
+  /**
+   * Een centraal kantoor dat nog niet op dit toestel staat kiezen: haalt master + historiek op.
+   * Geeft een foutmelding terug, of `null` bij succes (de aanroeper navigeert dan zelf naar het kantoor).
+   */
+  onLoadCentralOffice?: (officeId: string) => Promise<string | null>;
   /** Naar de (alleen-lezen) "Analyse telling" van een afgeronde telling (Sprint 2). */
   onOpenReview: (sessionId: string) => void;
   /** Naar de alleen-lezen detailweergave van een legacy "Historische snapshot" (id = `legacy:<periode>`). */
@@ -40,7 +47,7 @@ export function HomePage({
   onOpenArticles,
   onOpenSettings,
   onSwitchOffice,
-  onImportNewOffice,
+  onLoadCentralOffice,
   onOpenReview,
   onOpenLegacySnapshot,
   onCancelSession,
@@ -64,6 +71,42 @@ export function HomePage({
    * puur een render-keuze hier). Er wordt bewust geen `cancelledSessions`
    * meer berekend/gerenderd op dit scherm.
    */
+
+  // Kantoren uit de centrale index die nog niet lokaal staan (ook kiesbaar in de kantoorselector).
+  const [centralOffices, setCentralOffices] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingOfficeId, setLoadingOfficeId] = useState<string | null>(null);
+  const [officeError, setOfficeError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    centralDataSyncService
+      .listOffices()
+      .then((result) => {
+        if (!cancelled && result.ok) setCentralOffices(result.offices.map((o) => ({ id: o.id, name: o.name })));
+      })
+      .catch(() => {
+        // Offline/onbereikbaar: enkel de lokale kantoren blijven kiesbaar.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const localOfficeIds = new Set(allOffices.map((o) => o.id));
+  const remoteOnlyOffices = centralOffices.filter((o) => !localOfficeIds.has(o.id));
+
+  async function handleOfficeChange(nextOfficeId: string) {
+    setOfficeError(null);
+    if (localOfficeIds.has(nextOfficeId) || !onLoadCentralOffice) {
+      onSwitchOffice(nextOfficeId);
+      return;
+    }
+    setLoadingOfficeId(nextOfficeId);
+    try {
+      const message = await onLoadCentralOffice(nextOfficeId);
+      if (message) setOfficeError(message);
+    } finally {
+      setLoadingOfficeId(null);
+    }
+  }
 
   const [dialog, setDialog] = useState<SessionDialog>("none");
   const [cancelling, setCancelling] = useState(false);
@@ -118,15 +161,23 @@ export function HomePage({
         <select
           className="search-input office-select"
           value={officeId}
-          onChange={(e) => onSwitchOffice(e.target.value)}
+          disabled={loadingOfficeId !== null}
+          onChange={(e) => void handleOfficeChange(e.target.value)}
         >
           {allOffices.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
             </option>
           ))}
+          {remoteOnlyOffices.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
         </select>
       </label>
+      {loadingOfficeId && <p className="screen-subtitle">Kantoor wordt geladen...</p>}
+      {officeError && <div className="error-banner">{officeError}</div>}
       {activeSession && activeProgress && (
         <div className="card card--accent stack stack--tight">
           <h2 style={{ margin: 0 }}>Lopende telling</h2>
@@ -171,9 +222,6 @@ export function HomePage({
         </BigButton>
         <BigButton variant="ghost" onClick={onOpenSettings}>
           Instellingen
-        </BigButton>
-        <BigButton variant="ghost" onClick={onImportNewOffice}>
-          + Ander kantoor toevoegen
         </BigButton>
       </div>
       {!office && <p className="screen-subtitle">Kantoor wordt geladen...</p>}

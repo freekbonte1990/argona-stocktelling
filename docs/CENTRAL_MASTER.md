@@ -20,6 +20,10 @@ Een nieuw toestel hoeft dus geen Excel-master meer te importeren: kantoor kiezen
 
 Daarna werkt het toestel lokaal/offline verder; de achtergrond-sync houdt master en historiek bij. Een HTTP 401/403 (bv. van een host-bescherming) wordt gewoon als "niet bereikbaar" getoond — nooit als auth-melding.
 
+## Kantoor wisselen (Home)
+
+De kantoorselector op Home toont de lokale kantoren plus de kantoren uit de centrale index die nog niet op dit toestel staan. Een nog niet geladen kantoor kiezen haalt automatisch master + historiek op (zelfde `bootstrapOffice`); offline blijven enkel de lokale kantoren kiesbaar. "Ander kantoor toevoegen" (Excel) staat niet meer op Home maar onder Instellingen → Geavanceerd beheer, samen met de legacy-import en het verwijderen van lokale tellingen. Het Excel-alternatief op het eerste scherm staat onder "Geavanceerd".
+
 ## Update/sync-gedrag
 
 - Achtergrond, fire-and-forget, throttle 10 min, vanuit Home: master → historiek → "Vorige telling" afleiden. Een mislukte master blokkeert de historiek niet en omgekeerd; er wordt nooit iets gegooid.
