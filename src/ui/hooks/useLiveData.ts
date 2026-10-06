@@ -2,6 +2,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../adapters/storage/db";
 import { buildArticleHistory, mergeArticleHistory } from "../../domain/articleHistory";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
+import { listLegacySnapshotItems } from "../../domain/legacySnapshotView";
 import type { CountEntry } from "../../domain/types";
 
 /**
@@ -210,4 +211,21 @@ export function useCentralHistoryStatus(officeId: string | undefined) {
  */
 export function useCentralMasterStatus(officeId: string | undefined) {
   return useLiveQuery(() => (officeId ? db.centralMasterStatus.get(officeId) : undefined), [officeId]);
+}
+
+/** Legacy "Historische snapshots" van een kantoor (nieuwste eerst) — presentatie-items, geen sessies. */
+export function useLegacySnapshots(officeId: string | undefined) {
+  return useLiveQuery(
+    () =>
+      officeId
+        ? db.stockHistoryEntries
+            .where("officeId")
+            .equals(officeId)
+            .filter((entry) => entry.source === "LEGACY_IMPORT")
+            .toArray()
+            .then((entries) => listLegacySnapshotItems(entries))
+        : [],
+    [officeId],
+    [],
+  );
 }

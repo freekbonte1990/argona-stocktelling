@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { computeSessionProgress } from "../../domain/progress";
+import { buildPreviousCountList, legacySnapshotTitle } from "../../domain/legacySnapshotView";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import { BigButton } from "../components/BigButton";
 import {
   useActiveSession,
   useAllOffices,
   useCountEntries,
+  useLegacySnapshots,
   useOffice,
   useSessionsForOffice,
 } from "../hooks/useLiveData";
@@ -22,6 +24,8 @@ interface HomePageProps {
   onImportNewOffice: () => void;
   /** Naar de (alleen-lezen) "Analyse telling" van een afgeronde telling (Sprint 2). */
   onOpenReview: (sessionId: string) => void;
+  /** Naar de alleen-lezen detailweergave van een legacy "Historische snapshot" (id = `legacy:<periode>`). */
+  onOpenLegacySnapshot?: (legacySnapshotId: string) => void;
   /** Annuleert de meegegeven (ACTIVE) sessie — sessielogica-fix. */
   onCancelSession: (sessionId: string) => Promise<void>;
 }
@@ -38,6 +42,7 @@ export function HomePage({
   onSwitchOffice,
   onImportNewOffice,
   onOpenReview,
+  onOpenLegacySnapshot,
   onCancelSession,
 }: HomePageProps) {
   const office = useOffice(officeId);
@@ -46,6 +51,12 @@ export function HomePage({
   const activeEntries = useCountEntries(activeSession?.id) ?? [];
   const allSessions = useSessionsForOffice(officeId);
   const completedSessions = allSessions.filter((s) => s.status === "COMPLETED");
+  // Echte app-tellingen + legacy historische snapshots in één chronologische lijst (nieuwste eerst).
+  const legacySnapshots = useLegacySnapshots(officeId) ?? [];
+  const previousCounts = useMemo(
+    () => buildPreviousCountList(completedSessions, legacySnapshots),
+    [completedSessions, legacySnapshots],
+  );
   /*
    * UI/UX-fix (Home, spec-item 3): "Geannuleerde tellingen" verdwijnt
    * uitsluitend uit de zichtbare Home-UI — de CANCELLED-records zelf blijven
@@ -175,18 +186,35 @@ export function HomePage({
         de historiek te bekijken. Puur presentatie — de klikbare
         `session-history-item`-knoppen en `onOpenReview` blijven ongewijzigd.
       */}
-      {completedSessions.length > 0 && (
+      {previousCounts.length > 0 && (
         <div className="stack stack--tight">
           <details className="session-history-collapsible">
             <summary className="screen-subtitle session-history-collapsible__summary" style={{ margin: 0 }}>
-              Vorige tellingen ({completedSessions.length})
+              Vorige tellingen ({previousCounts.length})
             </summary>
             <div className="session-history">
-              {completedSessions.map((s) => (
+              {previousCounts.map((item) =>
+                item.kind === "LEGACY" ? (
+                  <button
+                    key={item.id}
+                    className="session-history-item session-history-item--legacy"
+                    onClick={() => onOpenLegacySnapshot?.(item.id)}
+                  >
+                    <span className="stack stack--tight" style={{ gap: 2 }}>
+                      <span>{legacySnapshotTitle(item.legacy.periodLabel)}</span>
+                      <span className="screen-subtitle" style={{ margin: 0 }}>
+                        Historisch · alleen-lezen
+                      </span>
+                    </span>
+                    <span className="screen-subtitle" style={{ margin: 0 }}>
+                      {item.legacy.periodLabel}
+                    </span>
+                  </button>
+                ) : (
                 <button
-                  key={s.id}
+                  key={item.id}
                   className="session-history-item"
-                  onClick={() => onOpenReview(s.id)}
+                  onClick={() => onOpenReview(item.id)}
                 >
                   {/*
                     Sprint 2 §12: naast het type ("Maandtelling") ook meteen de
@@ -199,16 +227,17 @@ export function HomePage({
                     blijft ongewijzigd zijn eigen element.
                   */}
                   <span className="stack stack--tight" style={{ gap: 2 }}>
-                    <span>{SESSION_TYPE_LABELS[s.type] ?? s.type}</span>
+                    <span>{SESSION_TYPE_LABELS[item.session.type] ?? item.session.type}</span>
                     <span className="screen-subtitle" style={{ margin: 0 }}>
-                      {sessionSnapshotName(s)}
+                      {sessionSnapshotName(item.session)}
                     </span>
                   </span>
                   <span className="screen-subtitle" style={{ margin: 0 }}>
-                    {s.completedAt ? formatDate(s.completedAt) : ""}
+                    {item.session.completedAt ? formatDate(item.session.completedAt) : ""}
                   </span>
                 </button>
-              ))}
+                ),
+              )}
             </div>
           </details>
         </div>

@@ -1,5 +1,7 @@
 import { IndexedDbCountingRepository } from "../adapters/storage/IndexedDbCountingRepository";
 import { ExcelStockResultExporter } from "../adapters/excel/ExcelStockResultExporter";
+import { ExcelLegacySnapshotExporter } from "../adapters/excel/ExcelLegacySnapshotExporter";
+import { LegacySnapshotService } from "./services/LegacySnapshotService";
 import { ImportService } from "./services/ImportService";
 import { CountSessionService } from "./services/CountSessionService";
 import { CountingService } from "./services/CountingService";
@@ -39,6 +41,12 @@ export const exportService = new ExportService(repository, resultExporter);
 export const productCategoryService = new ProductCategoryService(repository);
 export const analysisService = new AnalysisService(repository, productCategoryService);
 export const comparisonService = new ComparisonService(repository, productCategoryService);
+export const legacySnapshotService = new LegacySnapshotService(
+  repository,
+  comparisonService,
+  productCategoryService,
+  new ExcelLegacySnapshotExporter(),
+);
 export const locationAssignmentService = new LocationAssignmentService(repository);
 export const newArticleService = new NewArticleService(
   repository,

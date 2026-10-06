@@ -30,6 +30,11 @@ import { formatCount, formatDate, formatEuro, formatSignedCount, formatSignedEur
 interface ComparisonPageProps {
   /** De sessie van waaruit "Vergelijken" geopend werd — wordt de default telling B (spec §2). */
   sessionId: string;
+  /**
+   * Nodig wanneer `sessionId` een legacy "Historische snapshot" is
+   * (`legacy:<periode>`, geen echte sessie waaruit het kantoor af te leiden is).
+   */
+  officeId?: string;
   onOpenArticle: (articleId: string) => void;
   /** Terug naar de bestaande "Analyse telling" (Sprint 2) van de meegegeven sessie. */
   onOpenAnalysis: (sessionId: string) => void;
@@ -73,9 +78,9 @@ function headerCompletionSuffix(header: SessionComparisonHeader): string {
  * `ComparisonService` (die zelf uitsluitend bevroren `FinalizedSessionResult`s
  * leest, nooit levende `Article`-data) — geen enkele telactie, geen writes.
  */
-export function ComparisonPage({ sessionId, onOpenArticle, onOpenAnalysis }: ComparisonPageProps) {
+export function ComparisonPage({ sessionId, officeId: officeIdProp, onOpenArticle, onOpenAnalysis }: ComparisonPageProps) {
   const openedFromSession = useSession(sessionId);
-  const officeId = openedFromSession?.officeId;
+  const officeId = officeIdProp ?? openedFromSession?.officeId;
   const office = useOffice(officeId);
 
   const [options, setOptions] = useState<ComparisonSessionOption[]>([]);

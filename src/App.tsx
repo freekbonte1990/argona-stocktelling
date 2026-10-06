@@ -10,6 +10,8 @@ import { CountingPage } from "./ui/pages/CountingPage";
 import { ReviewPage } from "./ui/pages/ReviewPage";
 import { AnalysisPage } from "./ui/pages/AnalysisPage";
 import { ComparisonPage } from "./ui/pages/ComparisonPage";
+import { LegacySnapshotPage } from "./ui/pages/LegacySnapshotPage";
+import { isLegacySnapshotId } from "./domain/legacySnapshotView";
 import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
@@ -26,7 +28,8 @@ type Route =
   | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
   | { screen: "review"; sessionId: string }
   | { screen: "analysis"; sessionId: string }
-  | { screen: "comparison"; sessionId: string }
+  | { screen: "comparison"; sessionId: string; officeId?: string }
+  | { screen: "legacySnapshot"; officeId: string; snapshotId: string }
   | { screen: "articles"; officeId: string }
   | { screen: "articleDetail"; officeId: string; articleId: string }
   | { screen: "settings"; officeId: string };
@@ -104,11 +107,17 @@ async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
     case "articleDetail":
     case "settings":
       return !!(await countingRepository.getOffice(route.officeId));
+    case "legacySnapshot":
+      return !!(await countingRepository.getOffice(route.officeId));
+    case "comparison":
+      if (route.officeId && isLegacySnapshotId(route.sessionId)) {
+        return !!(await countingRepository.getOffice(route.officeId));
+      }
+      return !!(await countingRepository.getSession(route.sessionId));
     case "locationOverview":
     case "withoutLocation":
     case "review":
     case "analysis":
-    case "comparison":
       return !!(await countingRepository.getSession(route.sessionId));
     case "counting": {
       const session = await countingRepository.getSession(route.sessionId);
@@ -219,9 +228,12 @@ function RouteHeader({
     route.screen === "newSession" ||
     route.screen === "articles" ||
     route.screen === "articleDetail" ||
-    route.screen === "settings"
+    route.screen === "settings" ||
+    route.screen === "legacySnapshot"
       ? route.officeId
-      : undefined;
+      : route.screen === "comparison"
+        ? route.officeId
+        : undefined;
   const office = useOffice(directOfficeId);
   const session = useSession(
     route.screen === "locationOverview" ||
@@ -344,13 +356,22 @@ function RouteHeader({
       />
     );
   }
+  if (route.screen === "legacySnapshot") {
+    return (
+      <AppHeader
+        breadcrumb={`${office?.name ?? ""} — historische snapshot`}
+        onBack={() => onNavigate({ screen: "home", officeId: route.officeId })}
+      />
+    );
+  }
   if (route.screen === "comparison") {
     return (
       <AppHeader
-        breadcrumb={`${sessionOffice?.name ?? ""} — vergelijking tellingen`}
+        breadcrumb={`${(route.officeId ? office : sessionOffice)?.name ?? ""} — vergelijking tellingen`}
         onBack={() => {
-          if (!session) return;
-          onNavigate({ screen: "home", officeId: session.officeId });
+          const officeId = route.officeId ?? session?.officeId;
+          if (!officeId) return;
+          onNavigate({ screen: "home", officeId });
         }}
       />
     );
@@ -420,6 +441,9 @@ function RouteBody({
           }}
           onImportNewOffice={() => onNavigate({ screen: "bootstrap", fromOfficeId: route.officeId })}
           onOpenReview={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
+          onOpenLegacySnapshot={(snapshotId) =>
+            onNavigate({ screen: "legacySnapshot", officeId: route.officeId, snapshotId })
+          }
           onCancelSession={(sessionId) => countSessionService.cancelSession(sessionId)}
         />
       );
@@ -484,15 +508,33 @@ function RouteBody({
           onOpenComparison={(sessionId) => onNavigate({ screen: "comparison", sessionId })}
         />
       );
+    case "legacySnapshot":
+      return (
+        <LegacySnapshotPage
+          officeId={route.officeId}
+          snapshotId={route.snapshotId}
+          onOpenComparison={(snapshotId) =>
+            onNavigate({ screen: "comparison", sessionId: snapshotId, officeId: route.officeId })
+          }
+        />
+      );
     case "comparison":
       return (
         <ComparisonPage
           sessionId={route.sessionId}
+          officeId={route.officeId}
           onOpenArticle={async (articleId) => {
-            const session = await countingRepository.getSession(route.sessionId);
-            if (session) onNavigate({ screen: "articleDetail", officeId: session.officeId, articleId });
+            const officeId = route.officeId ?? (await countingRepository.getSession(route.sessionId))?.officeId;
+            if (officeId) onNavigate({ screen: "articleDetail", officeId, articleId });
           }}
-          onOpenAnalysis={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
+          onOpenAnalysis={async (sessionId) => {
+            if (isLegacySnapshotId(sessionId)) {
+              const officeId = route.officeId ?? (await countingRepository.getSession(route.sessionId))?.officeId;
+              if (officeId) onNavigate({ screen: "legacySnapshot", officeId, snapshotId: sessionId });
+              return;
+            }
+            onNavigate({ screen: "analysis", sessionId });
+          }}
         />
       );
     case "articles":

@@ -97,3 +97,11 @@ Bij het openen van de app en bij elke kantoorwissel (op de achtergrond, max. om 
 
 Een `EBuddyCentralHistorySource` implementeert dezelfde poort (`fetchOfficeHistory`, resultaat = `CentralHistoryFile`). In `application/container.ts` wordt enkel de ene regel
 `new HttpCentralHistorySource(...)` vervangen. Sync-service, repository, Analyse en Vergelijken blijven ongewijzigd; het publish-script, `api/` en `central-history-data/` kunnen dan vervallen.
+
+## Legacy periodes als "Historische snapshot" (Home → Vorige tellingen)
+
+Legacy periodes (`source: "LEGACY_IMPORT"`, status `LEGACY`) zijn **nooit** een `CountSession`. Home toont ze toch samen met de echte app-tellingen, in één chronologische lijst (nieuwste eerst; bij dezelfde dag staat de echte telling boven de legacy), met de teller van beide samen (bv. 1 app-telling + 7 legacy = "Vorige tellingen (8)"). Een item heet `01/09/2026 — Historische snapshot`.
+
+- Model: `domain/legacySnapshotView.ts` (`listLegacySnapshotItems`, `buildPreviousCountList`, `buildLegacySnapshotView`) — puur presentatie, afgeleid uit de `StockHistoryEntry`-regels; id = `legacy:<periode>` (zelfde schema als Vergelijken).
+- Detail (alleen-lezen): `LegacySnapshotPage` — periode, kantoor, totale voorraadwaarde, artikels, productgamma's, "Vergelijken" en "Exporteren naar Excel". Hergebruikt `ComparisonService#getLegacyPeriodSnapshot` → `buildLegacyPeriodSnapshot`.
+- Export: `LegacySnapshotService#exportToExcel` → `ExcelLegacySnapshotExporter` (los bestand met INFO-blad + datablad). Uitsluitend de ORIGINELE historische hoeveelheid en kostprijs van die periode (waarde = hoeveelheid × historische kostprijs); `Article.costPrice` wordt nergens gelezen. Raakt het rollend archief niet.

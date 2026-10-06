@@ -159,7 +159,7 @@ export class ComparisonService {
    * periodes ongeacht import-status tonen (dat zou een niet-bestaande
    * periode suggereren die gewoon leeg zou uitvallen).
    */
-  private async getLegacyPeriodOptions(officeId: string): Promise<ComparisonSessionOption[]> {
+  async getLegacyPeriodOptions(officeId: string): Promise<ComparisonSessionOption[]> {
     const historyEntries = await this.repository.getStockHistoryEntries(officeId);
     const legacySessionNames = new Set(
       historyEntries.filter((e) => e.source === "LEGACY_IMPORT").map((e) => e.sessionName),
@@ -177,6 +177,16 @@ export class ComparisonService {
       });
     }
     return options;
+  }
+
+  /**
+   * Hergebruik voor "Historische snapshot"-detail/-export (Home → Vorige
+   * tellingen): de bestaande synthetische legacy-snapshot (zelfde als in
+   * Analyse/Vergelijken), nooit een `CountSession`.
+   */
+  async getLegacyPeriodSnapshot(officeId: string, legacySnapshotId: string): Promise<ComparisonSnapshotInput> {
+    if (decodeLegacyPeriodKey(legacySnapshotId) === null) throw new ComparisonSessionNotFoundError(legacySnapshotId);
+    return (await this.resolveComparisonInput(officeId, legacySnapshotId)).input;
   }
 
   /**
