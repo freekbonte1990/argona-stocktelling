@@ -19,12 +19,11 @@ import { HttpCentralHistorySource } from "./HttpCentralHistorySource";
 /**
  * HARDE acceptatie van de centrale read-only historiek, end-to-end over de
  * échte keten: toestel A telt/exporteert → publish-logica → bestand in de
- * (niet-publieke) data-map → het BEVEILIGDE endpoint (`api/central-history`) →
+ * (niet-publieke) data-map → het alleen-lezen endpoint (`api/central-history`) →
  * `HttpCentralHistorySource` → `CentralHistorySyncService` → een volledig
  * lege toestel B → Analyse + Vergelijken → offline → herhaalde sync.
  */
 
-const TOKEN = "integration-token-0123456789abcdef";
 const FIXTURE = "Stocktelling_Lokeren_standaard.xlsx";
 const OFFICE = "lokeren";
 
@@ -41,17 +40,15 @@ function endpointFetch(state: { online: boolean }): typeof fetch {
   }) as typeof fetch;
 }
 
-async function makeEmptyDeviceB(accessCode: string | null, state: { online: boolean }) {
+async function makeEmptyDeviceB(state: { online: boolean }) {
   const repository = new InMemoryCountingRepository();
   const importService = new ImportService(repository);
   // Toestel B kent enkel het MASTERbestand (geen historiek, geen sessies).
   const master = createExcelStockSourceFromBuffer(loadFixtureBuffer(FIXTURE), FIXTURE);
   await importService.commitImport(await importService.prepareImport(master));
-  if (accessCode) await repository.setCentralHistoryAccessCode(accessCode);
   const sync = new CentralHistorySyncService(
     repository,
     new HttpCentralHistorySource({
-      getAccessCode: () => repository.getCentralHistoryAccessCode(),
       fetchImpl: endpointFetch(state),
     }),
   );
@@ -87,7 +84,6 @@ beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "central-history-int-"));
   writeFileSync(join(dataDir, `${OFFICE}.json`), serializeCentralHistoryFile(published));
   process.env.CENTRAL_HISTORY_DATA_DIR = dataDir;
-  process.env.CENTRAL_HISTORY_TOKENS = TOKEN;
 }, 60_000);
 
 afterAll(() => {
@@ -96,9 +92,9 @@ afterAll(() => {
 });
 
 describe("centrale historiek — lege device → centraal → Analyse/Vergelijken → offline → herhaald", () => {
-  it("lege device met geldige code: sessies verschijnen met stabiele ID's; Analyse en Vergelijken werken", async () => {
+  it("lege device (zonder enige code): sessies verschijnen met stabiele ID's; Analyse en Vergelijken werken", async () => {
     const online = { online: true };
-    const b = await makeEmptyDeviceB(TOKEN, online);
+    const b = await makeEmptyDeviceB(online);
     expect(await b.repository.getSessionsForOffice(OFFICE)).toHaveLength(0);
 
     const result = await b.sync.syncOffice(OFFICE);
@@ -121,7 +117,7 @@ describe("centrale historiek — lege device → centraal → Analyse/Vergelijke
 
   it("daarna offline: Analyse/Vergelijken blijven werken, de mislukte poging wijzigt niets en blokkeert niets", async () => {
     const net = { online: true };
-    const b = await makeEmptyDeviceB(TOKEN, net);
+    const b = await makeEmptyDeviceB(net);
     await b.sync.syncOffice(OFFICE);
     const before = await b.repository.getStockHistoryEntries(OFFICE);
 
@@ -140,7 +136,7 @@ describe("centrale historiek — lege device → centraal → Analyse/Vergelijke
 
   it("herhaalde sync (ook na offline herstel) levert nooit dubbels op", async () => {
     const net = { online: true };
-    const b = await makeEmptyDeviceB(TOKEN, net);
+    const b = await makeEmptyDeviceB(net);
     await b.sync.syncOffice(OFFICE);
     net.online = false;
     await b.sync.syncOffice(OFFICE, { force: true });
@@ -155,8 +151,8 @@ describe("centrale historiek — lege device → centraal → Analyse/Vergelijke
   }, 60_000);
 
   it("een tweede toestel krijgt exact dezelfde sessie-identiteit (geen heuristiek op naam)", async () => {
-    const one = await makeEmptyDeviceB(TOKEN, { online: true });
-    const two = await makeEmptyDeviceB(TOKEN, { online: true });
+    const one = await makeEmptyDeviceB({ online: true });
+    const two = await makeEmptyDeviceB({ online: true });
     await one.sync.syncOffice(OFFICE);
     await two.sync.syncOffice(OFFICE);
     const ids = async (d: typeof one) => (await d.repository.getSessionsForOffice(OFFICE)).map((s) => s.id).sort();
@@ -164,36 +160,24 @@ describe("centrale historiek — lege device → centraal → Analyse/Vergelijke
   }, 60_000);
 
   it("centrale sessies zijn niet verwijderbaar in de gewone app", async () => {
-    const b = await makeEmptyDeviceB(TOKEN, { online: true });
+    const b = await makeEmptyDeviceB({ online: true });
     await b.sync.syncOffice(OFFICE);
     await expect(b.sessions.deleteSession(sessionAId)).rejects.toBeInstanceOf(CentralSessionDeletionNotAllowedError);
     expect(await b.repository.getSession(sessionAId)).toBeDefined();
   }, 60_000);
 });
 
-describe("centrale historiek — security over de volledige keten", () => {
-  it("zonder toegangscode op het toestel: er wordt niets opgehaald en de app werkt gewoon", async () => {
-    const b = await makeEmptyDeviceB(null, { online: true });
+describe("centrale historiek — zonder authenticatie", () => {
+  it("een leeg toestel haalt de historiek op zonder code; er bestaat geen code-opslag meer", async () => {
+    const b = await makeEmptyDeviceB({ online: true });
+    expect("setCentralHistoryAccessCode" in b.repository).toBe(false);
     const result = await b.sync.syncOffice(OFFICE);
-    expect(result.outcome).toBe("not-configured");
-    expect(await b.repository.getSessionsForOffice(OFFICE)).toHaveLength(0);
+    expect(result.outcome).toBe("synced");
+    expect(await b.repository.getSessionsForOffice(OFFICE)).not.toHaveLength(0);
   }, 60_000);
 
-  it("met een foute toegangscode: geweigerd, geen enkele data lokaal, discrete melding", async () => {
-    const b = await makeEmptyDeviceB("een-totaal-foute-code-123", { online: true });
-    const result = await b.sync.syncOffice(OFFICE);
-    expect(result.outcome).toBe("failed");
-    expect(result.message).toContain("Toegangscode geweigerd");
-    expect(await b.repository.getStockHistoryEntries(OFFICE)).toHaveLength(0);
-  }, 60_000);
-
-  it("het endpoint geeft zonder/met foute code NOOIT aantallen of kostprijzen terug", async () => {
-    for (const headers of [{} as Record<string, string>, { Authorization: "Bearer fout-fout-fout-fout-fout" }]) {
-      const res = await GET(new Request(`https://argona.test/api/central-history?officeId=${OFFICE}`, { headers }));
-      expect(res.status).toBe(401);
-      const body = await res.text();
-      expect(body).not.toContain("costPrice");
-      expect(body).not.toContain("totalCount");
-    }
+  it("het endpoint is alleen-lezen en beantwoordt enkel geldige kantoor-id's (geen path traversal)", async () => {
+    expect((await GET(new Request("https://argona.test/api/central-history?officeId=../x"))).status).toBe(400);
+    expect((await GET(new Request("https://argona.test/api/central-history?officeId=bestaat-niet"))).status).toBe(404);
   });
 });

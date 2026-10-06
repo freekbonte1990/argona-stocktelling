@@ -5,15 +5,11 @@ import type { CentralHistoryFile } from "../../domain/centralHistoryFile";
  * discrete, begrijpelijke melding (nooit een crash, nooit een blokkade van de
  * app: user-eis 5).
  *
- *  - `not-configured`: er is (nog) geen toegang ingesteld op dit toestel.
- *  - `unauthorized`:   de bron weigerde de toegang (verkeerde/ingetrokken code).
  *  - `not-found`:      er is voor dit kantoor (nog) niets centraal gepubliceerd.
  *  - `unavailable`:    netwerk/server niet bereikbaar (bv. offline).
  *  - `invalid`:        de bron antwoordde, maar met een onbruikbaar bestand.
  */
 export type CentralHistoryErrorKind =
-  | "not-configured"
-  | "unauthorized"
   | "not-found"
   | "unavailable"
   | "invalid";
@@ -35,8 +31,8 @@ export class CentralHistoryError extends Error {
  * publiceermethode. Publiceren gebeurt buiten de app (script/git/Vercel,
  * zie `scripts/publish-central-history.ts`).
  *
- * User-eis 8 (migratiepad): vandaag `HttpCentralHistorySource` (een beveiligd
- * Vercel-endpoint met toegangscode); later een `EBuddyCentralHistorySource`
+ * User-eis 8 (migratiepad): vandaag `HttpCentralHistorySource` (een
+ * Vercel-endpoint zonder authenticatie); later een `EBuddyCentralHistorySource`
  * die dezelfde methode tegen de eBuddy-API implementeert. Enkel `container.ts`
  * verandert — sync-service, repository, Analyse en Vergelijken blijven gelijk.
  */

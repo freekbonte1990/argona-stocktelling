@@ -202,3 +202,12 @@ export function useArticleHistory(officeId: string | undefined, articleId: strin
 export function useCentralHistoryStatus(officeId: string | undefined) {
   return useLiveQuery(() => (officeId ? db.centralHistoryStatus.get(officeId) : undefined), [officeId]);
 }
+
+/**
+ * Centrale masterdata: status per kantoor (`undefined` zolang er nog niets is
+ * toegepast, of nog aan het laden). `isCentrallyManaged(status)` bepaalt de
+ * read-only weergave van master-velden.
+ */
+export function useCentralMasterStatus(officeId: string | undefined) {
+  return useLiveQuery(() => (officeId ? db.centralMasterStatus.get(officeId) : undefined), [officeId]);
+}

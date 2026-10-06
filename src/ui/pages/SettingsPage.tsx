@@ -11,17 +11,18 @@ import {
 } from "../../domain/locations";
 import { allProductCategoriesInOrder, countArticlesInCategory } from "../../domain/productCategory";
 import { isCentralSessionIn } from "../../domain/centralHistoryFile";
+import { isCentralCategory, isCentralLocation, isCentrallyManaged } from "../../domain/centralMasterFile";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
 import type { CountSession, Location, Office, ProductCategory } from "../../domain/types";
 import { generateLocationId } from "../../shared/ids";
 import { countSessionService, countingRepository, productCategoryService } from "../../application/container";
 import { BigButton } from "../components/BigButton";
 import { LegacyImportSection } from "./LegacyImportSection";
-import { CentralHistorySection } from "./CentralHistorySection";
 import {
   useAllArticles,
   useAssignments,
   useCentralHistoryStatus,
+  useCentralMasterStatus,
   useOffice,
   useProductCategories,
   useSessionsForOffice,
@@ -89,6 +90,9 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
   const sessions = useSessionsForOffice(officeId) ?? [];
   const completedSessions = sessions.filter((s) => s.status === "COMPLETED");
   const centralHistoryStatus = useCentralHistoryStatus(officeId);
+  // Centraal beheerd kantoor: locaties en productgamma's komen uit de centrale master en zijn hier alleen-lezen.
+  const masterStatus = useCentralMasterStatus(officeId);
+  const centrallyManaged = isCentrallyManaged(masterStatus);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState(false);
@@ -249,8 +253,6 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
 
       <LegacyImportSection officeId={officeId} />
 
-      <CentralHistorySection officeId={officeId} />
-
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Stocklocaties</h2>
         <p className="screen-subtitle" style={{ margin: 0 }}>
@@ -258,11 +260,17 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           locatie kan niet verwijderd worden — enkel inactief gemaakt (historische tellingen blijven
           zo altijd leesbaar).
         </p>
+        {centrallyManaged && (
+          <p className="screen-subtitle" style={{ margin: 0 }}>
+            De locaties van dit kantoor worden centraal beheerd en zijn alleen-lezen.
+          </p>
+        )}
 
         <div className="stack stack--tight">
           {orderedLocations.map((location, index) => {
             const used = !canHardDeleteLocation(location.id, assignments, []);
             const isEditing = editingLocationId === location.id;
+            const locationReadOnly = isCentralLocation(masterStatus, location.id);
             return (
               <div
                 key={location.id}
@@ -293,19 +301,22 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
                   ) : (
                     <>
                       <span className="location-settings-row__name">{location.name}</span>
-                      <button
-                        type="button"
-                        className="chip chip--settings"
-                        onClick={() => setEditingLocationId(location.id)}
-                      >
-                        Naam wijzigen
-                      </button>
+                      {!locationReadOnly && (
+                        <button
+                          type="button"
+                          className="chip chip--settings"
+                          onClick={() => setEditingLocationId(location.id)}
+                        >
+                          Naam wijzigen
+                        </button>
+                      )}
                     </>
                   )}
                   {!location.active && (
                     <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
                   )}
                 </div>
+                {!locationReadOnly && (
                 <div className="location-settings-row__actions">
                   <div className="filter-row location-settings-row__order">
                     <button
@@ -338,23 +349,26 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
                     )}
                   </div>
                 </div>
+                )}
               </div>
             );
           })}
         </div>
 
-        <div className="stack stack--tight stack--row">
-          <input
-            className="search-input"
-            style={{ flex: 1 }}
-            placeholder="Naam nieuwe locatie..."
-            value={newLocationName}
-            onChange={(e) => setNewLocationName(e.target.value)}
-          />
-          <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAdd}>
-            + Locatie
-          </BigButton>
-        </div>
+        {!centrallyManaged && (
+          <div className="stack stack--tight stack--row">
+            <input
+              className="search-input"
+              style={{ flex: 1 }}
+              placeholder="Naam nieuwe locatie..."
+              value={newLocationName}
+              onChange={(e) => setNewLocationName(e.target.value)}
+            />
+            <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAdd}>
+              + Locatie
+            </BigButton>
+          </div>
+        )}
       </div>
 
       <div className="card stack">
@@ -364,6 +378,11 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
           hier werkt door in alle managementanalyses, ook van reeds afgeronde tellingen — de historische
           brongegevens per artikel (Bronproductgroep) blijven altijd ongewijzigd.
         </p>
+        {centrallyManaged && (
+          <p className="screen-subtitle" style={{ margin: 0 }}>
+            De productgamma's worden centraal beheerd en zijn alleen-lezen.
+          </p>
+        )}
 
         {categoryError && <div className="error-banner">{categoryError}</div>}
 
@@ -375,6 +394,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
             const assignedCount = countArticlesInCategory(articles, category.id);
             const canDelete = assignedCount === 0;
             const isEditing = editingCategoryId === category.id;
+            const categoryReadOnly = isCentralCategory(masterStatus, category.id);
             return (
               <div
                 key={category.id}
@@ -398,13 +418,15 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
                   ) : (
                     <>
                       <span className="location-settings-row__name">{category.name}</span>
-                      <button
-                        type="button"
-                        className="chip chip--settings"
-                        onClick={() => setEditingCategoryId(category.id)}
-                      >
-                        Naam wijzigen
-                      </button>
+                      {!categoryReadOnly && (
+                        <button
+                          type="button"
+                          className="chip chip--settings"
+                          onClick={() => setEditingCategoryId(category.id)}
+                        >
+                          Naam wijzigen
+                        </button>
+                      )}
                     </>
                   )}
                   <span className="screen-subtitle" style={{ margin: 0 }}>
@@ -414,6 +436,7 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
                     <span className="review-row__badge review-row__badge--not-counted">Inactief</span>
                   )}
                 </div>
+                {!categoryReadOnly && (
                 <div className="location-settings-row__actions">
                   <div className="filter-row location-settings-row__order">
                     <button
@@ -463,23 +486,26 @@ export function SettingsPage({ officeId }: SettingsPageProps) {
                     )}
                   </div>
                 </div>
+                )}
               </div>
             );
           })}
         </div>
 
-        <div className="stack stack--tight stack--row">
-          <input
-            className="search-input"
-            style={{ flex: 1 }}
-            placeholder="Naam nieuw productgamma..."
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-          />
-          <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAddCategory}>
-            + Productgamma
-          </BigButton>
-        </div>
+        {!centrallyManaged && (
+          <div className="stack stack--tight stack--row">
+            <input
+              className="search-input"
+              style={{ flex: 1 }}
+              placeholder="Naam nieuw productgamma..."
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+            />
+            <BigButton variant="secondary" style={{ width: "auto" }} onClick={handleAddCategory}>
+              + Productgamma
+            </BigButton>
+          </div>
+        )}
       </div>
 
       <div className="card stack">

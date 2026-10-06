@@ -1,3 +1,4 @@
+import { isCentrallyManaged } from "../../domain/centralMasterFile";
 import { computeAssortmentImportDiff } from "../../domain/articleAssortment";
 import { computeFrequencyBreakdown, type FrequencyBreakdown } from "../../domain/frequency";
 import { activeLocationsInOrder, mergeArticleLocationAssignments } from "../../domain/locations";
@@ -13,6 +14,8 @@ export interface ExistingOfficeInfo {
   articleCount: number;
   importedAt: string | null;
   hasActiveSession: boolean;
+  /** Dit kantoor wordt centraal beheerd: een Excel-import is dan enkel een fallback/adminactie en wordt bij de volgende centrale sync weer overschreven door de master. */
+  centrallyManaged: boolean;
 }
 
 /**
@@ -121,16 +124,18 @@ export class ImportService {
     const existingOffice = await this.repository.getOffice(office.id);
     let existing: ExistingOfficeInfo | null = null;
     if (existingOffice) {
-      const [existingArticles, activeSession, meta] = await Promise.all([
+      const [existingArticles, activeSession, meta, masterStatus] = await Promise.all([
         this.repository.getArticles(office.id),
         this.repository.getActiveSession(office.id),
         this.repository.getImportMeta(office.id),
+        this.repository.getCentralMasterStatus(office.id),
       ]);
       existing = {
         office: existingOffice,
         articleCount: existingArticles.length,
         importedAt: meta?.importedAt ?? null,
         hasActiveSession: activeSession !== undefined,
+        centrallyManaged: isCentrallyManaged(masterStatus),
       };
     }
 
@@ -176,6 +181,14 @@ export class ImportService {
       importedAt: new Date().toISOString(),
     });
     await this.repository.setSelectedOfficeId(office.id);
+
+    // Centraal beheerd kantoor: de Excel-import heeft de lokale stamdata zojuist
+    // overschreven. Maak de toegepaste master-revision ongeldig zodat de eerstvolgende
+    // centrale sync de master onvoorwaardelijk opnieuw toepast (geen 304 "onveranderd").
+    const masterStatus = await this.repository.getCentralMasterStatus(office.id);
+    if (masterStatus) {
+      await this.repository.saveCentralMasterStatus({ ...masterStatus, revision: null, pendingRevision: null });
+    }
 
     // Rollend stockarchief (spec): herkent bestaande historische
     // tellingtabs uit het bronbestand en maakt de historiek beschikbaar voor

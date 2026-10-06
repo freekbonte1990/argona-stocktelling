@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "publish-central-history": "tsx scripts/publish-central-history.ts"
+    "publish-central-history": "tsx scripts/publish-central-history.ts",
+    "publish-central-master": "tsx scripts/publish-central-master.ts"
   },
   "dependencies": {
     "dexie": "^4.4.6",

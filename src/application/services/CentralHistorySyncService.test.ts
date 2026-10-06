@@ -152,7 +152,6 @@ describe("CentralHistorySyncService", () => {
   describe("falen blokkeert nooit (eis 5/6/7)", () => {
     it.each([
       ["unavailable", "niet bereikbaar"],
-      ["unauthorized", "Toegangscode geweigerd"],
       ["invalid", "onbruikbaar"],
     ] as const)("een %s-fout gooit niet, laat lokale data ongemoeid en wordt een discrete melding", async (kind, text) => {
       await service.syncOffice("damme");
@@ -190,13 +189,6 @@ describe("CentralHistorySyncService", () => {
       expect((await service.syncOffice("damme", { force: true })).outcome).toBe("failed");
       const analysis = await new AnalysisService(repository, new ProductCategoryService(repository)).getSessionAnalysis("session-aug");
       expect(analysis).toBeDefined();
-    });
-
-    it("zonder toegangscode (not-configured): stil overgeslagen, geen foutmelding in de status", async () => {
-      source.set(new CentralHistoryError("not-configured", "geen code"));
-      const result = await service.syncOffice("damme");
-      expect(result).toEqual({ outcome: "not-configured", addedSessionCount: 0, message: null });
-      expect(await repository.getCentralHistoryStatus("damme")).toBeUndefined();
     });
 
     it("niets gepubliceerd (not-found): geen fout, wel een discrete melding", async () => {
@@ -286,17 +278,6 @@ describe("CentralHistorySyncService", () => {
       });
       await new CountSessionService(repository).deleteSession("local-july");
       expect(await repository.getSession("local-july")).toBeUndefined();
-    });
-  });
-
-  describe("toegangscode", () => {
-    it("bewaart, wist en rapporteert de toegangscode (getrimd)", async () => {
-      expect(await service.hasAccessCode()).toBe(false);
-      await service.saveAccessCode("  geheim-geheim-geheim  ");
-      expect(await repository.getCentralHistoryAccessCode()).toBe("geheim-geheim-geheim");
-      expect(await service.hasAccessCode()).toBe(true);
-      await service.clearAccessCode();
-      expect(await service.hasAccessCode()).toBe(false);
     });
   });
 });

@@ -14,8 +14,6 @@ import { reconstructMissingSessionsFromHistory } from "./historyReconstruction";
 export type CentralHistorySyncOutcome =
   /** Centrale historiek opgehaald en additief samengevoegd (ook als er niets nieuw was). */
   | "synced"
-  /** Er is op dit toestel geen toegangscode ingesteld — niets geprobeerd. */
-  | "not-configured"
   /** Laatste succesvolle sync was net (zie `minIntervalMs`) — niets geprobeerd. */
   | "skipped-recent"
   /** Het kantoor bestaat lokaal (nog) niet — niets geprobeerd. */
@@ -82,19 +80,6 @@ export class CentralHistorySyncService {
     return this.repository.getCentralHistoryStatus(officeId);
   }
 
-  async hasAccessCode(): Promise<boolean> {
-    return (await this.repository.getCentralHistoryAccessCode()) !== undefined;
-  }
-
-  async saveAccessCode(code: string): Promise<void> {
-    const trimmed = code.trim();
-    await this.repository.setCentralHistoryAccessCode(trimmed === "" ? null : trimmed);
-  }
-
-  async clearAccessCode(): Promise<void> {
-    await this.repository.setCentralHistoryAccessCode(null);
-  }
-
   /**
    * Is deze lokale sessie ook centraal bekend (op id, of — zwakker — op
    * snapshotnaam)? Zo ja: read-only qua verwijdering in de gewone app.
@@ -149,9 +134,6 @@ export class CentralHistorySyncService {
     error: unknown,
   ): Promise<CentralHistorySyncResult> {
     const kind = error instanceof CentralHistoryError ? error.kind : "unavailable";
-    if (kind === "not-configured") {
-      return { outcome: "not-configured", addedSessionCount: 0, message: null };
-    }
     const base = previous ?? emptyStatus(officeId);
     if (kind === "not-found") {
       // Voor dit kantoor staat er (nog) niets centraal — geen fout, wel een
@@ -161,11 +143,9 @@ export class CentralHistorySyncService {
       return { outcome: "synced", addedSessionCount: 0, message };
     }
     const message =
-      kind === "unauthorized"
-        ? "Toegangscode geweigerd — controleer de code in Instellingen."
-        : kind === "invalid"
-          ? `Centrale historiek onbruikbaar: ${error instanceof Error ? error.message : "onbekende fout"}`
-          : "Centrale historiek niet bereikbaar — de lokale data blijft beschikbaar.";
+      kind === "invalid"
+        ? `Centrale historiek onbruikbaar: ${error instanceof Error ? error.message : "onbekende fout"}`
+        : "Centrale historiek niet bereikbaar — de lokale data blijft beschikbaar.";
     await this.safeSaveStatus({ ...base, lastAttemptAt: nowIso, lastError: message });
     return { outcome: "failed", addedSessionCount: 0, message };
   }

@@ -3,6 +3,9 @@
   "functions": {
     "api/central-history.ts": {
       "includeFiles": "central-history-data/**"
+    },
+    "api/central-master.ts": {
+      "includeFiles": "central-master-data/**"
     }
   }
 }

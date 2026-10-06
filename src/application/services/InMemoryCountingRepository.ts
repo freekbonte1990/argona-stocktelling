@@ -16,6 +16,7 @@ import type {
   ImportMeta,
 } from "../ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
+import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 
 /**
@@ -225,11 +226,24 @@ export class InMemoryCountingRepository implements CountingRepository {
     this.centralHistoryStatuses.set(status.officeId, { ...status, centralSessionIds: [...status.centralSessionIds] });
   }
 
-  private centralHistoryAccessCode: string | undefined;
-  async getCentralHistoryAccessCode(): Promise<string | undefined> {
-    return this.centralHistoryAccessCode;
+
+  private centralMasterStatuses = new Map<string, CentralMasterStatus>();
+  async getCentralMasterStatus(officeId: string): Promise<CentralMasterStatus | undefined> {
+    const status = this.centralMasterStatuses.get(officeId);
+    return status ? structuredClone(status) : undefined;
   }
-  async setCentralHistoryAccessCode(code: string | null): Promise<void> {
-    this.centralHistoryAccessCode = code ?? undefined;
+  async saveCentralMasterStatus(status: CentralMasterStatus): Promise<void> {
+    this.centralMasterStatuses.set(status.officeId, structuredClone(status));
+  }
+  async applyCentralMaster(plan: CentralMasterApplyPlan): Promise<void> {
+    this.offices.set(plan.office.id, plan.office);
+    await this.saveProductCategories(plan.categories);
+    await this.saveArticles(plan.articles);
+    await this.saveArticles(plan.otherOfficeArticles);
+    for (const id of plan.categoryIdsToDelete) this.productCategories.delete(id);
+    await this.saveArticleLocationAssignments(plan.assignments);
+    this.importMeta.set(plan.importMeta.officeId, plan.importMeta);
+    if (plan.selectOffice) this.selectedOfficeId = plan.office.id;
+    await this.saveCentralMasterStatus(plan.status);
   }
 }

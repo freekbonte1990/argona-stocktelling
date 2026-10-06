@@ -6,9 +6,9 @@
  * Leest een Argona-Excelbestand (de export uit de app, mét HISTORIE-sheet),
  * voegt het ADDITIEF samen met het reeds gepubliceerde bestand en schrijft
  * `central-history-data/<officeId>.json`. Daarna: `git diff` nakijken,
- * committen en pushen — Vercel deployt en de beveiligde functie
- * `api/central-history.ts` serveert het nieuwe bestand (enkel met geldige
- * toegangscode). Publiceren gebeurt NOOIT vanuit de app zelf.
+ * committen en pushen — Vercel deployt en de functie
+ * `api/central-history.ts` serveert het nieuwe bestand (alleen-lezen, zonder
+ * authenticatie). Publiceren gebeurt NOOIT vanuit de app zelf.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";

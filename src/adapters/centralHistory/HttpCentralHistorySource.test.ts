@@ -6,8 +6,8 @@ import { HttpCentralHistorySource } from "./HttpCentralHistorySource";
 const jsonResponse = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" }, ...init });
 
-function makeSource(fetchImpl: typeof fetch, code: string | null = "een-geldige-toegangscode") {
-  return new HttpCentralHistorySource({ getAccessCode: async () => code ?? undefined, fetchImpl });
+function makeSource(fetchImpl: typeof fetch) {
+  return new HttpCentralHistorySource({ fetchImpl });
 }
 
 const kindOf = async (promise: Promise<unknown>) => {
@@ -20,7 +20,7 @@ const kindOf = async (promise: Promise<unknown>) => {
 };
 
 describe("HttpCentralHistorySource", () => {
-  it("doet één GET met Bearer-code, zonder cookies en zonder cache, en valideert het antwoord", async () => {
+  it("doet één GET zonder authenticatie (geen Authorization-header), zonder cookies en zonder cache, en valideert het antwoord", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(makeFile([makeEntry()])));
     const file = await makeSource(fetchImpl as unknown as typeof fetch).fetchOfficeHistory("damme");
     expect(file.entries).toHaveLength(1);
@@ -29,7 +29,7 @@ describe("HttpCentralHistorySource", () => {
     expect(init.method).toBe("GET");
     expect(init.cache).toBe("no-store");
     expect(init.credentials).toBe("omit");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer een-geldige-toegangscode");
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
   it("is alleen-lezen: er bestaat geen publiceer-/schrijfmethode", () => {
@@ -38,15 +38,9 @@ describe("HttpCentralHistorySource", () => {
     expect(methods).toEqual(["fetchOfficeHistory"]);
   });
 
-  it("zonder toegangscode: not-configured, zonder netwerkcall", async () => {
-    const fetchImpl = vi.fn();
-    expect(await kindOf(makeSource(fetchImpl as unknown as typeof fetch, null).fetchOfficeHistory("damme"))).toBe("not-configured");
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
   it.each([
-    [401, "unauthorized"],
-    [403, "unauthorized"],
+    [401, "unavailable"],
+    [403, "unavailable"],
     [404, "not-found"],
     [500, "unavailable"],
     [503, "unavailable"],
@@ -81,7 +75,7 @@ describe("HttpCentralHistorySource", () => {
       new Promise((_resolve, reject) => {
         init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
       })) as unknown as typeof fetch;
-    const source = new HttpCentralHistorySource({ getAccessCode: async () => "code-code-code-code", fetchImpl: hanging, timeoutMs: 20 });
+    const source = new HttpCentralHistorySource({ fetchImpl: hanging, timeoutMs: 20 });
     expect(await kindOf(source.fetchOfficeHistory("damme"))).toBe("unavailable");
   });
 });

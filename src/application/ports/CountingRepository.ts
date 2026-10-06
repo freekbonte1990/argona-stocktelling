@@ -1,4 +1,5 @@
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
+import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { SessionReviewSummary } from "../../domain/review";
 import type { StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
 import type {
@@ -264,11 +265,20 @@ export interface CountingRepository {
    */
   getCentralHistoryStatus(officeId: string): Promise<CentralHistoryStatus | undefined>;
   saveCentralHistoryStatus(status: CentralHistoryStatus): Promise<void>;
+
   /**
-   * Toestel-lokale toegangscode voor de centrale bron (vandaag: het beveiligde
-   * Vercel-endpoint). `null`/`undefined` = niet ingesteld. Wordt nooit
-   * meegeëxporteerd naar Excel of gelogd.
+   * Centrale master: status per kantoor (laatst toegepaste revision, uitgestelde
+   * revision, "ooit centraal"-id's, interne foutmelding). Puur app-metadata.
+   * `appliedAt !== null` = dit kantoor wordt centraal beheerd (read-only master-velden).
    */
-  getCentralHistoryAccessCode(): Promise<string | undefined>;
-  setCentralHistoryAccessCode(code: string | null): Promise<void>;
+  getCentralMasterStatus(officeId: string): Promise<CentralMasterStatus | undefined>;
+  saveCentralMasterStatus(status: CentralMasterStatus): Promise<void>;
+  /**
+   * Past een master-plan ATOMAIR toe (één transactie): kantoor + locaties,
+   * artikelen, koppelingen, productgamma's, importmeta en status — faalt één
+   * schrijfactie, dan blijft de lokale stamdata exact zoals ze was. Raakt NOOIT
+   * sessies, CountEntries, locatiestatussen, bevroren resultaten, historische
+   * sheets of HISTORIE-regels (zie `domain/centralMasterPlan.ts`).
+   */
+  applyCentralMaster(plan: CentralMasterApplyPlan): Promise<void>;
 }

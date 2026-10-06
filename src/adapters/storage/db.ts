@@ -14,23 +14,13 @@ import type {
   ImportMeta,
 } from "../../application/ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
+import type { CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 
 /** Eén rij "app-brede" UI-voorkeur (welk kantoor laatst actief was). Geen businessdata. */
 export interface AppStateRow {
   id: "singleton";
   selectedOfficeId: string;
-}
-
-/**
- * Eén rij toestel-lokale configuratie van de centrale historiek (v8): de
- * toegangscode voor het beveiligde centrale endpoint. Staat bewust NIET in
- * `AppStateRow`: `setSelectedOfficeId` vervangt die hele rij (`put`) en zou de
- * code stilletjes wissen. Geen businessdata, nooit geëxporteerd naar Excel.
- */
-export interface CentralHistoryConfigRow {
-  id: "singleton";
-  accessCode: string | null;
 }
 
 /** Opslagrij voor `HistoricalSheetRecord` — `id` = `${officeId}:${sheetName}` (uniek, dus een upsert). */
@@ -62,7 +52,7 @@ export class AppDatabase extends Dexie {
   finalizedSessionResults!: Table<FinalizedSessionResult, string>;
   productCategories!: Table<ProductCategory, string>;
   centralHistoryStatus!: Table<CentralHistoryStatus, string>;
-  centralHistoryConfig!: Table<CentralHistoryConfigRow, string>;
+  centralMasterStatus!: Table<CentralMasterStatus, string>;
 
   constructor(name = "argona-stocktelling") {
     super(name);
@@ -132,13 +122,27 @@ export class AppDatabase extends Dexie {
     });
     // v8 (centrale read-only historiek): per kantoor de status van de laatste
     // centrale sync (incl. welke lokale sessies centraal zijn — read-only qua
-    // verwijdering) en één rij toestel-lokale configuratie (toegangscode).
+    // verwijdering) en één rij toestel-lokale configuratie (in v10 weer verwijderd).
     // Puur additief — twee volledig NIEUWE tabellen, geen bestaande tabel/index
     // gewijzigd, dus een bestaande database (versies 1-7) upgradet zonder
     // dataverlies of crash.
     this.version(8).stores({
       centralHistoryStatus: "officeId",
       centralHistoryConfig: "id",
+    });
+    // v9 (centrale masterdata): per kantoor de status van de centrale master
+    // (laatst toegepaste revision, uitgestelde revision, "ooit centraal"-id's).
+    // Puur additief — één volledig NIEUWE tabel, geen bestaande tabel/index
+    // gewijzigd, dus een bestaande database (versies 1-8) upgradet zonder
+    // dataverlies of crash.
+    this.version(9).stores({
+      centralMasterStatus: "officeId",
+    });
+    // v10: de toestel-lokale toegangscode (tabel `centralHistoryConfig`, v8) bestaat niet
+    // meer — de centrale bronnen vragen geen code meer. `null` verwijdert de tabel (en een
+    // eventueel reeds bewaarde code) bij het upgraden; alle andere tabellen blijven onaangeroerd.
+    this.version(10).stores({
+      centralHistoryConfig: null,
     });
   }
 }

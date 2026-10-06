@@ -16,6 +16,7 @@ import type {
   ImportMeta,
 } from "../../application/ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
+import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { StockHistoryEntry } from "../../domain/stockSnapshot";
 import type { AppDatabase } from "./db";
 import { db as defaultDb } from "./db";
@@ -286,12 +287,43 @@ export class IndexedDbCountingRepository implements CountingRepository {
     await this.db.centralHistoryStatus.put(status);
   }
 
-  async getCentralHistoryAccessCode(): Promise<string | undefined> {
-    const row = await this.db.centralHistoryConfig.get("singleton");
-    return row?.accessCode ?? undefined;
+  async getCentralMasterStatus(officeId: string): Promise<CentralMasterStatus | undefined> {
+    return this.db.centralMasterStatus.get(officeId);
   }
 
-  async setCentralHistoryAccessCode(code: string | null): Promise<void> {
-    await this.db.centralHistoryConfig.put({ id: "singleton", accessCode: code });
+  async saveCentralMasterStatus(status: CentralMasterStatus): Promise<void> {
+    await this.db.centralMasterStatus.put(status);
+  }
+
+  /**
+   * Alles in ÉÉN Dexie-transactie (zelfde discipline als `finalizeSession`):
+   * faalt één schrijfactie, dan wordt alles teruggedraaid. Bewust GEEN toegang
+   * tot sessions/countEntries/locationSessionStatuses/finalizedSessionResults/
+   * historicalSheets/stockHistoryEntries — de master kan die structureel niet raken.
+   */
+  async applyCentralMaster(plan: CentralMasterApplyPlan): Promise<void> {
+    await this.db.transaction(
+      "rw",
+      [
+        this.db.offices,
+        this.db.articles,
+        this.db.assignments,
+        this.db.productCategories,
+        this.db.importMeta,
+        this.db.appState,
+        this.db.centralMasterStatus,
+      ],
+      async () => {
+        await this.db.offices.put(plan.office);
+        if (plan.categories.length > 0) await this.db.productCategories.bulkPut(plan.categories);
+        if (plan.articles.length > 0) await this.db.articles.bulkPut(plan.articles);
+        if (plan.otherOfficeArticles.length > 0) await this.db.articles.bulkPut(plan.otherOfficeArticles);
+        if (plan.categoryIdsToDelete.length > 0) await this.db.productCategories.bulkDelete(plan.categoryIdsToDelete);
+        if (plan.assignments.length > 0) await this.db.assignments.bulkPut(plan.assignments);
+        await this.db.importMeta.put(plan.importMeta);
+        if (plan.selectOffice) await this.db.appState.put({ id: "singleton", selectedOfficeId: plan.office.id });
+        await this.db.centralMasterStatus.put(plan.status);
+      },
+    );
   }
 }

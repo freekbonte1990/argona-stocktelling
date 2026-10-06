@@ -18,9 +18,9 @@ const status: CentralHistoryStatus = {
 };
 
 describe("Dexie v8 — centrale historiek (additief schema)", () => {
-  it("is exact de volgende versie na de hoogste bestaande (v7 → v8)", () => {
+  it("is een versie ≥ 8 (de centrale-historiektabellen bestaan sinds v8)", () => {
     const db = new AppDatabase(`test-db-${Math.random()}`);
-    expect(db.verno).toBe(8);
+    expect(db.verno).toBeGreaterThanOrEqual(8);
   });
 
   it("upgradet een bestaande v7-database zonder dataverlies en maakt de nieuwe tabellen aan", async () => {
@@ -53,7 +53,6 @@ describe("Dexie v8 — centrale historiek (additief schema)", () => {
     expect(await repository.getOffice("damme")).toEqual(office);
     expect(await repository.getSelectedOfficeId()).toBe("damme");
     expect(await repository.getCentralHistoryStatus("damme")).toBeUndefined();
-    expect(await repository.getCentralHistoryAccessCode()).toBeUndefined();
     await repository.saveCentralHistoryStatus(status);
     expect(await repository.getCentralHistoryStatus("damme")).toEqual(status);
     upgraded.close();
@@ -70,15 +69,5 @@ describe("IndexedDbCountingRepository — centrale historiek", () => {
     await repository.saveCentralHistoryStatus({ ...status, officeId: "lokeren", centralSessionIds: [] });
     expect((await repository.getCentralHistoryStatus("damme"))?.lastError).toBe("offline");
     expect((await repository.getCentralHistoryStatus("lokeren"))?.centralSessionIds).toEqual([]);
-  });
-
-  it("bewaart en wist de toegangscode, en een kantoorwissel wist ze NIET", async () => {
-    const repository = make();
-    await repository.setCentralHistoryAccessCode("geheim-geheim-geheim");
-    await repository.setSelectedOfficeId("damme");
-    await repository.setSelectedOfficeId("lokeren");
-    expect(await repository.getCentralHistoryAccessCode()).toBe("geheim-geheim-geheim");
-    await repository.setCentralHistoryAccessCode(null);
-    expect(await repository.getCentralHistoryAccessCode()).toBeUndefined();
   });
 });

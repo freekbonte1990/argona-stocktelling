@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
+import { isCentralArticle } from "../../domain/centralMasterFile";
 import { activeLocationsInOrder } from "../../domain/locations";
 import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
 import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
@@ -21,6 +22,7 @@ import {
   useArticleHistory,
   useArticles,
   useAssignments,
+  useCentralMasterStatus,
   useOffice,
   useProductCategories,
 } from "../hooks/useLiveData";
@@ -113,6 +115,9 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   const office = useOffice(officeId);
   const assignments = useAssignments(officeId) ?? [];
   const history = useArticleHistory(officeId, articleId) ?? [];
+  // Een centraal artikel (uit de master) is read-only; een lokaal TMP-artikel blijft bewerkbaar.
+  const masterStatus = useCentralMasterStatus(officeId);
+  const masterOwned = isCentralArticle(masterStatus, articleId);
 
   // Sprint 3.2 §7: "Productgamma" — de eenmalige (idempotente) migratie/
   // bootstrap loopt via deze aanroep, `useProductCategories` levert de
@@ -299,10 +304,15 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
       <div className="card stack stack--tight">
         <div className="filter-row" style={{ justifyContent: "space-between" }}>
           <h2 style={{ margin: 0 }}>Algemeen</h2>
-          {!editingGeneral && (
+          {!editingGeneral && !masterOwned && (
             <button type="button" className="chip" onClick={startEditingGeneral}>
               Bewerken
             </button>
+          )}
+          {masterOwned && (
+            <span className="screen-subtitle" style={{ margin: 0 }}>
+              Centraal beheerd — alleen-lezen
+            </span>
           )}
         </div>
         <div className="article-detail-field">

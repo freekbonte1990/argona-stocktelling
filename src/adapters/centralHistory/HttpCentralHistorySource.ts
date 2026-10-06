@@ -5,18 +5,15 @@ import { CentralHistoryError, type CentralHistorySource } from "../../applicatio
 export const DEFAULT_CENTRAL_HISTORY_ENDPOINT = "/api/central-history";
 
 export interface HttpCentralHistorySourceOptions {
-  /** Leest de toestel-lokale toegangscode (vandaag uit IndexedDB, zie `CountingRepository`). */
-  getAccessCode: () => Promise<string | undefined>;
   endpoint?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
 
 /**
- * `CentralHistorySource` tegen het BEVEILIGDE Vercel-endpoint
- * `api/central-history.ts` (Bearer-toegangscode). De centrale data staat
- * bewust NIET als statisch bestand in `public/`/`dist/` — die zijn voor
- * iedereen op het internet leesbaar — maar enkel achter dit endpoint.
+ * `CentralHistorySource` tegen het Vercel-endpoint `api/central-history.ts`
+ * (geen authenticatie, geen toegangscode). De centrale data staat bewust NIET als
+ * statisch bestand in `public/`/`dist/` maar enkel achter dit alleen-lezen endpoint.
  *
  * ENKEL LEZEN (user-eis 1): één GET, geen enkele schrijfmethode.
  * Vertaalt elke mislukking naar een `CentralHistoryError` — gooit nooit iets
@@ -28,31 +25,24 @@ export interface HttpCentralHistorySourceOptions {
  */
 export class HttpCentralHistorySource implements CentralHistorySource {
   readonly label = "Argona centrale historiek";
-  private readonly getAccessCode: () => Promise<string | undefined>;
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
-  constructor(options: HttpCentralHistorySourceOptions) {
-    this.getAccessCode = options.getAccessCode;
+  constructor(options: HttpCentralHistorySourceOptions = {}) {
     this.endpoint = options.endpoint ?? DEFAULT_CENTRAL_HISTORY_ENDPOINT;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? 20_000;
   }
 
   async fetchOfficeHistory(officeId: string): Promise<CentralHistoryFile> {
-    const accessCode = await this.getAccessCode();
-    if (!accessCode) {
-      throw new CentralHistoryError("not-configured", "Geen toegangscode ingesteld.");
-    }
-
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.endpoint}?officeId=${encodeURIComponent(officeId)}`, {
         method: "GET",
-        headers: { Authorization: `Bearer ${accessCode}`, Accept: "application/json" },
+        headers: { Accept: "application/json" },
         cache: "no-store",
         credentials: "omit",
         signal: controller.signal,
@@ -63,9 +53,6 @@ export class HttpCentralHistorySource implements CentralHistorySource {
       clearTimeout(timer);
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new CentralHistoryError("unauthorized", "Toegangscode geweigerd.");
-    }
     if (response.status === 404) {
       throw new CentralHistoryError("not-found", "Geen centrale historiek voor dit kantoor.");
     }

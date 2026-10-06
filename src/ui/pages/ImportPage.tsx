@@ -109,6 +109,12 @@ export function ImportPage({ onImported, onCancel }: ImportPageProps) {
             lopende tellingen blijven behouden.
           </div>
         )}
+        {preview.existing?.centrallyManaged && (
+          <div className="warning-banner">
+            Dit kantoor wordt centraal beheerd. Een Excel-import is enkel een noodoplossing: de centrale
+            masterdata overschrijft deze gegevens weer bij de volgende synchronisatie.
+          </div>
+        )}
         <div className="stack">
           {preview.existing ? (
             <>

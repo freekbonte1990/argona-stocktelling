@@ -1,3 +1,4 @@
+import { isCentrallyManaged } from "../../domain/centralMasterFile";
 import {
   activeProductCategoriesInOrder,
   addProductCategory,
@@ -61,6 +62,11 @@ export class ProductCategoryService {
   private async ensureMigrated(officeId: string): Promise<void> {
     const office = await this.repository.getOffice(officeId);
     if (office?.categoriesMigrated) return;
+    // Centraal beheerd kantoor: de productgamma's komen uit de centrale master. De
+    // eenmalige productgroep-migratie (lokaal willekeurige categorie-id's uit
+    // `Article.productGroup`) mag hier NOOIT draaien — ook niet als de vlag door een
+    // Excel-import (die `categoriesMigrated` niet kent) zou ontbreken.
+    if (isCentrallyManaged(await this.repository.getCentralMasterStatus(officeId))) return;
 
     const existing = await this.repository.getProductCategories();
     const articles = await this.repository.getArticles(officeId);

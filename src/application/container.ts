@@ -12,6 +12,9 @@ import { ProductCategoryService } from "./services/ProductCategoryService";
 import { LegacyImportService } from "./services/LegacyImportService";
 import { CentralHistorySyncService } from "./services/CentralHistorySyncService";
 import { HttpCentralHistorySource } from "../adapters/centralHistory/HttpCentralHistorySource";
+import { CentralMasterSyncService } from "./services/CentralMasterSyncService";
+import { CentralDataSyncService } from "./services/CentralDataSyncService";
+import { HttpCentralMasterSource } from "../adapters/centralMaster/HttpCentralMasterSource";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -49,6 +52,19 @@ export const legacyImportService = new LegacyImportService(repository);
 // HTTP-adapter; sync-service, repository, Analyse en Vergelijken blijven gelijk.
 export const centralHistorySyncService = new CentralHistorySyncService(
   repository,
-  new HttpCentralHistorySource({ getAccessCode: () => repository.getCentralHistoryAccessCode() }),
+  new HttpCentralHistorySource(),
+);
+// Centrale masterdata (docs/CENTRAL_MASTER.md): actuele stamdata, naast de historiek.
+// Migratie naar eBuddy = ENKEL deze regel: `new EBuddyCentralMasterSource(...)` i.p.v. de
+// HTTP-adapter; sync, repository en de rest van de app blijven gelijk.
+export const centralMasterSyncService = new CentralMasterSyncService(
+  repository,
+  new HttpCentralMasterSource(),
+);
+// Volledige centrale sync (master → historiek → "Vorige telling"). Dit is wat de app aanroept.
+export const centralDataSyncService = new CentralDataSyncService(
+  repository,
+  centralMasterSyncService,
+  centralHistorySyncService,
 );
 export const countingRepository = repository;

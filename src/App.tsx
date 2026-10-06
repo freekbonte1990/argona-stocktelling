@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppHeader } from "./ui/components/AppHeader";
 import { ImportPage } from "./ui/pages/ImportPage";
+import { BootstrapPage } from "./ui/pages/BootstrapPage";
 import { HomePage } from "./ui/pages/HomePage";
 import { NewSessionPage } from "./ui/pages/NewSessionPage";
 import { LocationOverviewPage } from "./ui/pages/LocationOverviewPage";
@@ -13,10 +14,11 @@ import { ArticlesPage } from "./ui/pages/ArticlesPage";
 import { ArticleDetailPage } from "./ui/pages/ArticleDetailPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
 import { useOffice, useSession } from "./ui/hooks/useLiveData";
-import { centralHistorySyncService, countSessionService, countingRepository } from "./application/container";
+import { centralDataSyncService, countSessionService, countingRepository } from "./application/container";
 
 type Route =
-  | { screen: "import"; fromOfficeId?: string }
+  | { screen: "bootstrap"; fromOfficeId?: string }
+  | { screen: "import"; fromOfficeId?: string; fromBootstrap?: boolean }
   | { screen: "home"; officeId: string }
   | { screen: "newSession"; officeId: string }
   | { screen: "locationOverview"; sessionId: string }
@@ -92,6 +94,7 @@ function savePersistedRoute(route: Route | null) {
  */
 async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
   switch (route.screen) {
+    case "bootstrap":
     case "import":
       if (!route.fromOfficeId) return true;
       return !!(await countingRepository.getOffice(route.fromOfficeId));
@@ -156,7 +159,9 @@ export default function App() {
       const offices = await countingRepository.getAllOffices();
       if (cancelled) return;
       if (offices.length === 0) {
-        setRoute({ screen: "import" });
+        // Nieuw toestel: eerst het eenmalige bootstrap-scherm (code → kantoor → master → historiek);
+        // de Excel-import blijft daar als fallback bereikbaar.
+        setRoute({ screen: "bootstrap" });
         return;
       }
       const selectedOfficeId = await countingRepository.getSelectedOfficeId();
@@ -169,15 +174,17 @@ export default function App() {
     };
   }, [route]);
 
-  // Centrale read-only historiek: bij het openen van de app en bij elke
-  // kantoorwissel (route "home" met een ander kantoor) STIL en op de
-  // achtergrond synchroniseren. Fire-and-forget: `syncOffice` gooit nooit,
-  // wacht nooit op de UI en blokkeert dus nooit het tellen — offline of bij
-  // een fout blijft gewoon alle lokale data beschikbaar. Zie docs/CENTRAL_HISTORY.md.
+  // Centrale sync (masterdata → historiek → "Vorige telling"): bij het openen van
+  // de app en bij elke terugkeer naar Home / kantoorwissel STIL en op de
+  // achtergrond. Fire-and-forget: `syncOffice` gooit nooit, wacht nooit op de UI
+  // en blokkeert dus nooit het tellen — offline of bij een fout blijft gewoon alle
+  // lokale data beschikbaar. Tijdens een actieve telling wordt een nieuwe master
+  // wel opgehaald maar pas toegepast ná die telling (zie CentralMasterSyncService).
+  // Zie docs/CENTRAL_MASTER.md en docs/CENTRAL_HISTORY.md.
   const homeOfficeId = route?.screen === "home" ? route.officeId : null;
   useEffect(() => {
     if (!homeOfficeId) return;
-    void centralHistorySyncService.syncOffice(homeOfficeId);
+    void centralDataSyncService.syncOffice(homeOfficeId);
   }, [homeOfficeId]);
 
   // v0.3-hotfix: elke navigatie meteen bewaren, zodat een onverwachte
@@ -228,11 +235,28 @@ function RouteHeader({
   );
   const sessionOffice = useOffice(session?.officeId);
 
-  if (route.screen === "import") {
+  if (route.screen === "bootstrap") {
     if (!route.fromOfficeId) return null;
     return (
       <AppHeader
-        breadcrumb="Ander kantoor importeren"
+        breadcrumb="Kantoor toevoegen"
+        onBack={() => onNavigate({ screen: "home", officeId: route.fromOfficeId as string })}
+      />
+    );
+  }
+  if (route.screen === "import") {
+    if (route.fromBootstrap) {
+      return (
+        <AppHeader
+          breadcrumb="Excel importeren"
+          onBack={() => onNavigate({ screen: "bootstrap", fromOfficeId: route.fromOfficeId })}
+        />
+      );
+    }
+    if (!route.fromOfficeId) return null;
+    return (
+      <AppHeader
+        breadcrumb="Excel importeren"
         onBack={() => onNavigate({ screen: "home", officeId: route.fromOfficeId as string })}
       />
     );
@@ -354,14 +378,28 @@ function RouteBody({
   onNavigate: (route: Route) => void;
 }) {
   switch (route.screen) {
+    case "bootstrap":
+      return (
+        <BootstrapPage
+          onBootstrapped={(officeId) => onNavigate({ screen: "home", officeId })}
+          onUseExcel={() => onNavigate({ screen: "import", fromOfficeId: route.fromOfficeId, fromBootstrap: true })}
+          onCancel={
+            route.fromOfficeId
+              ? () => onNavigate({ screen: "home", officeId: route.fromOfficeId as string })
+              : undefined
+          }
+        />
+      );
     case "import":
       return (
         <ImportPage
           onImported={(officeId) => onNavigate({ screen: "home", officeId })}
           onCancel={
-            route.fromOfficeId
-              ? () => onNavigate({ screen: "home", officeId: route.fromOfficeId as string })
-              : undefined
+            route.fromBootstrap
+              ? () => onNavigate({ screen: "bootstrap", fromOfficeId: route.fromOfficeId })
+              : route.fromOfficeId
+                ? () => onNavigate({ screen: "home", officeId: route.fromOfficeId as string })
+                : undefined
           }
         />
       );
@@ -380,7 +418,7 @@ function RouteBody({
             await countingRepository.setSelectedOfficeId(officeId);
             onNavigate({ screen: "home", officeId });
           }}
-          onImportNewOffice={() => onNavigate({ screen: "import", fromOfficeId: route.officeId })}
+          onImportNewOffice={() => onNavigate({ screen: "bootstrap", fromOfficeId: route.officeId })}
           onOpenReview={(sessionId) => onNavigate({ screen: "analysis", sessionId })}
           onCancelSession={(sessionId) => countSessionService.cancelSession(sessionId)}
         />

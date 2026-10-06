@@ -11,7 +11,7 @@ Actieve tellingen blijven volledig lokaal (IndexedDB, local-first).
  Excel-export (app)  ──►  npm run publish-central-history  ──►  central-history-data/<kantoor>.json
                                                                       │  (git push → Vercel deploy)
                                                                       ▼
- Toestel (PWA)  ──GET + toegangscode──►  api/central-history.ts  (serverless, controleert de code)
+ Toestel (PWA)  ──GET (zonder authenticatie)──►  api/central-history.ts  (serverless, alleen-lezen)
       │
       ▼
  HttpCentralHistorySource ─► CentralHistorySyncService ─► IndexedDB (sessies + HISTORIE)
@@ -24,31 +24,32 @@ Actieve tellingen blijven volledig lokaal (IndexedDB, local-first).
 - **Adapter vandaag**: `adapters/centralHistory/HttpCentralHistorySource.ts`.
 - **Sync**: `application/services/CentralHistorySyncService.ts` (additief, idempotent, gooit nooit).
 - **Sessie-reconstructie**: `application/services/historyReconstruction.ts`, gedeeld met de Excel-import. Gereconstrueerde sessies zijn echte COMPLETED-sessies met `FinalizedSessionResult`, dus Analyse en Vergelijken werken ongewijzigd.
-- **Opslag (Dexie v8)**: tabellen `centralHistoryStatus` (per kantoor) en `centralHistoryConfig` (toegangscode van dit toestel). Puur additief.
+- **Opslag (Dexie v8)**: tabel `centralHistoryStatus` (per kantoor). Puur additief. (De tabel `centralHistoryConfig` uit v8 — de oude toegangscode — wordt door v10 verwijderd.)
 
-## Beveiliging (waarom een functie en geen statisch bestand)
+## Toegang (waarom een functie en geen statisch bestand)
 
 De productie-app op Vercel is publiek bereikbaar zonder aanmelding. **Alles in `public/` of `dist/` is voor iedereen leesbaar.** Aantallen en kostprijzen staan daarom
-nooit als statisch bestand online. Een private GitHub-repository beschermt geen gedeployde assets; de toegangscontrole zit in de functie:
+nooit als statisch bestand online, maar worden door een alleen-lezen functie geserveerd.
+
+**Bewuste keuze: het endpoint heeft GEEN authenticatie** (geen toegangscode, token of login). Wie de URL kent, kan de data lezen. Dat is een tijdelijke, aanvaarde situatie tot eBuddy de bron wordt en daar de echte toegangscontrole zit. Wat de functie wél afdwingt:
 
 - Data staat in `central-history-data/` (buiten `public/`, dus niet in `dist/`) en wordt via `vercel.json` → `includeFiles` enkel in `api/central-history.ts` gebundeld.
-- Elke aanvraag moet `Authorization: Bearer <toegangscode>` meesturen. Geldige codes staan in de Vercel-omgevingsvariabele `CENTRAL_HISTORY_TOKENS` (kommagescheiden → rotatie zonder onderbreking).
-- **Faalt gesloten**: zonder (of met te korte, < 16 tekens) configuratie antwoordt het endpoint 503, nooit data.
-- Vergelijking in constante tijd, `officeId` strikt `[a-z0-9-]` (geen path traversal), alleen GET, antwoorden `private, no-store`.
+- Geen `Authorization`-header nodig (een meegestuurde header wordt genegeerd); geen omgevingsvariabelen nodig.
+- `officeId` strikt `[a-z0-9-]` (geen path traversal), alleen GET (405 voor de rest), antwoorden `private, no-store`.
 - De service worker laat `/api` buiten de navigatiefallback (`navigateFallbackDenylist`) en precachet geen json; na één geslaagde sync zit alles in IndexedDB.
 
-De toegangscode staat op elk toestel in IndexedDB (Instellingen → Centrale historiek). Wie een toestel verliest: code roteren (nieuwe code toevoegen aan `CENTRAL_HISTORY_TOKENS`, oude verwijderen, toestellen opnieuw instellen).
+Er is bewust GEEN scherm in Instellingen om de sync-status of een handmatige synchronisatie te tonen: de sync loopt automatisch op de achtergrond, en een nieuw toestel haalt de historiek op tijdens de bootstrap (zie `docs/CENTRAL_MASTER.md`). Er is geen code of login in de app.
 
-> Beperking: dit is één gedeelde toegangscode voor Argona-gebruik, geen persoonlijke accounts. Voor per-gebruiker toegang is de eBuddy-API de aangewezen weg (zie migratiepad).
+> Beperking: de data is leesbaar voor iedereen met de URL. Echte toegangscontrole (per gebruiker) hoort bij de eBuddy-API (zie migratiepad); daarvoor is in deze app bewust niets voorbereid.
 
 ## Eenmalige opzet
 
-1. Genereer een code: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
-2. Vercel → Project → Settings → Environment Variables: `CENTRAL_HISTORY_TOKENS` = de code (Production én Preview). Redeploy.
-3. Publiceer de historiek (zie hieronder), commit en push.
-4. Per toestel: Instellingen → Centrale historiek → toegangscode invoeren → "Opslaan en synchroniseren".
+1. Publiceer de historiek (zie hieronder), commit en push — Vercel deployt.
+2. Per toestel is er niets in te stellen: het bootstrap-scherm (of de achtergrond-sync) haalt de historiek automatisch op.
 
-Lokaal testen: `vite dev` heeft geen `/api`; de app toont dan "niet beschikbaar" en werkt gewoon door. Gebruik `vercel dev` om het endpoint lokaal uit te proberen (met `CENTRAL_HISTORY_TOKENS` in de omgeving).
+Lokaal testen: `vite dev` heeft geen `/api`; de app toont dan "niet beschikbaar" en werkt gewoon door. Gebruik `vercel dev` om het endpoint lokaal uit te proberen.
+
+> Opruiming: de omgevingsvariabele `CENTRAL_HISTORY_TOKENS` in Vercel is niet meer nodig en mag verwijderd worden.
 
 ## Publiceren (alleen buiten de app)
 
@@ -80,11 +81,11 @@ Verplicht: `schemaVersion`, `officeId`, `generatedAt`, `entries`. Validatie is a
 
 ## Sync-regels
 
-Bij het openen van de app en bij elke kantoorwissel (op de achtergrond, max. om de 10 minuten, of handmatig via "Nu synchroniseren"):
+Bij het openen van de app en bij elke kantoorwissel (op de achtergrond, max. om de 10 minuten; er is geen handmatige knop):
 
 - **Additief/idempotent**: lokaal wint bij een botsing op (sessienaam, artikel); sessies krijgen hun stabiele `sourceSessionId` (geen dubbels, ook niet over toestellen heen); een lokale sessie wordt nooit verwijderd omdat ze centraal ontbreekt.
 - **Afwezig ≠ verwijderd.** `deletedSessionIds` (tombstones) wordt al geparsed maar in v1 bewust **niet toegepast**.
-- **Falen blokkeert nooit**: netwerk/401/ongeldig bestand → discrete melding in Instellingen; lokale data blijft ongewijzigd. Offline werkt alles na één geslaagde sync.
+- **Falen blokkeert nooit**: netwerk/401/ongeldig bestand → status/foutmelding enkel intern bewaard (`centralHistoryStatus.lastError`, geen scherm); lokale data blijft ongewijzigd. Offline werkt alles na één geslaagde sync.
 - Onbekende artikelen in centrale regels worden als historisch/inactief artikel aangemaakt (nodig voor snapshots), een bestaand artikel wordt nooit overschreven.
 
 ## Verwijderen en corrigeren

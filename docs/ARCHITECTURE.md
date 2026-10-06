@@ -273,5 +273,13 @@ onafhankelijk van de tijdzone van de machine verifieert.
 Een tweede, kleine "poort" naast `StockSource`: `CentralHistorySource` (alleen lezen) levert afgeronde historische
 tellingen aan `CentralHistorySyncService`, die ze additief in IndexedDB samenvoegt en als echte afgeronde sessies
 reconstrueert (gedeelde logica met de Excel-import: `historyReconstruction.ts`). De data staat bewust achter een
-beveiligd endpoint (`api/central-history.ts`, toegangscode), niet in `public/`. Zie `docs/CENTRAL_HISTORY.md`.
+alleen-lezen endpoint (`api/central-history.ts`, zonder authenticatie — tijdelijk tot eBuddy), niet in `public/`. Zie `docs/CENTRAL_HISTORY.md`.
 
+## Centrale read-only masterdata
+
+Naast `CentralHistorySource` (autoritatief voor tellingen) bestaat `CentralMasterSource` (alleen lezen,
+autoritatief voor *actuele masterdata*: kantoor, locaties, productgamma's, artikelen, koppelingen). Een nieuw
+toestel kiest een kantoor op het bootstrap-scherm; `CentralDataSyncService` haalt master → historiek op en leidt
+"Vorige telling" af uit de historiek. De pure `planCentralMasterApply` berekent wat er geschreven wordt;
+`CountingRepository.applyCentralMaster` doet dat in één transactie die structureel niet aan tellingen of historiek
+kan. Tijdens een actieve telling wordt de master uitgesteld. Zie `docs/CENTRAL_MASTER.md`.

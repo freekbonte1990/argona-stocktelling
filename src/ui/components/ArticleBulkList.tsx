@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { countingRepository, locationAssignmentService, productCategoryService } from "../../application/container";
 import { applyAssortmentActive, isArticleActiveInAssortment } from "../../domain/articleAssortment";
+import { isCentrallyManaged } from "../../domain/centralMasterFile";
 import { resolveCategoryLabel } from "../../domain/productCategory";
+import { useCentralMasterStatus } from "../hooks/useLiveData";
 import type { Article, Location, ProductCategory } from "../../domain/types";
 import { BigButton } from "./BigButton";
 
@@ -52,6 +54,8 @@ export function ArticleBulkList({
   onOpenArticle,
 }: ArticleBulkListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Centraal beheerd kantoor: productgamma en assortiment komen uit de master (read-only bulkacties verborgen).
+  const centrallyManaged = isCentrallyManaged(useCentralMasterStatus(officeId));
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
   const [categoryTarget, setCategoryTarget] = useState<string | null>(null);
@@ -216,12 +220,16 @@ export function ArticleBulkList({
             <button type="button" className="chip" onClick={() => setBulkAction("MOVE")}>
               Verplaatsen naar
             </button>
-            <button type="button" className="chip" onClick={() => setBulkAction("SET_CATEGORY")}>
-              Productgamma wijzigen
-            </button>
-            <button type="button" className="chip" onClick={() => setBulkAction("SET_ASSORTMENT")}>
-              Assortiment wijzigen
-            </button>
+            {!centrallyManaged && (
+              <>
+                <button type="button" className="chip" onClick={() => setBulkAction("SET_CATEGORY")}>
+                  Productgamma wijzigen
+                </button>
+                <button type="button" className="chip" onClick={() => setBulkAction("SET_ASSORTMENT")}>
+                  Assortiment wijzigen
+                </button>
+              </>
+            )}
             <button type="button" className="chip" onClick={() => setSelectedIds(new Set())}>
               Selectie wissen
             </button>

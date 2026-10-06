@@ -162,7 +162,7 @@ export function HomePage({
           Instellingen
         </BigButton>
         <BigButton variant="ghost" onClick={onImportNewOffice}>
-          + Ander kantoor importeren
+          + Ander kantoor toevoegen
         </BigButton>
       </div>
       {!office && <p className="screen-subtitle">Kantoor wordt geladen...</p>}
