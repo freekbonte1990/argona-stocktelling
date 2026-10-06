@@ -65,7 +65,7 @@ function normalizeName(name: string): string {
 }
 
 /** De door de master beheerde velden van een artikel, in één opgebouwd (gedeeltelijk) `Article`. */
-function masterOwnedFields(master: CentralMasterArticle, existing: Article | undefined): Partial<Article> {
+function masterOwnedFields(master: CentralMasterArticle): Partial<Article> {
   const fields: Partial<Article> = {
     officialArticleNumber: master.officialArticleNumber,
     idType: master.idType,
@@ -81,8 +81,9 @@ function masterOwnedFields(master: CentralMasterArticle, existing: Article | und
     categoryId: master.categoryId,
     assortmentActive: master.assortmentActive,
   };
-  const classification = master.stockClassification ?? existing?.stockClassification;
-  if (classification !== undefined) fields.stockClassification = classification;
+  // `stockClassification` is LOKAAL beheerde businessdata: nooit hier, dus nooit
+  // overschreven bij een bestaand artikel. De masterwaarde dient enkel als
+  // initiële waarde bij het aanmaken van een nieuw artikel (zie `articles.push` hieronder).
   return fields;
 }
 
@@ -214,7 +215,7 @@ export function planCentralMasterApply(input: PlanCentralMasterInput): CentralMa
     masterArticleIds.add(id);
     handled.add(id);
     const existing = workingByOffice.get(id);
-    const fields = masterOwnedFields(m, existing);
+    const fields = masterOwnedFields(m);
     if (!existing) {
       summary.articlesAdded += 1;
       articles.push({

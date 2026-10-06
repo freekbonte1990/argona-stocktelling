@@ -164,6 +164,10 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   // deze kaart.
   const [draftAssortmentActive, setDraftAssortmentActive] = useState(true);
   const [savingGeneral, setSavingGeneral] = useState(false);
+  // Beperkte actie voor centraal beheerde artikels: enkel `stockClassification`
+  // (lokaal beheerde businessdata) is aanpasbaar, nooit de mastervelden.
+  const [editingClassification, setEditingClassification] = useState(false);
+  const [classificationDraft, setClassificationDraft] = useState<StockClassification>("ACTIVE");
 
   const article = articles.find((a) => a.id === articleId);
 
@@ -183,6 +187,20 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     setDraftStockClassification(getStockClassification(article));
     setDraftAssortmentActive(isArticleActiveInAssortment(article));
     setEditingGeneral(true);
+  }
+
+  async function saveClassificationOnly() {
+    if (!article) return;
+    setError(null);
+    setSavingGeneral(true);
+    try {
+      await countingRepository.saveArticles([{ ...article, stockClassification: classificationDraft }]);
+      setEditingClassification(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Onbekende fout bij het opslaan.");
+    } finally {
+      setSavingGeneral(false);
+    }
   }
 
   async function saveGeneral() {
@@ -477,9 +495,49 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
             </div>
             <div className="article-detail-field">
               <span className="article-detail-field__label">Voorraadclassificatie</span>
-              <span className="article-detail-field__value">
-                {STOCK_CLASSIFICATION_LABELS[getStockClassification(article)]}
-              </span>
+              {editingClassification ? (
+                <span className="article-detail-field__value filter-row">
+                  <select
+                    className="search-input"
+                    style={{ width: "auto" }}
+                    aria-label="Voorraadclassificatie"
+                    value={classificationDraft}
+                    onChange={(e) => setClassificationDraft(e.target.value as StockClassification)}
+                  >
+                    {(Object.keys(STOCK_CLASSIFICATION_LABELS) as StockClassification[]).map((classification) => (
+                      <option key={classification} value={classification}>
+                        {STOCK_CLASSIFICATION_LABELS[classification]}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="chip" disabled={savingGeneral} onClick={() => void saveClassificationOnly()}>
+                    Opslaan
+                  </button>
+                  <button type="button" className="chip" disabled={savingGeneral} onClick={() => setEditingClassification(false)}>
+                    Annuleren
+                  </button>
+                </span>
+              ) : (
+                <span className="article-detail-field__value">
+                  {STOCK_CLASSIFICATION_LABELS[getStockClassification(article)]}
+                  {masterOwned && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="chip"
+                        onClick={() => {
+                          setError(null);
+                          setClassificationDraft(getStockClassification(article));
+                          setEditingClassification(true);
+                        }}
+                      >
+                        Voorraadclassificatie aanpassen
+                      </button>
+                    </>
+                  )}
+                </span>
+              )}
             </div>
             <div className="article-detail-field">
               <span className="article-detail-field__label">Actief in assortiment</span>

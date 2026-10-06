@@ -348,3 +348,38 @@ describe("planCentralMasterApply — wat het plan NOOIT kan raken", () => {
     );
   });
 });
+
+describe("planCentralMasterApply — lokaal beheerde stockClassification", () => {
+  it("een bestaand artikel behoudt zijn lokale classificatie, ook als de master een andere meestuurt", () => {
+    const first = planCentralMasterApply({ master: makeMaster(), local: emptyLocal(), previousStatus: undefined, now: NOW });
+    const localArticles = first.articles.map((a) => (a.articleNumber === "A1" ? { ...a, stockClassification: "OBSOLETE" as const } : a));
+    const master = makeMaster({
+      revision: "rev-0002",
+      articles: [
+        makeMasterArticle("A1", { stockClassification: "ACTIVE", description: "Gewijzigd" }),
+        makeMasterArticle("A2", { categoryId: CATEGORY_LAMPEN.id, stockClassification: "OBSOLETE" }),
+      ],
+    });
+    const plan = planCentralMasterApply({
+      master,
+      local: local({ office: first.office, articles: localArticles, assignments: first.assignments, categories: first.categories }),
+      previousStatus: first.status,
+      now: NOW,
+    });
+    const a1 = plan.articles.find((a) => a.articleNumber === "A1");
+    expect(a1?.description).toBe("Gewijzigd"); // masterveld wel overgenomen
+    expect(a1?.stockClassification).toBe("OBSOLETE"); // lokaal behouden
+    // A2 had lokaal geen classificatie (ACTIVE-default): master mag die NIET alsnog zetten.
+    expect(plan.articles.find((a) => a.articleNumber === "A2")?.stockClassification).toBeUndefined();
+  });
+
+  it("een nieuw artikel uit de master gebruikt de masterwaarde enkel als initiële waarde", () => {
+    const plan = planCentralMasterApply({
+      master: makeMaster({ articles: [makeMasterArticle("A1", { stockClassification: "OBSOLETE" })], assignments: [] }),
+      local: emptyLocal(),
+      previousStatus: undefined,
+      now: NOW,
+    });
+    expect(plan.articles.find((a) => a.articleNumber === "A1")?.stockClassification).toBe("OBSOLETE");
+  });
+});
