@@ -1,5 +1,5 @@
 import type { ArticleReviewResult, LocationCountValue, SessionReviewSummary } from "./review";
-import type { Article, CountSession, CountSessionType, Location } from "./types";
+import type { Article, CountSession, CountSessionType, Location, StockClassification } from "./types";
 
 /**
  * Rollend stockarchief (Excel-uitbreiding, zie docs/ARCHITECTURE.md): PURE
@@ -168,6 +168,14 @@ export interface StockHistoryEntry {
    * hetzelfde backward-compat-idioom als `source` hierboven).
    */
   sourceSessionId?: string;
+  /**
+   * Bevroren voorraadclassificatie van dit artikel in DEZE telling/periode,
+   * zoals de expliciete bronstatus die gaf (legacy: kolom "OBSOLETE?"; app-
+   * telling: bronstatus op dat moment). BEWUST optioneel: `undefined` =
+   * onbekend (nooit verzonnen) -> val terug op de classificatie van het
+   * levende artikel, zoals vóór deze uitbreiding.
+   */
+  stockClassification?: StockClassification;
 }
 
 /**
@@ -419,6 +427,8 @@ export function buildLegacyPeriodSnapshot(
       articleNumber: entry.articleNumber,
       description: entry.description,
       productGroup: entry.sourceProductGroup ?? resolvedArticle.productGroup,
+      // Bevroren historische classificatie (expliciete bronvlag) wint van de levende.
+      ...(entry.stockClassification !== undefined ? { stockClassification: entry.stockClassification } : {}),
     };
     articles.push({
       articleId: entry.articleId,
@@ -524,6 +534,7 @@ export function buildSnapshotAndReviewFromHistory(
       ...resolvedArticle,
       articleNumber: entry.articleNumber,
       description: entry.description,
+      ...(entry.stockClassification !== undefined ? { stockClassification: entry.stockClassification } : {}),
     };
     const totalCount = entry.totalCount;
     const costPrice = entry.costPrice;

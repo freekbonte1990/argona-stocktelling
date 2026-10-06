@@ -350,7 +350,7 @@ describe("planCentralMasterApply — wat het plan NOOIT kan raken", () => {
 });
 
 describe("planCentralMasterApply — lokaal beheerde stockClassification", () => {
-  it("een bestaand artikel behoudt zijn lokale classificatie, ook als de master een andere meestuurt", () => {
+  it("een bestaand artikel wordt nooit gedowngrade door de master; een handmatige keuze blijft altijd leidend", () => {
     const first = planCentralMasterApply({ master: makeMaster(), local: emptyLocal(), previousStatus: undefined, now: NOW });
     const localArticles = first.articles.map((a) => (a.articleNumber === "A1" ? { ...a, stockClassification: "OBSOLETE" as const } : a));
     const master = makeMaster({
@@ -369,8 +369,24 @@ describe("planCentralMasterApply — lokaal beheerde stockClassification", () =>
     const a1 = plan.articles.find((a) => a.articleNumber === "A1");
     expect(a1?.description).toBe("Gewijzigd"); // masterveld wel overgenomen
     expect(a1?.stockClassification).toBe("OBSOLETE"); // lokaal behouden
-    // A2 had lokaal geen classificatie (ACTIVE-default): master mag die NIET alsnog zetten.
-    expect(plan.articles.find((a) => a.articleNumber === "A2")?.stockClassification).toBeUndefined();
+    // A2: lokaal nooit handmatig aangepast + master zegt expliciet OBSOLETE -> eenmalige bronbackfill (omhoog).
+    expect(plan.articles.find((a) => a.articleNumber === "A2")?.stockClassification).toBe("OBSOLETE");
+    expect(plan.articles.find((a) => a.articleNumber === "A2")?.stockClassificationManual).toBeUndefined();
+  });
+
+  it("een handmatig als ACTIVE gezet artikel wordt nooit door een master-OBSOLETE overschreven", () => {
+    const first = planCentralMasterApply({ master: makeMaster(), local: emptyLocal(), previousStatus: undefined, now: NOW });
+    const manual = first.articles.map((a) => ({ ...a, stockClassification: "ACTIVE" as const, stockClassificationManual: true }));
+    const plan = planCentralMasterApply({
+      master: makeMaster({
+        revision: "rev-0003",
+        articles: [makeMasterArticle("A1", { stockClassification: "OBSOLETE" }), makeMasterArticle("A2", { categoryId: CATEGORY_LAMPEN.id, stockClassification: "OBSOLETE" })],
+      }),
+      local: local({ office: first.office, articles: manual, assignments: first.assignments, categories: first.categories }),
+      previousStatus: first.status,
+      now: NOW,
+    });
+    expect(plan.articles.filter((a) => a.stockClassification !== "ACTIVE")).toEqual([]);
   });
 
   it("een nieuw artikel uit de master gebruikt de masterwaarde enkel als initiële waarde", () => {

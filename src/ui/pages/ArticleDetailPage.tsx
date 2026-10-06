@@ -197,7 +197,14 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
     setError(null);
     setSavingGeneral(true);
     try {
-      await countingRepository.saveArticles([{ ...article, stockClassification: classificationDraft }]);
+      await countingRepository.saveArticles([
+        {
+          ...article,
+          stockClassification: classificationDraft,
+          // Handmatige keuze is altijd leidend (geen sync/backfill overschrijft ze).
+          stockClassificationManual: true,
+        },
+      ]);
       setEditingClassification(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Onbekende fout bij het opslaan.");
@@ -243,6 +250,7 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
           status: statusOption.status,
           rawStatus: statusOption.raw,
           stockClassification: draftStockClassification,
+          ...(draftStockClassification !== getStockClassification(article) ? { stockClassificationManual: true } : {}),
           assortmentActive: draftAssortmentActive,
         },
       ]);

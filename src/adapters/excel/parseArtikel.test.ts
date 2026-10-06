@@ -49,4 +49,31 @@ describe("parseArtikelSheet — Voorraadclassificatie (Sprint 2, backward compat
       expect(getStockClassification(article)).toBe("ACTIVE");
     }
   });
+
+  it("expliciete bronstatus OBSOLETE* zet de INITIËLE classificatie; ACTIEF/NON-ACTIEF/ZIE PANELEN niet", () => {
+    const withStatus = (n: string, status: string): unknown[] => {
+      const row = baseDataRow(n);
+      row[9] = status;
+      return row;
+    };
+    const rows: unknown[][] = [
+      [...ARTIKEL_HEADER_ROW],
+      withStatus("R", "OBSOLETE - ROOD"),
+      withStatus("P", "OBSOLETE - PANEEL"),
+      withStatus("O", "OBSOLETE"),
+      withStatus("A", "ACTIEF"),
+      withStatus("N", "NON-ACTIEF"),
+      withStatus("Z", "ZIE PANELEN"),
+    ];
+    const byNr = new Map(parseArtikelSheet(rows, "office").map((a) => [a.articleNumber, getStockClassification(a)]));
+    expect([byNr.get("R"), byNr.get("P"), byNr.get("O")]).toEqual(["OBSOLETE", "OBSOLETE", "OBSOLETE"]);
+    expect([byNr.get("A"), byNr.get("N"), byNr.get("Z")]).toEqual(["ACTIVE", "ACTIVE", "ACTIVE"]);
+  });
+
+  it("een expliciete kolomwaarde wint van de bronstatus (export-roundtrip van een handmatige keuze)", () => {
+    const row = baseDataRow("A1");
+    row[9] = "OBSOLETE - ROOD";
+    const rows: unknown[][] = [[...ARTIKEL_HEADER_ROW, STOCK_CLASSIFICATION_HEADER], [...row, "ACTIEF"]];
+    expect(getStockClassification(parseArtikelSheet(rows, "office")[0])).toBe("ACTIVE");
+  });
 });

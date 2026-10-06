@@ -1,3 +1,4 @@
+import { initialClassificationFromStatus } from "../src/domain/stockClassification";
 import { createHash } from "node:crypto";
 import { createExcelStockSourceFromBuffer } from "../src/adapters/excel/ExcelStockSource";
 import {
@@ -143,7 +144,9 @@ export async function buildMasterPublication(input: MasterPublicationInput): Pro
         rawStatus: a.rawStatus,
         assortmentActive: a.assortmentActive ?? true,
       };
-      if (a.stockClassification !== undefined) article.stockClassification = a.stockClassification;
+      // Initiële classificatie: expliciete obsolete-bronstatus (OBSOLETE*) wint; anders de lokale waarde.
+      const classification = initialClassificationFromStatus(a.rawStatus) ?? a.stockClassification;
+      if (classification !== undefined) article.stockClassification = classification;
       return article;
     })
     .sort((a, b) => compare(a.articleNumber, b.articleNumber));

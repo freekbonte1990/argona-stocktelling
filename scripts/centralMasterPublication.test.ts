@@ -86,3 +86,22 @@ describe("alignCategories", () => {
     );
   });
 });
+
+describe("initiële obsolete-classificatie uit de expliciete bronstatus", () => {
+  it("Lokeren: exact 26 artikels OBSOLETE (21 ROOD + 5 PANEEL), NON-ACTIEF blijft niet-obsolete", async () => {
+    const { file } = await build("Stocktelling_Lokeren_standaard.xlsx");
+    const obsolete = file.articles.filter((a) => a.stockClassification === "OBSOLETE");
+    expect(obsolete).toHaveLength(26);
+    expect(obsolete.every((a) => (a.rawStatus ?? "").toUpperCase().startsWith("OBSOLETE"))).toBe(true);
+    expect(file.articles.filter((a) => a.rawStatus === "NON-ACTIEF").every((a) => a.stockClassification !== "OBSOLETE")).toBe(true);
+  });
+
+  it("Damme: exact 39 artikels OBSOLETE; 'ZIE PANELEN' wordt niet automatisch obsolete", async () => {
+    // Zoals de echte publicatie: inclusief tijdelijke (TMP) artikels, die in Damme mee in de master staan.
+    const { file } = await build("Stocktelling_Damme_standaard.xlsx", { includeTemporary: true });
+    expect(file.articles.filter((a) => a.stockClassification === "OBSOLETE")).toHaveLength(39);
+    const panelen = file.articles.filter((a) => a.rawStatus === "ZIE PANELEN");
+    expect(panelen.length).toBeGreaterThan(0);
+    expect(panelen.every((a) => a.stockClassification !== "OBSOLETE")).toBe(true);
+  });
+});

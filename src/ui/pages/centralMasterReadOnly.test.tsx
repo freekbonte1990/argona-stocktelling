@@ -111,7 +111,11 @@ describe("Artikeldetail — centraal beheerd artikel", () => {
     });
     const saved = (await countingRepository.getArticles("damme")).find((a) => a.id === "damme:A1")!;
     // Enkel stockClassification is gewijzigd.
-    expect({ ...saved, stockClassification: original.stockClassification }).toEqual(original);
+    expect(saved.stockClassificationManual).toBe(true); // handmatige keuze is leidend
+    expect({ ...saved, stockClassification: original.stockClassification, stockClassificationManual: undefined }).toEqual({
+      ...original,
+      stockClassificationManual: undefined,
+    });
 
     // Bestaande analyse/obsolete-logica gebruikt de classificatie.
     const row = toAnalysisArticleRow(

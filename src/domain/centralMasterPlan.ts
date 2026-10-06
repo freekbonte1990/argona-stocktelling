@@ -1,3 +1,4 @@
+import { getStockClassification } from "./stockClassification";
 import { isArticleActiveInAssortment } from "./articleAssortment";
 import {
   isCentrallyManaged,
@@ -81,9 +82,9 @@ function masterOwnedFields(master: CentralMasterArticle): Partial<Article> {
     categoryId: master.categoryId,
     assortmentActive: master.assortmentActive,
   };
-  // `stockClassification` is LOKAAL beheerde businessdata: nooit hier, dus nooit
-  // overschreven bij een bestaand artikel. De masterwaarde dient enkel als
-  // initiële waarde bij het aanmaken van een nieuw artikel (zie `articles.push` hieronder).
+  // `stockClassification` is LOKAAL beheerde businessdata: niet hier, dus nooit
+  // overschreven bij een bestaand artikel. De masterwaarde is enkel een initiële
+  // waarde (nieuw artikel) of een eenmalige OBSOLETE-backfill (zie hieronder).
   return fields;
 }
 
@@ -218,6 +219,18 @@ export function planCentralMasterApply(input: PlanCentralMasterInput): CentralMa
     // Tijdelijke (TMP) artikels zijn lokaal bewerkbaar: bij een bestaand artikel
     // wint de lokale waarde altijd, de sync overschrijft er niets van.
     const fields = existing && isTemporaryArticle(existing) ? {} : masterOwnedFields(m);
+    // Eenmalige bronbackfill (enkel omhoog): de master zegt expliciet OBSOLETE en
+    // de classificatie is lokaal nog nooit handmatig aangepast. Een handmatige
+    // keuze (`stockClassificationManual`) is altijd leidend; nooit een downgrade.
+    if (
+      existing &&
+      !isTemporaryArticle(existing) &&
+      m.stockClassification === "OBSOLETE" &&
+      !existing.stockClassificationManual &&
+      getStockClassification(existing) !== "OBSOLETE"
+    ) {
+      fields.stockClassification = "OBSOLETE";
+    }
     if (!existing) {
       summary.articlesAdded += 1;
       articles.push({

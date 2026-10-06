@@ -205,8 +205,8 @@ describe("Artikels — locatiechips", () => {
     render(<ArticlesPage officeId="lokeren" onOpenArticle={() => {}} />);
     await screen.findByText(/Centraal artikel A1/);
     await waitFor(() => expect(screen.getAllByText("Bestelwagen").length).toBeGreaterThan(0));
-    expect(screen.queryByRole("button", { name: "Magazijn verwijderen van dit artikel" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Bestelwagen verwijderen van dit artikel" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Magazijn verwijderen van dit artikel" })).toBeNull());
+    expect(await screen.findByRole("button", { name: "Bestelwagen verwijderen van dit artikel" })).toBeInTheDocument();
     // "+ Nieuw artikel" blijft beschikbaar (maar discreet).
     expect(screen.getByRole("button", { name: "+ Nieuw artikel" })).toHaveClass("chip");
   });

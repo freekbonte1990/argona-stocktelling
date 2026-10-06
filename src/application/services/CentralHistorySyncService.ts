@@ -179,17 +179,43 @@ export class CentralHistorySyncService {
     previous: CentralHistoryStatus | undefined,
     nowIso: string,
   ): Promise<number> {
-    const central = file.entries;
+    // Een centrale sessie die dit toestel al kent (zelfde `sourceSessionId`) maar
+    // onder een andere naam bewaarde (bv. een later gecorrigeerde sessienaam) wordt
+    // NIET nogmaals als tweede reeks regels toegevoegd — de lokale, bevroren
+    // sessie blijft ongewijzigd.
+    const local = await this.repository.getStockHistoryEntries(officeId);
+    const localNameBySessionId = new Map<string, string>();
+    for (const entry of local) {
+      if (entry.sourceSessionId) localNameBySessionId.set(entry.sourceSessionId, entry.sessionName);
+    }
+    const centralAll = file.entries;
+    const central = centralAll.filter((entry) => {
+      const knownName = entry.sourceSessionId ? localNameBySessionId.get(entry.sourceSessionId) : undefined;
+      return knownName === undefined || knownName === entry.sessionName;
+    });
 
     // 1. Historiek: LOKAAL WINT bij een botsing op (sessienaam, artikel) —
     //    `mergeHistoryEntries(existing, incoming)` laat `incoming` winnen, dus
     //    de centrale regels gaan eerst en de lokale erna. Er wordt enkel
     //    geschreven als er écht iets nieuws binnenkomt.
-    const local = await this.repository.getStockHistoryEntries(officeId);
     const localKeys = new Set(local.map(historyEntryKey));
     const hasNewEntries = central.some((entry) => !localKeys.has(historyEntryKey(entry)));
-    const merged = hasNewEntries ? mergeHistoryEntries(central, local) : local;
-    if (hasNewEntries) {
+    let merged = hasNewEntries ? mergeHistoryEntries(central, local) : local;
+    // Enige uitzondering op "lokaal wint": een legacy-regel zonder bevroren
+    // classificatie krijgt ENKEL dat veld aangevuld uit de centrale bron
+    // (hoeveelheden/kostprijzen blijven onaangeroerd).
+    const centralClassification = new Map(
+      centralAll.filter((e) => e.stockClassification !== undefined).map((e) => [historyEntryKey(e), e.stockClassification!]),
+    );
+    let enriched = 0;
+    merged = merged.map((entry) => {
+      if (entry.source !== "LEGACY_IMPORT" || entry.stockClassification !== undefined) return entry;
+      const classification = centralClassification.get(historyEntryKey(entry));
+      if (classification === undefined) return entry;
+      enriched += 1;
+      return { ...entry, stockClassification: classification };
+    });
+    if (hasNewEntries || enriched > 0) {
       await this.repository.saveStockHistoryEntries(officeId, merged);
     }
 
@@ -211,7 +237,7 @@ export class CentralHistorySyncService {
     //    gereconstrueerd (gedeelde logica met de Excel-import). Enkel sessies
     //    die ook in het centrale bestand staan — nooit lokale restanten.
     const centralSessionNames = new Set(
-      central.filter((e) => e.source !== "LEGACY_IMPORT").map((e) => e.sessionName),
+      centralAll.filter((e) => e.source !== "LEGACY_IMPORT").map((e) => e.sessionName),
     );
     const toReconstruct = merged.filter((e) => centralSessionNames.has(e.sessionName));
     const created = await reconstructMissingSessionsFromHistory(
@@ -230,7 +256,7 @@ export class CentralHistorySyncService {
       lastError: null,
       lastGeneratedAt: file.generatedAt,
       lastAddedSessionCount: created.length,
-      centralSessionIds: union(previous?.centralSessionIds, centralSessionIdsOf(central), created.map((s) => s.id)),
+      centralSessionIds: union(previous?.centralSessionIds, centralSessionIdsOf(centralAll), created.map((s) => s.id)),
       centralSessionNames: union(previous?.centralSessionNames, Array.from(centralSessionNames)),
     };
     await this.repository.saveCentralHistoryStatus(status);

@@ -231,6 +231,10 @@ export function buildLegacyHistoryEntry(
     // rij, nooit de eventueel intussen gewijzigde huidige `Article.productGroup`
     // — zie `StockHistoryEntry.sourceProductGroup`s eigen documentatie.
     sourceProductGroup: row.sourceProductGroup,
+    // Expliciete bronvlag "OBSOLETE?" bevroren in de historische regel
+    // (JA* -> OBSOLETE, NEE/NEEN -> ACTIVE, onbekend -> niet gezet).
+    ...(row.obsolete === true ? { stockClassification: "OBSOLETE" as const } : {}),
+    ...(row.obsolete === false ? { stockClassification: "ACTIVE" as const } : {}),
   };
 }
 

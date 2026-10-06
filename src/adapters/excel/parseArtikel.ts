@@ -1,5 +1,6 @@
 import { normalizeArticleStatus, normalizeFrequency } from "../../domain/frequency";
-import { normalizeStockClassification } from "../../domain/stockClassification";
+import { initialClassificationFromStatus, normalizeStockClassification } from "../../domain/stockClassification";
+import type { StockClassification } from "../../domain/types";
 import type { Article } from "../../domain/types";
 import { ExcelValidationError } from "./excelErrors";
 import { extractDataRows, findHeaderRow, findOptionalColumnIndex } from "./excelHeaderUtils";
@@ -144,7 +145,9 @@ function buildArticle(
     // is `row[STOCK_CLASSIFICATION_HEADER]` altijd `undefined` (nooit
     // meegelezen door extractDataRows) -> `toStringOrNull` geeft `null` ->
     // veilige default ACTIVE, exact zoals spec §14 vraagt.
-    stockClassification: normalizeStockClassification(toStringOrNull(row[STOCK_CLASSIFICATION_HEADER])),
+    // Expliciete kolomwaarde wint; een lege/ontbrekende kolom valt terug op de
+    // expliciete bronstatus ("OBSOLETE", "OBSOLETE - ROOD", ...) als INITIËLE waarde.
+    stockClassification: resolveInitialClassification(toStringOrNull(row[STOCK_CLASSIFICATION_HEADER]), rawStatus),
     // Sprint 3.2 §14: enkel zetten (mogelijk `null`) wanneer de kolom
     // effectief in dit bestand aanwezig is — anders blijft `categoryId`
     // `undefined`, zie de toelichting bij `CATEGORY_ID_HEADER` hierboven.
@@ -160,4 +163,9 @@ function buildArticle(
       ? { assortmentActive: toBooleanFlag(row[ASSORTMENT_ACTIVE_HEADER], true) }
       : {}),
   };
+}
+
+function resolveInitialClassification(rawColumn: string | null, rawStatus: string | null): StockClassification {
+  if (rawColumn !== null && rawColumn.trim() !== "") return normalizeStockClassification(rawColumn);
+  return initialClassificationFromStatus(rawStatus) ?? normalizeStockClassification(null);
 }

@@ -193,6 +193,14 @@ export interface Article {
    */
   stockClassification?: StockClassification;
   /**
+   * Kleinste marker voor lokaal beheerde classificatie: `true` zodra een
+   * gebruiker de classificatie zelf aanpaste. Een handmatige keuze is altijd
+   * leidend — geen centrale sync of bronbackfill overschrijft ze. Ontbrekend
+   * = nog nooit handmatig aangepast (eenmalige bronbackfill naar OBSOLETE
+   * toegestaan).
+   */
+  stockClassificationManual?: boolean;
+  /**
    * Sprint 3.2 §2/§7: de HUIDIGE, beheerde "Productgamma"-classificatie —
    * verwijst naar `ProductCategory.id` (nooit naar een naam, die kan
    * hernoemd worden). Mag retroactief wijzigen: management-analyses van OUDE

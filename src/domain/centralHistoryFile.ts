@@ -162,6 +162,12 @@ function parseEntry(raw: unknown, index: number): StockHistoryEntry {
     }
     entry.sourceProductGroup = raw.sourceProductGroup;
   }
+  if (raw.stockClassification !== undefined) {
+    if (raw.stockClassification !== "ACTIVE" && raw.stockClassification !== "OBSOLETE") {
+      throw new CentralHistoryFormatError(`${where}: "stockClassification" moet ACTIVE of OBSOLETE zijn.`);
+    }
+    entry.stockClassification = raw.stockClassification;
+  }
   return entry;
 }
 

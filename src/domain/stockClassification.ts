@@ -54,6 +54,31 @@ export function normalizeStockClassification(raw: string | null | undefined): St
   return value === "OBSOLETE" ? "OBSOLETE" : DEFAULT_STOCK_CLASSIFICATION;
 }
 
+/**
+ * Expliciete bronstatus van een ACTUEEL artikel (`Artikelstatus`/`rawStatus`)
+ * -> INITIËLE classificatie. Enkel een status die met "OBSOLETE" begint
+ * ("OBSOLETE", "OBSOLETE - ROOD", "OBSOLETE - PANEEL") geeft OBSOLETE; al het
+ * andere (ACTIEF, NON-ACTIEF, ZIE PANELEN, leeg, ...) is NIET automatisch
+ * obsolete (`null` = "geen uitspraak"). Nooit afgeleid uit beweging/leeftijd.
+ */
+export function initialClassificationFromStatus(rawStatus: string | null | undefined): StockClassification | null {
+  const value = (rawStatus ?? "").trim().toUpperCase();
+  return value.startsWith("OBSOLETE") ? "OBSOLETE" : null;
+}
+
+/**
+ * Expliciete HISTORISCHE bronvlag (legacy kolom "OBSOLETE?") -> classificatie
+ * die in de historische snapshot bevroren wordt. "JA", "JA - ROOD",
+ * "JA - PANEEL", "JA - HUAWEI" -> OBSOLETE; "NEE"/"NEEN" -> ACTIVE; alles
+ * anders (bv. "ZIE PANELEN", leeg, kolom ontbreekt) -> `undefined` (onbekend).
+ */
+export function classificationFromLegacyFlag(raw: string | null | undefined): StockClassification | undefined {
+  const value = (raw ?? "").trim().toUpperCase();
+  if (value === "NEE" || value === "NEEN") return "ACTIVE";
+  if (value.startsWith("JA")) return "OBSOLETE";
+  return undefined;
+}
+
 /** Omgekeerde afbeelding — voor export (kolom "Voorraadclassificatie" in ARTIKEL). */
 export const STOCK_CLASSIFICATION_TO_RAW: Record<StockClassification, string> = {
   ACTIVE: "ACTIEF",
