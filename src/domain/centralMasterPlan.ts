@@ -215,7 +215,9 @@ export function planCentralMasterApply(input: PlanCentralMasterInput): CentralMa
     masterArticleIds.add(id);
     handled.add(id);
     const existing = workingByOffice.get(id);
-    const fields = masterOwnedFields(m);
+    // Tijdelijke (TMP) artikels zijn lokaal bewerkbaar: bij een bestaand artikel
+    // wint de lokale waarde altijd, de sync overschrijft er niets van.
+    const fields = existing && isTemporaryArticle(existing) ? {} : masterOwnedFields(m);
     if (!existing) {
       summary.articlesAdded += 1;
       articles.push({

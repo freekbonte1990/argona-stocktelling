@@ -383,3 +383,30 @@ describe("planCentralMasterApply — lokaal beheerde stockClassification", () =>
     expect(plan.articles.find((a) => a.articleNumber === "A1")?.stockClassification).toBe("OBSOLETE");
   });
 });
+
+describe("planCentralMasterApply — tijdelijke (TMP) artikels uit de master zijn lokaal bewerkbaar", () => {
+  const tmpMaster = (description: string, rev: string) =>
+    makeMaster({
+      revision: rev,
+      articles: [
+        makeMasterArticle("TMP-DAM-0003", { idType: "TIJDELIJK", description, costPrice: 385 }),
+        makeMasterArticle("A1", { description }),
+      ],
+      assignments: [],
+    });
+
+  it("een lokale wijziging aan een TMP-artikel uit de master wordt door een volgende sync niet overschreven; gewone artikels volgen de master wel", () => {
+    const first = planCentralMasterApply({ master: tmpMaster("Master v1", "rev-1"), local: emptyLocal(), previousStatus: undefined, now: NOW });
+    const edited = first.articles.map((a) =>
+      a.articleNumber === "TMP-DAM-0003" ? { ...a, description: "Lokaal aangepast", costPrice: 400 } : a,
+    );
+    const plan = planCentralMasterApply({
+      master: tmpMaster("Master v2", "rev-2"),
+      local: local({ office: first.office, articles: edited, assignments: first.assignments, categories: first.categories }),
+      previousStatus: first.status,
+      now: NOW,
+    });
+    expect(plan.articles.find((a) => a.articleNumber === "TMP-DAM-0003")).toBeUndefined(); // niet herschreven
+    expect(plan.articles.find((a) => a.articleNumber === "A1")?.description).toBe("Master v2");
+  });
+});

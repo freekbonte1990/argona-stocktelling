@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
-import { isCentralArticle } from "../../domain/centralMasterFile";
+import { isCentralArticle, isTemporaryArticle } from "../../domain/centralMasterFile";
 import { activeLocationsInOrder } from "../../domain/locations";
 import { ARTICLE_STATUS_OPTIONS, FREQUENCY_TO_RAW } from "../../domain/frequency";
 import { FREQUENCY_FILTER_LABELS } from "../../domain/articleListing";
@@ -117,7 +117,10 @@ export function ArticleDetailPage({ officeId, articleId }: ArticleDetailPageProp
   const history = useArticleHistory(officeId, articleId) ?? [];
   // Een centraal artikel (uit de master) is read-only; een lokaal TMP-artikel blijft bewerkbaar.
   const masterStatus = useCentralMasterStatus(officeId);
-  const masterOwned = isCentralArticle(masterStatus, articleId);
+  // Tijdelijke (TMP) artikels uit de master blijven lokaal volledig bewerkbaar.
+  const currentArticle = articles.find((a) => a.id === articleId);
+  const masterOwned =
+    isCentralArticle(masterStatus, articleId) && !(currentArticle && isTemporaryArticle(currentArticle));
 
   // Sprint 3.2 §7: "Productgamma" — de eenmalige (idempotente) migratie/
   // bootstrap loopt via deze aanroep, `useProductCategories` levert de

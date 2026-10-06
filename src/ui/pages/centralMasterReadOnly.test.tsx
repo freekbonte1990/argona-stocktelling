@@ -10,7 +10,7 @@ import { buildObsoleteAnalysis, toAnalysisArticleRow } from "../../domain/analys
 import type { ArticleSnapshot } from "../../domain/stockSnapshot";
 import { CentralMasterSyncService } from "../../application/services/CentralMasterSyncService";
 import { makeArticle } from "../../application/services/centralHistoryTestUtils";
-import { FakeCentralMasterSource, makeMaster } from "../../application/services/centralMasterTestUtils";
+import { FakeCentralMasterSource, makeMaster, makeMasterArticle } from "../../application/services/centralMasterTestUtils";
 import type { Article } from "../../domain/types";
 import { ArticleDetailPage } from "./ArticleDetailPage";
 import { ArticlesPage } from "./ArticlesPage";
@@ -124,6 +124,31 @@ describe("Artikeldetail — centraal beheerd artikel", () => {
     // Historische snapshot blijft bevroren.
     const after = (await countingRepository.getFinalizedSessionResult(session.id))!;
     expect(JSON.stringify(after.snapshot)).toBe(frozenBefore);
+  });
+
+  it("een tijdelijk (TMP) artikel dat in de master staat is volledig bewerkbaar", async () => {
+    const user = userEvent.setup();
+    const sync = new CentralMasterSyncService(
+      countingRepository,
+      new FakeCentralMasterSource(
+        makeMaster({
+          revision: "rev-tmp",
+          articles: [makeMasterArticle("TMP-DAM-0003", { idType: "TIJDELIJK", description: "3M Verbindingsmof" })],
+          assignments: [],
+        }),
+      ),
+    );
+    await sync.syncOffice("damme", { force: true, selectOffice: true });
+    render(<ArticleDetailPage officeId="damme" articleId="damme:TMP-DAM-0003" />);
+    await user.click(await screen.findByRole("button", { name: "Bewerken" }));
+    const input = screen.getByDisplayValue("3M Verbindingsmof");
+    await user.clear(input);
+    await user.type(input, "3M mof lokaal");
+    await user.click(screen.getByRole("button", { name: /Opslaan/ }));
+    await waitFor(async () => {
+      const a = (await countingRepository.getArticles("damme")).find((x) => x.id === "damme:TMP-DAM-0003");
+      expect(a?.description).toBe("3M mof lokaal");
+    });
   });
 
   it("een lokaal TMP-artikel blijft bewerkbaar", async () => {
