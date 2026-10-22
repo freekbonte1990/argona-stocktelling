@@ -10,6 +10,7 @@ import type {
 import type {
   CountingRepository,
   DeleteSessionInput,
+  ApplySessionCorrectionInput,
   FinalizedSessionResult,
   FinalizeSessionInput,
   HistoricalSheetRecord,
@@ -167,6 +168,43 @@ export class IndexedDbCountingRepository implements CountingRepository {
           .equals(input.officeId)
           .and((entry) => entry.sessionName === input.sessionName)
           .delete();
+
+        if (input.updatedArticles.length > 0) {
+          await this.db.articles.bulkPut(input.updatedArticles);
+        }
+      },
+    );
+  }
+
+  async applySessionCorrection(input: ApplySessionCorrectionInput): Promise<void> {
+    const sheetId = `${input.officeId}:${input.sessionName}`;
+    await this.db.transaction(
+      "rw",
+      [
+        this.db.finalizedSessionResults,
+        this.db.historicalSheets,
+        this.db.stockHistoryEntries,
+        this.db.articles,
+      ],
+      async () => {
+        await this.db.finalizedSessionResults.put(input.result);
+
+        if (input.historyEntries.length > 0) {
+          await this.db.stockHistoryEntries.bulkPut(
+            input.historyEntries.map((entry) => ({
+              ...entry,
+              officeId: input.officeId,
+              id: `${input.officeId}:${entry.sessionName}:${entry.articleId}`,
+            })),
+          );
+        }
+
+        // Enkel de eigen, door DEZE sessie gegenereerde sheet laten vallen
+        // zodat de export opnieuw uit de gecorrigeerde snapshot opbouwt.
+        const sheet = await this.db.historicalSheets.get(sheetId);
+        if (sheet && sheet.sessionId === input.sessionId) {
+          await this.db.historicalSheets.delete(sheetId);
+        }
 
         if (input.updatedArticles.length > 0) {
           await this.db.articles.bulkPut(input.updatedArticles);

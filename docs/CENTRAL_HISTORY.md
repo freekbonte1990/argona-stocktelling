@@ -93,6 +93,14 @@ Bij het openen van de app en bij elke kantoorwissel (op de achtergrond, max. om 
 - Centraal gesynchroniseerde sessies zijn **read-only qua verwijdering** in de gewone app (service-laag: `CentralSessionDeletionNotAllowedError`; in Instellingen verdwijnt de knop). Anders zou een lokaal verwijderde sessie bij de volgende sync terugkeren.
 - Correctie/verwijdering gebeurt aan de centrale bron. **Let op (v1):** al gesynchroniseerde regels worden door de sync nooit overschreven (lokaal wint). Een gecorrigeerde waarde bereikt dus enkel nieuwe toestellen; voor bestaande toestellen is een expliciete tombstone + nieuwe sessie nodig — dat is precies waar `deletedSessionIds` voor gereserveerd is (volgende stap).
 
+### Telling corrigeren (afgeronde telling aanpassen zonder ze te verwijderen)
+
+- In de app: **Vorige tellingen → telling openen → "Telling corrigeren"**. Enkel het **getelde eindaantal** van geteld/0-bevestigde artikelen kan gewijzigd worden; kostprijs, naam, sessienaam, datum en sessie-ID blijven bevroren. De telling blijft bestaan (ook een centrale telling is lokaal corrigeerbaar).
+- Een correctie werkt in één transactie bij: bevroren snapshot + review, de HISTORIE-regels van die sessie, en verwijdert de bewaarde Excelsheet van die sessie (de volgende export bouwt opnieuw op uit de gecorrigeerde cijfers). Is de telling de **laatste afgeronde** van het kantoor, dan wordt ook `Article.previousCount` (basis voor de volgende telling) bijgewerkt. Eerdere/latere bevroren tellingen worden niet herschreven.
+- Elke correctie wordt als auditspoor bewaard (`corrections` op het bevroren resultaat) en met **"Correcties exporteren"** als JSON gedownload (`correcties-<kantoor>-<sessie>.json`).
+- Centraal bijwerken (nieuwe toestellen zien dan de juiste cijfers): `npm run apply-central-corrections -- <correcties.json> [--dry-run]` past enkel `totalCount`/verschillen/status van de gecorrigeerde regels in `central-history-data/<kantoor>.json` aan (idempotent, waarschuwt bij afwijkend origineel); daarna commit + push zoals gewoonlijk.
+- Beperking: toestellen die de sessie al hebben houden hun eigen lokale waarden (lokaal wint); corrigeer daar zelf via dezelfde functie.
+
 ## Migratiepad naar eBuddy
 
 Een `EBuddyCentralHistorySource` implementeert dezelfde poort (`fetchOfficeHistory`, resultaat = `CentralHistoryFile`). In `application/container.ts` wordt enkel de ene regel

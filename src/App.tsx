@@ -8,6 +8,7 @@ import { LocationOverviewPage } from "./ui/pages/LocationOverviewPage";
 import { WithoutLocationPage } from "./ui/pages/WithoutLocationPage";
 import { CountingPage } from "./ui/pages/CountingPage";
 import { ReviewPage } from "./ui/pages/ReviewPage";
+import { SessionCorrectionPage } from "./ui/pages/SessionCorrectionPage";
 import { AnalysisPage } from "./ui/pages/AnalysisPage";
 import { ComparisonPage } from "./ui/pages/ComparisonPage";
 import { LegacySnapshotPage } from "./ui/pages/LegacySnapshotPage";
@@ -28,6 +29,7 @@ type Route =
   | { screen: "counting"; sessionId: string; locationId: string; focusArticleId?: string }
   | { screen: "review"; sessionId: string }
   | { screen: "analysis"; sessionId: string }
+  | { screen: "correction"; sessionId: string }
   | { screen: "comparison"; sessionId: string; officeId?: string }
   | { screen: "legacySnapshot"; officeId: string; snapshotId: string }
   | { screen: "articles"; officeId: string }
@@ -118,6 +120,7 @@ async function isPersistedRouteStillValid(route: Route): Promise<boolean> {
     case "withoutLocation":
     case "review":
     case "analysis":
+    case "correction":
       return !!(await countingRepository.getSession(route.sessionId));
     case "counting": {
       const session = await countingRepository.getSession(route.sessionId);
@@ -241,6 +244,7 @@ function RouteHeader({
       route.screen === "counting" ||
       route.screen === "review" ||
       route.screen === "analysis" ||
+      route.screen === "correction" ||
       route.screen === "comparison"
       ? route.sessionId
       : undefined,
@@ -353,6 +357,14 @@ function RouteHeader({
           if (!session) return;
           onNavigate({ screen: "home", officeId: session.officeId });
         }}
+      />
+    );
+  }
+  if (route.screen === "correction") {
+    return (
+      <AppHeader
+        breadcrumb={`${sessionOffice?.name ?? ""} — telling corrigeren`}
+        onBack={() => onNavigate({ screen: "analysis", sessionId: route.sessionId })}
       />
     );
   }
@@ -511,6 +523,14 @@ function RouteBody({
             if (session) onNavigate({ screen: "articleDetail", officeId: session.officeId, articleId });
           }}
           onOpenComparison={(sessionId) => onNavigate({ screen: "comparison", sessionId })}
+          onOpenCorrection={(sessionId) => onNavigate({ screen: "correction", sessionId })}
+        />
+      );
+    case "correction":
+      return (
+        <SessionCorrectionPage
+          sessionId={route.sessionId}
+          onDone={() => onNavigate({ screen: "analysis", sessionId: route.sessionId })}
         />
       );
     case "legacySnapshot":

@@ -25,6 +25,8 @@ interface AnalysisPageProps {
   onOpenArticle: (articleId: string) => void;
   /** Sprint 3 §1: naar de "Vergelijken"-view, met deze sessie als default telling B. */
   onOpenComparison: (sessionId: string) => void;
+  /** Naar "Telling corrigeren" (enkel voor afgeronde tellingen). */
+  onOpenCorrection?: (sessionId: string) => void;
 }
 
 const ARTICLE_LIST_ANCHOR_ID = "analysis-article-list";
@@ -49,7 +51,7 @@ const ARTICLE_LIST_ANCHOR_ID = "analysis-article-list";
  * meer geëxporteerd worden, ook niet wanneer ze op een ander toestel verder
  * gebruikt moet worden (bv. een Excel-export om elders te heropenen/te delen).
  */
-export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: AnalysisPageProps) {
+export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison, onOpenCorrection }: AnalysisPageProps) {
   const session = useSession(sessionId);
   const office = useOffice(session?.officeId);
 
@@ -196,6 +198,11 @@ export function AnalysisPage({ sessionId, onOpenArticle, onOpenComparison }: Ana
         <button type="button" className="mode-toggle__button" onClick={() => onOpenComparison(sessionId)}>
           Vergelijken
         </button>
+        {onOpenCorrection ? (
+          <button type="button" className="mode-toggle__button" onClick={() => onOpenCorrection(sessionId)}>
+            Telling corrigeren
+          </button>
+        ) : null}
       </div>
 
       {/* Aanvulling: export blijft bereikbaar voor een afgeronde telling,

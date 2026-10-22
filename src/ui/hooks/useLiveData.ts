@@ -64,6 +64,10 @@ export function useSession(sessionId: string | undefined) {
   return useLiveQuery(() => (sessionId ? db.sessions.get(sessionId) : undefined), [sessionId]);
 }
 
+export function useFinalizedSessionResult(sessionId: string | undefined) {
+  return useLiveQuery(() => (sessionId ? db.finalizedSessionResults.get(sessionId) : undefined), [sessionId]);
+}
+
 export function useCountEntries(sessionId: string | undefined) {
   return useLiveQuery(
     () => (sessionId ? db.countEntries.where("sessionId").equals(sessionId).toArray() : []),

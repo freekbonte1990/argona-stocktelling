@@ -4,6 +4,7 @@ import { ExcelLegacySnapshotExporter } from "../adapters/excel/ExcelLegacySnapsh
 import { LegacySnapshotService } from "./services/LegacySnapshotService";
 import { ImportService } from "./services/ImportService";
 import { CountSessionService } from "./services/CountSessionService";
+import { SessionCorrectionService } from "./services/SessionCorrectionService";
 import { CountingService } from "./services/CountingService";
 import { ExportService } from "./services/ExportService";
 import { AnalysisService } from "./services/AnalysisService";
@@ -36,6 +37,7 @@ const resultExporter = new ExcelStockResultExporter();
 
 export const importService = new ImportService(repository);
 export const countSessionService = new CountSessionService(repository);
+export const sessionCorrectionService = new SessionCorrectionService(repository);
 export const countingService = new CountingService(repository);
 export const exportService = new ExportService(repository, resultExporter);
 export const productCategoryService = new ProductCategoryService(repository);

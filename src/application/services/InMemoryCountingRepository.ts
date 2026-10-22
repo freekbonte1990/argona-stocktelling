@@ -10,6 +10,7 @@ import type {
 import type {
   CountingRepository,
   DeleteSessionInput,
+  ApplySessionCorrectionInput,
   FinalizedSessionResult,
   FinalizeSessionInput,
   HistoricalSheetRecord,
@@ -134,6 +135,17 @@ export class InMemoryCountingRepository implements CountingRepository {
       }
     }
 
+    for (const article of input.updatedArticles) this.articles.set(article.id, article);
+  }
+
+  async applySessionCorrection(input: ApplySessionCorrectionInput): Promise<void> {
+    this.finalizedSessionResults.set(input.sessionId, input.result);
+    await this.saveStockHistoryEntries(input.officeId, input.historyEntries);
+    const sheetKey = `${input.officeId}:${input.sessionName}`;
+    const sheet = this.historicalSheets.get(sheetKey);
+    if (sheet && sheet.sessionId === input.sessionId) {
+      this.historicalSheets.delete(sheetKey);
+    }
     for (const article of input.updatedArticles) this.articles.set(article.id, article);
   }
 

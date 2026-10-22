@@ -2,6 +2,7 @@ import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { SessionReviewSummary } from "../../domain/review";
 import type { StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
+import type { SessionCorrectionRecord } from "../../domain/sessionCorrection";
 import type {
   Article,
   ArticleLocationAssignment,
@@ -50,6 +51,23 @@ export interface FinalizedSessionResult {
   sessionId: string;
   review: SessionReviewSummary;
   snapshot: StockSnapshot;
+  /** Auditspoor van correcties op deze afgeronde telling (zie domain/sessionCorrection.ts). */
+  corrections?: SessionCorrectionRecord[];
+}
+
+/**
+ * Alles wat een correctie van een afgeronde telling in ÉÉN transactie wegschrijft:
+ * het bijgewerkte bevroren resultaat, de gewijzigde HISTORIE-regels, eventueel
+ * bijgewerkte `previousCount`-baselines, en het verwijderen van de gecachete
+ * Excel-sheet van deze sessie (die wordt bij de volgende export opnieuw opgebouwd).
+ */
+export interface ApplySessionCorrectionInput {
+  officeId: string;
+  sessionId: string;
+  sessionName: string;
+  result: FinalizedSessionResult;
+  historyEntries: StockHistoryEntry[];
+  updatedArticles: Article[];
 }
 
 /**
@@ -171,6 +189,8 @@ export interface CountingRepository {
    * `previousCount` kan wijzigen.
    */
   deleteSession(input: DeleteSessionInput): Promise<void>;
+  /** Past een correctie op een afgeronde telling toe (één transactie), zie `ApplySessionCorrectionInput`. */
+  applySessionCorrection(input: ApplySessionCorrectionInput): Promise<void>;
   /**
    * Sprint 3.3 §5: verwijdert één legacy historische snapshot (`LEGACY_IMPORT`,
    * item 3) — eenvoudiger dan `deleteSession` hierboven: een legacy snapshot
