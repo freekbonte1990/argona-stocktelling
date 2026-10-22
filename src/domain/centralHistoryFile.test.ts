@@ -103,5 +103,9 @@ describe("centralSessionIdsOf / isCentralSessionIn", () => {
     expect(isCentralSessionIn(status, { ...base, id: "andere" })).toBe(true); // zelfde naam 2026-08 Maand
     expect(isCentralSessionIn(status, { ...base, id: "andere", completedAt: "2026-06-20T10:00:00.000Z" })).toBe(false);
     expect(isCentralSessionIn(undefined, { ...base, id: "s1" })).toBe(false);
+    // Met een centrale tweeling (ander sessie met centraal ID en dezelfde naam) is de lokale kopie GEEN centrale sessie meer.
+    const twin = { ...base, id: "s1" };
+    expect(isCentralSessionIn(status, { ...base, id: "andere" }, [twin])).toBe(false);
+    expect(isCentralSessionIn(status, twin, [{ ...base, id: "andere" }])).toBe(true);
   });
 });

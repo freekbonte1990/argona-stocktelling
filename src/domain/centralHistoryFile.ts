@@ -314,12 +314,27 @@ export function buildHistoricalOnlyArticle(entry: StockHistoryEntry, officeId: s
   };
 }
 
-/** Pure variant van `CentralHistorySyncService#isCentralSession` (ook bruikbaar vanuit een UI-hook met een reeds geladen status). */
+/**
+ * Pure variant van `CentralHistorySyncService#isCentralSession` (ook bruikbaar vanuit een UI-hook met een reeds geladen status).
+ *
+ * Een sessie telt als centraal als haar ID centraal gekend is, of als haar (live berekende)
+ * snapshotnaam een centrale naam is. Die naam-match mag een lokale sessie echter niet blokkeren
+ * wanneer er al een ANDERE sessie met een centraal ID bestaat die dezelfde naam draagt: dan is de
+ * lokale sessie een dubbele kopie van de centrale (bv. na het hernoemen van een centrale sessie)
+ * en mag ze verwijderd worden. Geef daarvoor de andere sessies van het kantoor mee als `siblings`.
+ */
 export function isCentralSessionIn(
   status: CentralHistoryStatus | undefined,
   session: Pick<CountSession, "id" | "type" | "completedAt" | "startedAt">,
+  siblings: readonly Pick<CountSession, "id" | "type" | "completedAt" | "startedAt">[] = [],
 ): boolean {
   if (!status) return false;
   if (status.centralSessionIds.includes(session.id)) return true;
-  return status.centralSessionNames.includes(sessionSnapshotName(session));
+  const name = sessionSnapshotName(session);
+  if (!status.centralSessionNames.includes(name)) return false;
+  const hasCentralTwin = siblings.some(
+    (other) =>
+      other.id !== session.id && status.centralSessionIds.includes(other.id) && sessionSnapshotName(other) === name,
+  );
+  return !hasCentralTwin;
 }

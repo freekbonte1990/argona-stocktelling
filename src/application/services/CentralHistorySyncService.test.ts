@@ -245,7 +245,7 @@ describe("CentralHistorySyncService", () => {
       expect(await repository.getStockHistoryEntries("damme")).toHaveLength(2);
     });
 
-    it("beschermt ook een lokale sessie die enkel op NAAM overeenkomt met een centrale sessie", async () => {
+    it("een lokale dubbele kopie (zelfde naam, centrale tweeling bestaat) is verwijderbaar; de centrale blijft intact", async () => {
       await service.syncOffice("damme");
       await repository.createSession({
         id: "local-same-period",
@@ -258,9 +258,12 @@ describe("CentralHistorySyncService", () => {
         sourceBaseDate: null,
         articleIds: [],
       });
-      await expect(new CountSessionService(repository).deleteSession("local-same-period")).rejects.toBeInstanceOf(
-        CentralSessionDeletionNotAllowedError,
-      );
+      const sessionService = new CountSessionService(repository);
+      await sessionService.deleteSession("local-same-period");
+      expect(await repository.getSession("local-same-period")).toBeUndefined();
+      expect(await repository.getSession("session-aug")).toBeDefined();
+      expect(await repository.getStockHistoryEntries("damme")).toHaveLength(2);
+      await expect(sessionService.deleteSession("session-aug")).rejects.toBeInstanceOf(CentralSessionDeletionNotAllowedError);
     });
 
     it("een louter lokale sessie blijft gewoon verwijderbaar", async () => {

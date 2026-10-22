@@ -92,7 +92,7 @@ export function SettingsPage({ officeId, onImportNewOffice }: SettingsPageProps)
   const sessions = useSessionsForOffice(officeId) ?? [];
   const completedSessions = sessions.filter((s) => s.status === "COMPLETED");
   const centralHistoryStatus = useCentralHistoryStatus(officeId);
-  const localSessions = completedSessions.filter((x) => !isCentralSessionIn(centralHistoryStatus, x));
+  const localSessions = completedSessions.filter((x) => !isCentralSessionIn(centralHistoryStatus, x, completedSessions));
   // Centraal beheerd kantoor: locaties en productgamma's komen uit de centrale master en zijn hier alleen-lezen.
   const masterStatus = useCentralMasterStatus(officeId);
   const centrallyManaged = isCentrallyManaged(masterStatus);
@@ -525,7 +525,7 @@ export function SettingsPage({ officeId, onImportNewOffice }: SettingsPageProps)
               </div>
               <div className="location-settings-row__actions">
                 <div className="filter-row">
-                  {isCentralSessionIn(centralHistoryStatus, session) ? null : (
+                  {isCentralSessionIn(centralHistoryStatus, session, completedSessions) ? null : (
                     <button
                       type="button"
                       className="chip chip--settings"

@@ -439,7 +439,9 @@ export class CountSessionService {
       throw new SessionNotDeletableError(sessionId, session.status);
     }
     const centralStatus = await this.repository.getCentralHistoryStatus(session.officeId);
-    if (isCentralSessionIn(centralStatus, session)) {
+    const officeSessions = await this.repository.getSessionsForOffice(session.officeId);
+    const completedSiblings = officeSessions.filter((s) => s.status === "COMPLETED");
+    if (isCentralSessionIn(centralStatus, session, completedSiblings)) {
       throw new CentralSessionDeletionNotAllowedError(sessionId);
     }
 
@@ -484,10 +486,15 @@ export class CountSessionService {
       articles,
     );
 
+    // Draagt een overblijvende sessie dezelfde (bevroren) naam, dan horen de HISTORIE-regels
+    // met die naam ook bij haar: die mogen niet mee gewist worden.
+    const nameSharedWithRemaining = remainingSnapshotsChronological.some(
+      (snapshot) => snapshot.sessionName === finalizedResult.snapshot.sessionName,
+    );
     await this.repository.deleteSession({
       officeId: session.officeId,
       sessionId,
-      sessionName: finalizedResult.snapshot.sessionName,
+      sessionName: nameSharedWithRemaining ? "" : finalizedResult.snapshot.sessionName,
       updatedArticles,
     });
   }
