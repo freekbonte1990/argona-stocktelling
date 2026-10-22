@@ -46,6 +46,11 @@ export interface AppliedSessionCorrection<T extends FrozenSessionResult> {
   records: SessionCorrectionRecord[];
 }
 
+/** Statussen die gecorrigeerd mogen worden; een overgenomen (niet geteld) artikel wordt door de correctie "geteld". */
+export function isCorrectableStatus(status: string): boolean {
+  return status === "GETELD" || status === "0 BEVESTIGD" || status === "OVERGENOMEN" || status === "OVERGENOMEN - NIET GETELD";
+}
+
 function round(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }
@@ -75,9 +80,9 @@ export function applySessionCorrections<T extends FrozenSessionResult>(
   for (const articleId of inputByArticle.keys()) {
     const found = snapshotArticles.get(articleId);
     if (!found) throw new SessionCorrectionError(`Artikel ${articleId} komt niet voor in deze telling.`);
-    if (found.status !== "GETELD" && found.status !== "0 BEVESTIGD") {
+    if (!isCorrectableStatus(found.status)) {
       throw new SessionCorrectionError(
-        `Artikel ${found.article.articleNumber} is in deze telling niet geteld en kan niet gecorrigeerd worden.`,
+        `Artikel ${found.article.articleNumber} komt uit een historische import en kan niet gecorrigeerd worden.`,
       );
     }
   }
@@ -90,11 +95,14 @@ export function applySessionCorrections<T extends FrozenSessionResult>(
     const next = inputByArticle.get(snap.articleId);
     if (next === undefined || next === snap.totalCount) return snap;
     const costPrice = snap.costPrice;
-    const diffQty = snap.differenceQuantity !== null ? round(next - (snap.previousCount ?? 0)) : null;
+    const carried = snap.status === "OVERGENOMEN" || snap.status === "OVERGENOMEN - NIET GETELD";
+    const diffQty = carried || snap.differenceQuantity !== null ? round(next - (snap.previousCount ?? 0)) : null;
     const amount = costPrice !== null ? round(next * costPrice) : null;
     const diffAmount = diffQty !== null && costPrice !== null ? round(diffQty * costPrice) : null;
     const status: "GETELD" | "0 BEVESTIGD" = snap.status === "0 BEVESTIGD" && next === 0 ? "0 BEVESTIGD" : "GETELD";
-    const marker = `Gecorrigeerd van ${snap.totalCount ?? "—"} naar ${next}`;
+    const marker = carried
+      ? `Gecorrigeerd: niet geteld (overgenomen ${snap.totalCount ?? "—"}), nu geteld ${next}`
+      : `Gecorrigeerd van ${snap.totalCount ?? "—"} naar ${next}`;
     const note = snap.note ? `${snap.note} · ${marker}` : marker;
     records.push({
       articleId: snap.articleId,

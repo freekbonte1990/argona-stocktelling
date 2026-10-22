@@ -60,7 +60,8 @@ export function applyCorrectionsToCentralHistory(
         `${entry.articleNumber}: centraal ${entry.totalCount}, correctiebestand verwachtte ${c.oldTotalCount}`,
       );
     }
-    const diffQty = entry.differenceQuantity !== null ? Math.round((c.newTotalCount - (entry.previousCount ?? 0)) * 1e6) / 1e6 : null;
+    const carried = entry.status === "OVERGENOMEN" || entry.status === "OVERGENOMEN - NIET GETELD";
+    const diffQty = carried || entry.differenceQuantity !== null ? Math.round((c.newTotalCount - (entry.previousCount ?? 0)) * 1e6) / 1e6 : null;
     const diffAmount =
       diffQty !== null && entry.costPrice !== null ? Math.round(diffQty * entry.costPrice * 1e6) / 1e6 : entry.differenceAmount;
     report.applied.push({ articleNumber: entry.articleNumber, oldTotalCount: entry.totalCount, newTotalCount: c.newTotalCount });

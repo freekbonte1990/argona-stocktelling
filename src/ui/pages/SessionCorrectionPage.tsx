@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { sessionCorrectionService } from "../../application/container";
-import { buildCorrectionExport } from "../../domain/sessionCorrection";
+import { buildCorrectionExport, isCorrectableStatus } from "../../domain/sessionCorrection";
 import { BigButton } from "../components/BigButton";
 import { useFinalizedSessionResult, useSession } from "../hooks/useLiveData";
 import { formatCount, formatDate } from "../../shared/format";
@@ -32,7 +32,7 @@ export function SessionCorrectionPage({ sessionId, onDone }: SessionCorrectionPa
     if (!result) return [];
     const q = search.trim().toLowerCase();
     return result.snapshot.articles
-      .filter((a) => a.status === "GETELD" || a.status === "0 BEVESTIGD")
+      .filter((a) => isCorrectableStatus(a.status))
       .filter(
         (a) =>
           q === "" ||
@@ -113,7 +113,8 @@ export function SessionCorrectionPage({ sessionId, onDone }: SessionCorrectionPa
               <strong>{a.article.articleNumber}</strong> — {a.article.description}
             </div>
             <div>
-              Geteld: {a.totalCount === null ? "—" : formatCount(a.totalCount)}
+              {a.status.startsWith("OVERGENOMEN") ? "Niet geteld (overgenomen): " : "Geteld: "}
+              {a.totalCount === null ? "—" : formatCount(a.totalCount)}
               {a.note?.includes("Gecorrigeerd") ? " (gecorrigeerd)" : ""}
             </div>
             <input

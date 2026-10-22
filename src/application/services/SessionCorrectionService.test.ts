@@ -50,10 +50,12 @@ describe("SessionCorrectionService", () => {
   });
 
   async function runCount(m1: number, m2: number): Promise<string> {
+    await new Promise((resolve) => setTimeout(resolve, 5)); // unieke tijdstempels per sessie
     const session = await sessions.startSession("office-1", "MONTHLY");
     await counting.recordCount({ session, articleId: "office-1:M1", locationId: "office-1:loc-1", quantity: m1 });
     await counting.recordCount({ session, articleId: "office-1:M2", locationId: "office-1:loc-1", quantity: m2 });
     await counting.completeLocation(session.id, "office-1:loc-1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
     await sessions.completeSession(session.id);
     return session.id;
   }
@@ -122,6 +124,34 @@ describe("SessionCorrectionService", () => {
     expect(await repository.getHistoricalSheetSnapshots("office-1")).toHaveLength(1);
     await service.correct(id, [{ articleId: "office-1:M1", newTotalCount: 12 }], null);
     expect(await repository.getHistoricalSheetSnapshots("office-1")).toHaveLength(0);
+  });
+
+  it("laat een overgenomen (buiten scope, niet geteld) artikel corrigeren: wordt geteld, verschil t.o.v. vorige", async () => {
+    await repository.saveArticles([
+      { ...makeArticle("Q1", 7), countPeriod: "QUARTERLY", rawCountPeriod: "KWARTAAL" },
+    ]);
+    const id = await runCount(10, 3);
+    const before = (await repository.getFinalizedSessionResult(id))!;
+    const carried = before.snapshot.articles.find((a) => a.articleId === "office-1:Q1")!;
+    expect(carried.status).toBe("OVERGENOMEN");
+    expect(carried.totalCount).toBe(7);
+
+    const outcome = await service.correct(id, [{ articleId: "office-1:Q1", newTotalCount: 9 }], "obsolete mee geteld");
+    expect(outcome.records).toHaveLength(1);
+    expect(outcome.previousCountUpdated).toBe(true);
+
+    const after = (await repository.getFinalizedSessionResult(id))!;
+    const row = after.snapshot.articles.find((a) => a.articleId === "office-1:Q1")!;
+    expect(row).toMatchObject({ status: "GETELD", totalCount: 9, differenceQuantity: 2, amount: 18, differenceAmount: 4 });
+    expect(row.note).toContain("Gecorrigeerd");
+    // Scope van de telling verandert niet: het artikel blijft buiten de review.
+    expect(after.review.results.some((r) => r.articleId === "office-1:Q1")).toBe(false);
+    expect(after.review.totalArticlesInScope).toBe(before.review.totalArticlesInScope);
+
+    const history = await repository.getStockHistoryEntries("office-1");
+    const h = history.find((e) => e.sessionName === after.snapshot.sessionName && e.articleId === "office-1:Q1")!;
+    expect(h).toMatchObject({ status: "GETELD", totalCount: 9, differenceQuantity: 2 });
+    expect((await repository.getArticles("office-1")).find((a) => a.articleNumber === "Q1")!.previousCount).toBe(9);
   });
 
   it("een correctie naar hetzelfde aantal is een no-op", async () => {
