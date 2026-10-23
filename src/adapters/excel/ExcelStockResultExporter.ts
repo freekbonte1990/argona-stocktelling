@@ -114,7 +114,8 @@ export class ExcelStockResultExporter implements StockResultExporter {
     // al afgeronde sessie), dan hergebruiken we die exact bevroren rijen in
     // plaats van ze te herberekenen — zie `StockResultExportInput.frozenSnapshotRows`.
     const namedSheetRows = input.frozenSnapshotRows ?? buildNamedSnapshotSheetRows(snapshot, exportLocations);
-    buildNamedSnapshotSheet(workbook, snapshot.sessionName, namedSheetRows);
+    const named = buildNamedSnapshotSheet(workbook, snapshot.sessionName, namedSheetRows);
+    addTellingTotals(workbook, snapshot, exportLocations.length, sortedArticles.length, named.totalValueCell);
 
     const data = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 
@@ -221,6 +222,109 @@ function buildTellingSheet(
 // 10 kolommen ná de spacerkolom A, vóór "LOCATIE 1" begint.
 const TELLING_HEADERS_BEFORE_LOCATIONS_LENGTH = 10;
 
+/**
+ * Totalenblok bovenaan TELLING (rijen 7-11, tussen de metadata en de titelrij), met SUM-formules over
+ * de kolommen eronder. "Bedrag" in TELLING bevat enkel de effectief getelde artikelen; de VOLLEDIGE
+ * voorraadwaarde (alle artikelen, ook de overgenomen) staat in het tellingtabblad en wordt hier ernaar verwezen.
+ */
+function addTellingTotals(
+  workbook: ExcelJS.Workbook,
+  snapshot: StockSnapshot,
+  locationCount: number,
+  articleCount: number,
+  snapshotTotalCell: string | null,
+): void {
+  const sheet = workbook.getWorksheet("TELLING");
+  if (!sheet) return;
+  const first = 15;
+  const last = 14 + articleCount;
+  if (articleCount === 0) return;
+  const afterLocationsCol = 2 + TELLING_HEADERS_BEFORE_LOCATIONS_LENGTH + locationCount;
+  const L = (c: number) => sheet.getColumn(c).letter;
+  const rowsOf = (col: number) => {
+    let acc = 0;
+    for (let r = first; r <= last; r++) {
+      const v = sheet.getCell(r, col).value;
+      const num = typeof v === "number" ? v : v && typeof v === "object" && "result" in v && typeof v.result === "number" ? v.result : 0;
+      acc += num;
+    }
+    return Math.round(acc * 100) / 100;
+  };
+  const sumFormula = (col: number) => `SUM(${L(col)}${first}:${L(col)}${last})`;
+  const total = snapshot.articles.reduce((acc, a) => acc + (a.amount ?? 0), 0);
+
+  const put = (row: number, label: string, cell: ExcelJS.CellValue, fmt: string) => {
+    const labelCell = sheet.getCell(row, 2);
+    labelCell.value = label;
+    labelCell.font = { bold: true };
+    const valueCell = sheet.getCell(row, 3);
+    valueCell.value = cell;
+    valueCell.numFmt = fmt;
+    valueCell.alignment = { horizontal: "left" };
+  };
+  put(7, "Totaal waarde vorige telling", { formula: sumFormula(11), result: rowsOf(11) }, CURRENCY_FORMAT);
+  put(8, "Totaal bedrag getelde artikelen", { formula: sumFormula(afterLocationsCol + 2), result: rowsOf(afterLocationsCol + 2) }, CURRENCY_FORMAT);
+  put(9, "Totaal verschil bedrag", { formula: sumFormula(afterLocationsCol + 3), result: rowsOf(afterLocationsCol + 3) }, CURRENCY_DIFF_FORMAT);
+  if (snapshotTotalCell) {
+    const sheetRef = `'${snapshot.sessionName.replace(/'/g, "''")}'!${snapshotTotalCell}`;
+    put(10, "Totale voorraadwaarde (alle artikelen)", { formula: sheetRef, result: Math.round(total * 100) / 100 }, CURRENCY_FORMAT);
+    sheet.getCell(11, 2).value = `Zie tabblad "${snapshot.sessionName}" voor de volledige, bevroren telling.`;
+    sheet.getCell(11, 2).font = { italic: true };
+  }
+}
+
+/**
+ * Vervangt de waarde door een echte formule — maar enkel wanneer die formule het bewaarde cijfer
+ * exact reproduceert (anders blijft de waarde staan). Kolommen: I = vorige telling, J = kostprijs,
+ * K = waarde vorige telling, daarna (na de LOCATIE-kolommen): AANTAL TOTAAL, Bedrag, Verschil Bedrag,
+ * VERSCHIL AANTAL.
+ */
+function applyTellingFormulas(
+  row: ExcelJS.Row,
+  afterLocationsCol: number,
+  previousCount: number | null,
+  costPrice: number | null,
+  previousValue: number | null,
+  result: ArticleReviewResult | undefined,
+): void {
+  const n = row.number;
+  const L = (col: number) => row.worksheet.getColumn(col).letter;
+  const prev = `I${n}`;
+  const cost = `J${n}`;
+  if (previousValue !== null && previousCount !== null && costPrice !== null) {
+    if (Math.abs(previousCount * costPrice - previousValue) < 0.005) {
+      row.getCell(11).value = { formula: `IF(OR(${prev}="",${cost}=""),"",${prev}*${cost})`, result: previousValue };
+    }
+  }
+  if (!result || result.newTotalCount === null) return;
+  const total = `${L(afterLocationsCol + 1)}${n}`;
+  const diffQty = `${L(afterLocationsCol + 4)}${n}`;
+  if (result.amount !== null && costPrice !== null && Math.abs(result.newTotalCount * costPrice - result.amount) < 0.005) {
+    row.getCell(afterLocationsCol + 2).value = {
+      formula: `IF(OR(${total}="",${cost}=""),"",${total}*${cost})`,
+      result: result.amount,
+    };
+  }
+  const expectedDiffQty = Math.round((result.newTotalCount - (previousCount ?? 0)) * 1e6) / 1e6;
+  const diffQtyMatches = result.differenceQuantity !== null && Math.abs(result.differenceQuantity - expectedDiffQty) < 1e-6;
+  if (diffQtyMatches) {
+    row.getCell(afterLocationsCol + 4).value = {
+      formula: `IF(${total}="","",${total}-N(${prev}))`,
+      result: result.differenceQuantity as number,
+    };
+    if (
+      result.differenceAmount !== null &&
+      costPrice !== null &&
+      Math.abs((result.differenceQuantity as number) * costPrice - result.differenceAmount) < 0.005
+    ) {
+      row.getCell(afterLocationsCol + 3).value = {
+        formula: `IF(OR(${diffQty}="",${cost}=""),"",${diffQty}*${cost})`,
+        result: result.differenceAmount,
+      };
+    }
+  }
+}
+
 function writeTellingRow(
   row: ExcelJS.Row,
   article: Article,
@@ -274,6 +378,8 @@ function writeTellingRow(
   const geteldCell = row.getCell(afterLocationsCol + 5);
   geteldCell.value = result ? (result.fullyCounted ? "JA" : "NEE") : null;
   geteldCell.alignment = { horizontal: "center" };
+
+  applyTellingFormulas(row, afterLocationsCol, previousCount, costPrice, previousValue, result);
 
   if (isMissingOfficialNumber) {
     row.getCell(col(0)).fill = HIGHLIGHT_FILL_PEACH;
@@ -669,38 +775,176 @@ function widthsForHeader(headerNames: unknown[]): number[] {
   });
 }
 
-function buildNamedSnapshotSheet(workbook: ExcelJS.Workbook, sheetName: string, rows: unknown[][]): void {
-  const sheet = workbook.addWorksheet(sheetName);
-  if (rows.length === 0) return;
+const WAARDE_VORIGE_HEADER = "Waarde vorige telling";
+const WAARDE_NIEUWE_HEADER = "Waarde nieuwe telling";
+
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const roundCents = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/**
+ * Schrijft een tellingtabel (benoemd tellingtabblad) met ECHTE formules in plaats van enkel waarden:
+ * "Waarde vorige/nieuwe telling" = aantal × kostprijs, en waar het bevroren resultaat exact
+ * overeenkomt ook "Verschil aantal"/"Verschil bedrag". Een formule wordt enkel gebruikt als ze het
+ * bewaarde (bevroren) cijfer exact reproduceert; anders blijft de bevroren waarde staan. Naast
+ * de tabel staat een blokje met totalen (SUM-formules): totale voorraadwaarde, waarde vorige
+ * telling, verschil en aantal artikelen. Geeft het adres van de "voorraadwaarde nieuwe telling"-cel terug.
+ *
+ * De bewaarde `rows` zelf blijven ongewijzigd (zonder totalenblok): bij een heropend bestand worden
+ * extra cellen rechts van de tabel weggesneden en bij het schrijven opnieuw opgebouwd.
+ */
+function writeSnapshotTable(
+  sheet: ExcelJS.Worksheet,
+  rows: unknown[][],
+): { totalValueCell: string | null } {
   const [header, ...dataRows] = rows;
-  const columnCount = (header as unknown[]).length;
-  setColumnWidths(sheet, widthsForHeader(header as unknown[]));
+  const names = (header as unknown[]).map((h) => (typeof h === "string" ? h : ""));
+  const idx = (name: string) => names.indexOf(name);
+  const prevIdx = idx("Vorige telling");
+  const costIdx = idx("Kostprijs");
+  const newIdx = idx("Nieuwe telling");
+  const dqIdx = idx("Verschil aantal");
+  const daIdx = idx("Verschil bedrag");
+  const statusIdx = idx("Status telling");
+  const hasCore = prevIdx >= 0 && costIdx >= 0 && newIdx >= 0;
 
-  const headerRow = sheet.addRow(header as unknown[]);
-  styleHeaderRow(headerRow, HEADER_FILL_BLUE, columnCount);
-  sheet.views = [{ state: "frozen", ySplit: 1 }];
-
-  const headerNames = header as string[];
-  const costPriceCol = headerNames.indexOf("Kostprijs") + 1;
-  const previousCol = headerNames.indexOf("Vorige telling") + 1;
-  const newTotalCol = headerNames.indexOf("Nieuwe telling") + 1;
-  const diffAmountCol = headerNames.indexOf("Verschil bedrag") + 1;
-  const diffQtyCol = headerNames.indexOf("Verschil aantal") + 1;
-  const locationColCount = headerNames.filter(
-    (h): h is string => typeof h === "string" && h.startsWith("LOCATIE "),
-  ).length;
-
-  for (const rowValues of dataRows) {
-    const row = sheet.addRow(rowValues);
-    if (costPriceCol > 0) row.getCell(costPriceCol).numFmt = CURRENCY_FORMAT;
-    if (previousCol > 0) row.getCell(previousCol).numFmt = QUANTITY_FORMAT;
-    if (newTotalCol > 0) row.getCell(newTotalCol).numFmt = QUANTITY_DIFF_FORMAT;
-    if (diffAmountCol > 0) row.getCell(diffAmountCol).numFmt = CURRENCY_DIFF_FORMAT;
-    if (diffQtyCol > 0) row.getCell(diffQtyCol).numFmt = QUANTITY_DIFF_FORMAT;
-    for (let i = 0; i < locationColCount; i++) {
-      row.getCell(NAMED_SNAPSHOT_LOCATION_COL_OFFSET + 1 + i).fill = HIGHLIGHT_FILL_PURPLE;
-    }
+  let wpIdx = idx(WAARDE_VORIGE_HEADER);
+  let wnIdx = idx(WAARDE_NIEUWE_HEADER);
+  let tableWidth = Math.max(statusIdx, wpIdx, wnIdx, hasCore ? Math.max(prevIdx, costIdx, newIdx, dqIdx, daIdx) : -1) + 1;
+  if (tableWidth <= 0) tableWidth = (header as unknown[]).length;
+  if (hasCore) {
+    if (wpIdx < 0) wpIdx = tableWidth++;
+    if (wnIdx < 0) wnIdx = tableWidth++;
   }
+
+  const headerValues = Array.from({ length: tableWidth }, (_, i) => (header as unknown[])[i] ?? null);
+  if (hasCore) {
+    headerValues[wpIdx] = WAARDE_VORIGE_HEADER;
+    headerValues[wnIdx] = WAARDE_NIEUWE_HEADER;
+  }
+  setColumnWidths(sheet, widthsForHeader(headerValues));
+  const headerRow = sheet.addRow(headerValues);
+  styleHeaderRow(headerRow, HEADER_FILL_BLUE, tableWidth);
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  if (!hasCore) {
+    dataRows.forEach((rowValues) => sheet.addRow(rowValues));
+    return { totalValueCell: null };
+  }
+
+  const letter = (zeroBased: number) => sheet.getColumn(zeroBased + 1).letter;
+  const locationColCount = names.filter((h) => h.startsWith("LOCATIE ")).length;
+  const L = {
+    prev: letter(prevIdx),
+    cost: letter(costIdx),
+    nw: letter(newIdx),
+    dq: dqIdx >= 0 ? letter(dqIdx) : null,
+  };
+
+  dataRows.forEach((raw, i) => {
+    const excelRow = i + 2;
+    const values = Array.from({ length: tableWidth }, (_, c) => raw[c] ?? null);
+    const row = sheet.addRow(values);
+    const prev = raw[prevIdx];
+    const cost = raw[costIdx];
+    const nw = raw[newIdx];
+
+    row.getCell(costIdx + 1).numFmt = CURRENCY_FORMAT;
+    row.getCell(prevIdx + 1).numFmt = QUANTITY_FORMAT;
+    row.getCell(newIdx + 1).numFmt = QUANTITY_DIFF_FORMAT;
+    if (daIdx >= 0) row.getCell(daIdx + 1).numFmt = CURRENCY_DIFF_FORMAT;
+    if (dqIdx >= 0) row.getCell(dqIdx + 1).numFmt = QUANTITY_DIFF_FORMAT;
+    for (let c = 0; c < locationColCount; c++) {
+      row.getCell(NAMED_SNAPSHOT_LOCATION_COL_OFFSET + 1 + c).fill = HIGHLIGHT_FILL_PURPLE;
+    }
+
+    const wp = isNum(prev) && isNum(cost) ? roundCents(prev * cost) : null;
+    const wn = isNum(nw) && isNum(cost) ? roundCents(nw * cost) : null;
+    if (wp !== null) {
+      row.getCell(wpIdx + 1).value = {
+        formula: `IF(OR(${L.prev}${excelRow}="",${L.cost}${excelRow}=""),"",${L.prev}${excelRow}*${L.cost}${excelRow})`,
+        result: wp,
+      };
+    }
+    if (wn !== null) {
+      row.getCell(wnIdx + 1).value = {
+        formula: `IF(OR(${L.nw}${excelRow}="",${L.cost}${excelRow}=""),"",${L.nw}${excelRow}*${L.cost}${excelRow})`,
+        result: wn,
+      };
+    }
+    row.getCell(wpIdx + 1).numFmt = CURRENCY_FORMAT;
+    row.getCell(wnIdx + 1).numFmt = CURRENCY_FORMAT;
+
+    if (dqIdx >= 0 && isNum(nw)) {
+      const expected = roundCents(nw - (isNum(prev) ? prev : 0));
+      const stored = raw[dqIdx];
+      if (isNum(stored) && Math.abs(stored - expected) < 1e-6) {
+        row.getCell(dqIdx + 1).value = {
+          formula: `IF(${L.nw}${excelRow}="","",${L.nw}${excelRow}-N(${L.prev}${excelRow}))`,
+          result: stored,
+        };
+      }
+    }
+    if (daIdx >= 0 && L.dq && isNum(raw[dqIdx]) && isNum(cost) && isNum(raw[daIdx])) {
+      const expected = roundCents((raw[dqIdx] as number) * cost);
+      if (Math.abs((raw[daIdx] as number) - expected) < 0.005) {
+        row.getCell(daIdx + 1).value = {
+          formula: `IF(OR(${L.dq}${excelRow}="",${L.cost}${excelRow}=""),"",${L.dq}${excelRow}*${L.cost}${excelRow})`,
+          result: raw[daIdx] as number,
+        };
+      }
+    }
+  });
+
+  // Totalenblok rechts van de tabel (twee lege kolommen ertussen).
+  const last = dataRows.length + 1;
+  const labelCol = tableWidth + 3;
+  const valueCol = tableWidth + 4;
+  sheet.getColumn(labelCol).width = 38;
+  sheet.getColumn(valueCol).width = 18;
+  const sum = (zeroBased: number) => `SUM(${letter(zeroBased)}2:${letter(zeroBased)}${last})`;
+  const totalOf = (field: number) =>
+    roundCents(dataRows.reduce((acc: number, r) => acc + (isNum(r[field]) ? (r[field] as number) : 0), 0));
+  const totalValue = roundCents(
+    dataRows.reduce((acc: number, r) => acc + (isNum(r[newIdx]) && isNum(r[costIdx]) ? (r[newIdx] as number) * (r[costIdx] as number) : 0), 0),
+  );
+  const totalPrev = roundCents(
+    dataRows.reduce((acc: number, r) => acc + (isNum(r[prevIdx]) && isNum(r[costIdx]) ? (r[prevIdx] as number) * (r[costIdx] as number) : 0), 0),
+  );
+  const lines: { label: string; formula: string; result: number; fmt: string }[] = [
+    { label: "Totale voorraadwaarde (nieuwe telling)", formula: sum(wnIdx), result: totalValue, fmt: CURRENCY_FORMAT },
+    { label: "Waarde vorige telling", formula: sum(wpIdx), result: totalPrev, fmt: CURRENCY_FORMAT },
+  ];
+  if (daIdx >= 0) {
+    lines.push({ label: "Totaal verschil bedrag", formula: sum(daIdx), result: totalOf(daIdx), fmt: CURRENCY_DIFF_FORMAT });
+  }
+  lines.push({
+    label: "Aantal artikelen",
+    formula: `COUNTA(${letter(0)}2:${letter(0)}${last})`,
+    result: dataRows.filter((r) => r[0] !== null && r[0] !== undefined && r[0] !== "").length,
+    fmt: "0",
+  });
+  const titleCell = sheet.getCell(1, labelCol);
+  titleCell.value = "TOTALEN";
+  titleCell.font = { bold: true };
+  lines.forEach((line, i) => {
+    const labelCell = sheet.getCell(2 + i, labelCol);
+    labelCell.value = line.label;
+    labelCell.font = { bold: i === 0 };
+    const valueCell = sheet.getCell(2 + i, valueCol);
+    valueCell.value = { formula: line.formula, result: line.result };
+    valueCell.numFmt = line.fmt;
+    valueCell.font = { bold: i === 0 };
+  });
+  return { totalValueCell: `${letter(valueCol - 1)}2` };
+}
+
+function buildNamedSnapshotSheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  rows: unknown[][],
+): { totalValueCell: string | null } {
+  const sheet = workbook.addWorksheet(sheetName);
+  if (rows.length === 0) return { totalValueCell: null };
+  return writeSnapshotTable(sheet, rows);
 }
 
 /**
@@ -757,20 +1001,13 @@ function buildHistorieSheet(workbook: ExcelJS.Workbook, entries: StockHistoryEnt
  * overschreven worden"). We passen wel dezelfde consistente headerstijl toe
  * op de eerste rij (indien aanwezig) — dat wijzigt geen enkele WAARDE, enkel
  * hoe de sheet er visueel bij staat, en houdt het volledige werkblad
- * visueel één geheel.
+ * visueel één geheel. Sinds de formule-update worden hierbij (additief) ook de kolommen
+ * "Waarde vorige/nieuwe telling", formules en een totalenblok toegevoegd — bestaande WAARDEN
+ * blijven exact gelijk (zie `writeSnapshotTable`).
  */
 function buildPassthroughSheet(workbook: ExcelJS.Workbook, sheetName: string, rows: unknown[][]): void {
   const sheet = workbook.addWorksheet(sheetName);
   if (rows.length > 0 && rows[0].length > 0) {
-    setColumnWidths(sheet, widthsForHeader(rows[0]));
-  }
-  rows.forEach((rowValues, index) => {
-    const row = sheet.addRow(rowValues);
-    if (index === 0 && rowValues.length > 0) {
-      styleHeaderRow(row, HEADER_FILL_BLUE, rowValues.length);
-    }
-  });
-  if (rows.length > 0) {
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    writeSnapshotTable(sheet, rows);
   }
 }
