@@ -28,7 +28,7 @@ const session: CountSession = {
 
 async function exportOnce(extra: { historicalSheets?: { sheetName: string; rows: unknown[][] }[]; frozen?: unknown[][] } = {}) {
   // A1 wordt geteld (7 × 2 = 14), Q1 (kwartaalartikel) blijft overgenomen (5 × 3 = 15) -> totaal 29.
-  const articles = [art("A1"), art("Q1", { countPeriod: "QUARTERLY", rawCountPeriod: "KWARTAAL", previousCount: 5, costPrice: 3 })];
+  const articles = [art("A1"), art("Q1", { countPeriod: "QUARTERLY", rawCountPeriod: "KWARTAAL", previousCount: 5, costPrice: 3, stockClassification: "OBSOLETE" })];
   const entries: CountEntry[] = [
     { id: "e1", sessionId: "s1", articleId: "damme:A1", locationId: "damme:loc-1", quantity: 7, counted: true, countedAt: null, note: null, resolution: "COUNTED" },
   ];
@@ -81,15 +81,40 @@ describe("Excel-export: formules en totale stockwaarde", () => {
     expect(sheet[XLSX.utils.encode_cell({ r: cnt.r, c: cnt.c + 1 })]!.v).toBe(2);
   });
 
-  it("TELLING: totalenblok met SUM-formules en verwijzing naar de volledige waarde in het tellingtabblad", async () => {
+  it("tellingtabblad: totale waarde, obsolete en normale voorraad apart (SUMIF op de classificatiekolom)", async () => {
+    const { workbook } = await exportOnce();
+    const sheet = workbook.Sheets["2026-09 Maand"]!;
+    const header = rowsOf(sheet)[0] as string[];
+    expect(header).toContain("Voorraadclassificatie");
+    const obs = findCell(sheet, "waarvan obsolete stock");
+    const cell = sheet[XLSX.utils.encode_cell({ r: obs.r, c: obs.c + 1 })]!;
+    expect(cell.f).toMatch(/^SUMIF\(/);
+    expect(cell.v).toBe(15);
+    const normal = findCell(sheet, "waarvan normale voorraad");
+    expect(sheet[XLSX.utils.encode_cell({ r: normal.r, c: normal.c + 1 })]!.v).toBe(14);
+  });
+
+  it("TELLING: bovenaan de totale voorraadwaarde, obsolete en normale waarde, plus rijformules", async () => {
     const { workbook } = await exportOnce();
     const sheet = workbook.Sheets["TELLING"]!;
-    expect(sheet["B10"]!.v).toBe("Totale voorraadwaarde (alle artikelen)");
-    expect(sheet["C10"]!.f).toContain("'2026-09 Maand'!");
-    expect(sheet["C10"]!.v).toBe(29);
-    expect(sheet["C7"]!.f).toMatch(/^SUM\(K15:K16\)/);
-    expect(sheet["C8"]!.f).toMatch(/^SUM\(/);
-    // rijformule in TELLING: waarde vorige telling = vorige × kostprijs
+    expect(sheet["B7"]!.v).toBe("TOTALE VOORRAADWAARDE (alle artikelen)");
+    expect(sheet["C7"]!.f).toContain("'2026-09 Maand'!");
+    expect(sheet["C7"]!.v).toBe(29);
+    expect(sheet["B8"]!.v).toBe("waarvan obsolete stock");
+    expect(sheet["C8"]!.v).toBe(15);
+    expect(sheet["B9"]!.v).toBe("waarvan normale voorraad");
+    expect(sheet["C9"]!.v).toBe(14);
+    expect(sheet["C10"]!.f).toMatch(/^SUM\(K15:K16\)/);
+    // Bedrag bevat ook de NIET geteld overgenomen artikelen: de som van de kolom is de totale voorraadwaarde.
+    const tellingRows = rowsOf(sheet);
+    const headerRowIdx = tellingRows.findIndex((r) => r.includes("Artikelnr."));
+    const bedragCol = (tellingRows[headerRowIdx] as unknown[]).indexOf("Bedrag");
+    expect(tellingRows.find((r) => r.includes("Q1"))![bedragCol]).toBe(15); // overgenomen: 5 × 3
+    expect(tellingRows.find((r) => r.includes("A1"))![bedragCol]).toBe(14); // geteld: 7 × 2
+    const sumBedrag = tellingRows
+      .slice(headerRowIdx + 1)
+      .reduce((acc: number, r) => acc + (typeof r[bedragCol] === "number" ? (r[bedragCol] as number) : 0), 0);
+    expect(sumBedrag).toBe(29);
     expect(sheet["K15"]!.f).toContain("I15");
   });
 
@@ -106,6 +131,8 @@ describe("Excel-export: formules en totale stockwaarde", () => {
     expect(rowsOf(passed)).toEqual(reimported);
     expect(rowsOf(passed).flat().filter((v) => v === "TOTALEN")).toHaveLength(1);
     expect(rowsOf(passed).flat().filter((v) => v === "Totale voorraadwaarde (nieuwe telling)")).toHaveLength(1);
+    expect(rowsOf(passed).flat().filter((v) => v === "waarvan obsolete stock")).toHaveLength(1);
+    expect((rowsOf(passed)[0] as unknown[]).filter((v) => v === "Voorraadclassificatie")).toHaveLength(1);
     expect((rowsOf(passed)[0] as unknown[]).filter((v) => v === "Waarde nieuwe telling")).toHaveLength(1);
   });
 });

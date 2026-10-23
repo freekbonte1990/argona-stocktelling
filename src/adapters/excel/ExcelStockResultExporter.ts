@@ -8,7 +8,7 @@ import { isArticleActiveInAssortment } from "../../domain/articleAssortment";
 import { buildNextPreviousCounts, type ArticleReviewResult } from "../../domain/review";
 import { computeFrequencyBreakdown } from "../../domain/frequency";
 import { allLocationsInOrder } from "../../domain/locations";
-import { getStockClassification, STOCK_CLASSIFICATION_TO_RAW } from "../../domain/stockClassification";
+import { getStockClassification, STOCK_CLASSIFICATION_LABELS, STOCK_CLASSIFICATION_TO_RAW } from "../../domain/stockClassification";
 import type { ArticleSnapshot, StockHistoryEntry, StockSnapshot } from "../../domain/stockSnapshot";
 import type { Article, ArticleLocationAssignment, Location, ProductCategory } from "../../domain/types";
 import { buildExportFileName } from "../../shared/exportFileName";
@@ -114,8 +114,11 @@ export class ExcelStockResultExporter implements StockResultExporter {
     // al afgeronde sessie), dan hergebruiken we die exact bevroren rijen in
     // plaats van ze te herberekenen — zie `StockResultExportInput.frozenSnapshotRows`.
     const namedSheetRows = input.frozenSnapshotRows ?? buildNamedSnapshotSheetRows(snapshot, exportLocations);
-    const named = buildNamedSnapshotSheet(workbook, snapshot.sessionName, namedSheetRows);
-    addTellingTotals(workbook, snapshot, exportLocations.length, sortedArticles.length, named.totalValueCell);
+    const classificationByNumber = new Map(
+      snapshot.articles.map((a) => [a.article.articleNumber, STOCK_CLASSIFICATION_LABELS[getStockClassification(a.article)]]),
+    );
+    const named = buildNamedSnapshotSheet(workbook, snapshot.sessionName, namedSheetRows, classificationByNumber);
+    addTellingTotals(workbook, snapshot, exportLocations.length, sortedArticles.length, named);
 
     const data = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 
@@ -232,13 +235,12 @@ function addTellingTotals(
   snapshot: StockSnapshot,
   locationCount: number,
   articleCount: number,
-  snapshotTotalCell: string | null,
+  named: SnapshotTableCells,
 ): void {
   const sheet = workbook.getWorksheet("TELLING");
-  if (!sheet) return;
+  if (!sheet || articleCount === 0) return;
   const first = 15;
   const last = 14 + articleCount;
-  if (articleCount === 0) return;
   const afterLocationsCol = 2 + TELLING_HEADERS_BEFORE_LOCATIONS_LENGTH + locationCount;
   const L = (c: number) => sheet.getColumn(c).letter;
   const rowsOf = (col: number) => {
@@ -251,26 +253,43 @@ function addTellingTotals(
     return Math.round(acc * 100) / 100;
   };
   const sumFormula = (col: number) => `SUM(${L(col)}${first}:${L(col)}${last})`;
-  const total = snapshot.articles.reduce((acc, a) => acc + (a.amount ?? 0), 0);
+  const valueOf = (a: ArticleSnapshot) => a.amount ?? 0;
+  const total = snapshot.articles.reduce((acc, a) => acc + valueOf(a), 0);
+  const obsolete = snapshot.articles
+    .filter((a) => getStockClassification(a.article) === "OBSOLETE")
+    .reduce((acc, a) => acc + valueOf(a), 0);
+  const round2 = (v: number) => Math.round(v * 100) / 100;
 
-  const put = (row: number, label: string, cell: ExcelJS.CellValue, fmt: string) => {
+  const put = (row: number, label: string, cell: ExcelJS.CellValue, fmt: string, bold = false) => {
     const labelCell = sheet.getCell(row, 2);
     labelCell.value = label;
     labelCell.font = { bold: true };
     const valueCell = sheet.getCell(row, 3);
     valueCell.value = cell;
     valueCell.numFmt = fmt;
+    valueCell.font = { bold };
     valueCell.alignment = { horizontal: "left" };
   };
-  put(7, "Totaal waarde vorige telling", { formula: sumFormula(11), result: rowsOf(11) }, CURRENCY_FORMAT);
-  put(8, "Totaal bedrag getelde artikelen", { formula: sumFormula(afterLocationsCol + 2), result: rowsOf(afterLocationsCol + 2) }, CURRENCY_FORMAT);
-  put(9, "Totaal verschil bedrag", { formula: sumFormula(afterLocationsCol + 3), result: rowsOf(afterLocationsCol + 3) }, CURRENCY_DIFF_FORMAT);
-  if (snapshotTotalCell) {
-    const sheetRef = `'${snapshot.sessionName.replace(/'/g, "''")}'!${snapshotTotalCell}`;
-    put(10, "Totale voorraadwaarde (alle artikelen)", { formula: sheetRef, result: Math.round(total * 100) / 100 }, CURRENCY_FORMAT);
-    sheet.getCell(11, 2).value = `Zie tabblad "${snapshot.sessionName}" voor de volledige, bevroren telling.`;
-    sheet.getCell(11, 2).font = { italic: true };
+  const ref = (cell: string) => `'${snapshot.sessionName.replace(/'/g, "''")}'!${cell}`;
+  // Totale voorraadwaarde: zonder verwijzing naar het tellingtabblad is de som van de kolom Bedrag (die ook de
+  // overgenomen artikelen bevat) hetzelfde getal.
+  put(
+    7,
+    "TOTALE VOORRAADWAARDE (alle artikelen)",
+    named.totalValueCell
+      ? { formula: ref(named.totalValueCell), result: round2(total) }
+      : { formula: sumFormula(afterLocationsCol + 2), result: rowsOf(afterLocationsCol + 2) },
+    CURRENCY_FORMAT,
+    true,
+  );
+  if (named.obsoleteValueCell && named.normalValueCell) {
+    put(8, "waarvan obsolete stock", { formula: ref(named.obsoleteValueCell), result: round2(obsolete) }, CURRENCY_FORMAT);
+    put(9, "waarvan normale voorraad", { formula: ref(named.normalValueCell), result: round2(total - obsolete) }, CURRENCY_FORMAT);
   }
+  put(10, "Totaal waarde vorige telling", { formula: sumFormula(11), result: rowsOf(11) }, CURRENCY_FORMAT);
+  put(11, "Totaal verschil bedrag", { formula: sumFormula(afterLocationsCol + 3), result: rowsOf(afterLocationsCol + 3) }, CURRENCY_DIFF_FORMAT);
+  sheet.getCell(12, 2).value = `Bedragen: zie ook tabblad "${snapshot.sessionName}" (volledige, bevroren telling). De kolom Bedrag telt overgenomen artikelen mee (grijs).`;
+  sheet.getCell(12, 2).font = { italic: true };
 }
 
 /**
@@ -371,6 +390,15 @@ function writeTellingRow(
   row.getCell(afterLocationsCol + 1).numFmt = QUANTITY_DIFF_FORMAT;
   row.getCell(afterLocationsCol + 2).value = result ? result.amount : null;
   row.getCell(afterLocationsCol + 2).numFmt = CURRENCY_FORMAT;
+  // Artikelen die in deze telling NIET (volledig) geteld zijn (bv. obsolete stock buiten scope) tellen toch mee
+  // in de voorraadwaarde: hun Bedrag = de overgenomen waarde (= "Waarde vorige telling"). Zo is de som van
+  // de kolom Bedrag de TOTALE voorraadwaarde. Cursief/grijs ter onderscheid van effectief getelde artikelen.
+  const notCounted = !result || !result.fullyCounted;
+  if (notCounted && previousValue !== null) {
+    const carriedCell = row.getCell(afterLocationsCol + 2);
+    carriedCell.value = { formula: `K${row.number}`, result: previousValue };
+    carriedCell.font = { italic: true, color: { argb: "FF7F7F7F" } };
+  }
   row.getCell(afterLocationsCol + 3).value = result ? result.differenceAmount : null;
   row.getCell(afterLocationsCol + 3).numFmt = CURRENCY_DIFF_FORMAT;
   row.getCell(afterLocationsCol + 4).value = result ? result.differenceQuantity : null;
@@ -777,9 +805,17 @@ function widthsForHeader(headerNames: unknown[]): number[] {
 
 const WAARDE_VORIGE_HEADER = "Waarde vorige telling";
 const WAARDE_NIEUWE_HEADER = "Waarde nieuwe telling";
+const CLASSIFICATION_HEADER = "Voorraadclassificatie";
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const roundCents = (v: number) => Math.round(v * 1e6) / 1e6;
+
+interface SnapshotTableCells {
+  totalValueCell: string | null;
+  obsoleteValueCell: string | null;
+  normalValueCell: string | null;
+}
+const NO_CELLS: SnapshotTableCells = { totalValueCell: null, obsoleteValueCell: null, normalValueCell: null };
 
 /**
  * Schrijft een tellingtabel (benoemd tellingtabblad) met ECHTE formules in plaats van enkel waarden:
@@ -795,7 +831,8 @@ const roundCents = (v: number) => Math.round(v * 1e6) / 1e6;
 function writeSnapshotTable(
   sheet: ExcelJS.Worksheet,
   rows: unknown[][],
-): { totalValueCell: string | null } {
+  classificationByArticleNumber?: ReadonlyMap<string, string>,
+): SnapshotTableCells {
   const [header, ...dataRows] = rows;
   const names = (header as unknown[]).map((h) => (typeof h === "string" ? h : ""));
   const idx = (name: string) => names.indexOf(name);
@@ -809,17 +846,23 @@ function writeSnapshotTable(
 
   let wpIdx = idx(WAARDE_VORIGE_HEADER);
   let wnIdx = idx(WAARDE_NIEUWE_HEADER);
-  let tableWidth = Math.max(statusIdx, wpIdx, wnIdx, hasCore ? Math.max(prevIdx, costIdx, newIdx, dqIdx, daIdx) : -1) + 1;
+  let tableWidth = Math.max(statusIdx, wpIdx, wnIdx, idx(CLASSIFICATION_HEADER), hasCore ? Math.max(prevIdx, costIdx, newIdx, dqIdx, daIdx) : -1) + 1;
   if (tableWidth <= 0) tableWidth = (header as unknown[]).length;
   if (hasCore) {
     if (wpIdx < 0) wpIdx = tableWidth++;
     if (wnIdx < 0) wnIdx = tableWidth++;
   }
+  // "Voorraadclassificatie" (Normale voorraad / Obsolete): bestaat al in een eerder geschreven tabblad, of wordt
+  // voor het nieuwe tabblad uit de bevroren snapshot toegevoegd. Zonder die kolom (oude/geïmporteerde tabs) geen obsolete-split.
+  let clsIdx = idx(CLASSIFICATION_HEADER);
+  const appendClassification = hasCore && clsIdx < 0 && classificationByArticleNumber !== undefined;
+  if (appendClassification) clsIdx = tableWidth++;
 
   const headerValues = Array.from({ length: tableWidth }, (_, i) => (header as unknown[])[i] ?? null);
   if (hasCore) {
     headerValues[wpIdx] = WAARDE_VORIGE_HEADER;
     headerValues[wnIdx] = WAARDE_NIEUWE_HEADER;
+    if (clsIdx >= 0) headerValues[clsIdx] = CLASSIFICATION_HEADER;
   }
   setColumnWidths(sheet, widthsForHeader(headerValues));
   const headerRow = sheet.addRow(headerValues);
@@ -827,7 +870,7 @@ function writeSnapshotTable(
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   if (!hasCore) {
     dataRows.forEach((rowValues) => sheet.addRow(rowValues));
-    return { totalValueCell: null };
+    return NO_CELLS;
   }
 
   const letter = (zeroBased: number) => sheet.getColumn(zeroBased + 1).letter;
@@ -842,6 +885,7 @@ function writeSnapshotTable(
   dataRows.forEach((raw, i) => {
     const excelRow = i + 2;
     const values = Array.from({ length: tableWidth }, (_, c) => raw[c] ?? null);
+    if (appendClassification) values[clsIdx] = classificationByArticleNumber!.get(String(raw[0] ?? "")) ?? null;
     const row = sheet.addRow(values);
     const prev = raw[prevIdx];
     const cost = raw[costIdx];
@@ -916,6 +960,28 @@ function writeSnapshotTable(
   if (daIdx >= 0) {
     lines.push({ label: "Totaal verschil bedrag", formula: sum(daIdx), result: totalOf(daIdx), fmt: CURRENCY_DIFF_FORMAT });
   }
+  if (clsIdx >= 0) {
+    const cls = `${letter(clsIdx)}2:${letter(clsIdx)}${last}`;
+    const wnRange = `${letter(wnIdx)}2:${letter(wnIdx)}${last}`;
+    const obsolete = roundCents(
+      dataRows.reduce((acc: number, r) => {
+        const isObs = (appendClassification ? classificationByArticleNumber!.get(String(r[0] ?? "")) : r[clsIdx]) === OBSOLETE_LABEL;
+        return acc + (isObs && isNum(r[newIdx]) && isNum(r[costIdx]) ? (r[newIdx] as number) * (r[costIdx] as number) : 0);
+      }, 0),
+    );
+    lines.push({
+      label: "waarvan obsolete stock",
+      formula: `SUMIF(${cls},"${OBSOLETE_LABEL}",${wnRange})`,
+      result: obsolete,
+      fmt: CURRENCY_FORMAT,
+    });
+    lines.push({
+      label: "waarvan normale voorraad",
+      formula: `SUMIF(${cls},"<>${OBSOLETE_LABEL}",${wnRange})`,
+      result: roundCents(totalValue - obsolete),
+      fmt: CURRENCY_FORMAT,
+    });
+  }
   lines.push({
     label: "Aantal artikelen",
     formula: `COUNTA(${letter(0)}2:${letter(0)}${last})`,
@@ -934,18 +1000,26 @@ function writeSnapshotTable(
     valueCell.numFmt = line.fmt;
     valueCell.font = { bold: i === 0 };
   });
-  return { totalValueCell: `${letter(valueCol - 1)}2` };
+  const valueLetter = letter(valueCol - 1);
+  return {
+    totalValueCell: `${valueLetter}2`,
+    obsoleteValueCell: clsIdx >= 0 ? `${valueLetter}${2 + lines.findIndex((l) => l.label === "waarvan obsolete stock")}` : null,
+    normalValueCell: clsIdx >= 0 ? `${valueLetter}${2 + lines.findIndex((l) => l.label === "waarvan normale voorraad")}` : null,
+  };
 }
 
 function buildNamedSnapshotSheet(
   workbook: ExcelJS.Workbook,
   sheetName: string,
   rows: unknown[][],
-): { totalValueCell: string | null } {
+  classificationByArticleNumber?: ReadonlyMap<string, string>,
+): SnapshotTableCells {
   const sheet = workbook.addWorksheet(sheetName);
-  if (rows.length === 0) return { totalValueCell: null };
-  return writeSnapshotTable(sheet, rows);
+  if (rows.length === 0) return NO_CELLS;
+  return writeSnapshotTable(sheet, rows, classificationByArticleNumber);
 }
+
+const OBSOLETE_LABEL = STOCK_CLASSIFICATION_LABELS.OBSOLETE;
 
 /**
  * HISTORIE — de machinevriendelijke, ever-groeiende telhistoriek: één regel
