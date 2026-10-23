@@ -296,7 +296,15 @@ function addTellingTotals(
     put(8, "waarvan obsolete stock", { formula: ref(named.obsoleteValueCell), result: round2(obsolete) }, CURRENCY_FORMAT);
     put(9, "waarvan normale voorraad", { formula: ref(named.normalValueCell), result: round2(total - obsolete) }, CURRENCY_FORMAT);
   }
-  put(10, "Totaal waarde vorige telling", { formula: sumFormula(11), result: rowsOf(11) }, CURRENCY_FORMAT);
+  // Vorige waarde = de BEVROREN waarden van de snapshot (niet de levende kolom K, die na de telling kan
+  // wijzigen). Zo geldt altijd: totale voorraadwaarde - vorige waarde = totaal verschil bedrag.
+  const frozenPrevious = round2(snapshot.articles.reduce((acc, a) => acc + (a.previousValue ?? 0), 0));
+  put(
+    10,
+    "Totaal waarde vorige telling",
+    named.previousValueCell ? { formula: ref(named.previousValueCell), result: frozenPrevious } : { formula: sumFormula(11), result: rowsOf(11) },
+    CURRENCY_FORMAT,
+  );
   put(11, "Totaal verschil bedrag", { formula: sumFormula(afterLocationsCol + 3), result: rowsOf(afterLocationsCol + 3) }, CURRENCY_DIFF_FORMAT);
   sheet.getCell(12, 2).value = `Bedragen: zie ook tabblad "${snapshot.sessionName}" (volledige, bevroren telling). De kolom Bedrag telt overgenomen artikelen mee (grijs).`;
   sheet.getCell(12, 2).font = { italic: true };
@@ -822,10 +830,11 @@ const roundCents = (v: number) => Math.round(v * 1e6) / 1e6;
 
 interface SnapshotTableCells {
   totalValueCell: string | null;
+  previousValueCell: string | null;
   obsoleteValueCell: string | null;
   normalValueCell: string | null;
 }
-const NO_CELLS: SnapshotTableCells = { totalValueCell: null, obsoleteValueCell: null, normalValueCell: null };
+const NO_CELLS: SnapshotTableCells = { totalValueCell: null, previousValueCell: null, obsoleteValueCell: null, normalValueCell: null };
 
 /**
  * Schrijft een tellingtabel (benoemd tellingtabblad) met ECHTE formules in plaats van enkel waarden:
@@ -1013,6 +1022,7 @@ function writeSnapshotTable(
   const valueLetter = letter(valueCol - 1);
   return {
     totalValueCell: `${valueLetter}2`,
+    previousValueCell: `${valueLetter}3`,
     obsoleteValueCell: clsIdx >= 0 ? `${valueLetter}${2 + lines.findIndex((l) => l.label === "waarvan obsolete stock")}` : null,
     normalValueCell: clsIdx >= 0 ? `${valueLetter}${2 + lines.findIndex((l) => l.label === "waarvan normale voorraad")}` : null,
   };

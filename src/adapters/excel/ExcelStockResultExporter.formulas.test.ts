@@ -104,7 +104,7 @@ describe("Excel-export: formules en totale stockwaarde", () => {
     expect(sheet["C8"]!.v).toBe(15);
     expect(sheet["B9"]!.v).toBe("waarvan normale voorraad");
     expect(sheet["C9"]!.v).toBe(14);
-    expect(sheet["C10"]!.f).toMatch(/^SUM\(K15:K16\)/);
+    expect(sheet["C10"]!.f).toContain("'2026-09 Maand'!");
     // Bedrag bevat ook de NIET geteld overgenomen artikelen: de som van de kolom is de totale voorraadwaarde.
     const tellingRows = rowsOf(sheet);
     const headerRowIdx = tellingRows.findIndex((r) => r.includes("Artikelnr."));
