@@ -114,11 +114,20 @@ export class ExcelStockResultExporter implements StockResultExporter {
     // al afgeronde sessie), dan hergebruiken we die exact bevroren rijen in
     // plaats van ze te herberekenen — zie `StockResultExportInput.frozenSnapshotRows`.
     const namedSheetRows = input.frozenSnapshotRows ?? buildNamedSnapshotSheetRows(snapshot, exportLocations);
-    const classificationByNumber = new Map(
-      snapshot.articles.map((a) => [a.article.articleNumber, STOCK_CLASSIFICATION_LABELS[getStockClassification(a.article)]]),
-    );
+    // Classificatie: de LEVENDE artikelstamdata wint (een oudere, bevroren snapshot kan van vóór de
+    // obsolete-markering dateren); OBSOLETE in één van beide bronnen telt als obsolete.
+    const classificationByNumber = new Map<string, string>();
+    for (const a of snapshot.articles) {
+      classificationByNumber.set(a.article.articleNumber, STOCK_CLASSIFICATION_LABELS[getStockClassification(a.article)]);
+    }
+    for (const a of allArticles) {
+      const live = getStockClassification(a);
+      if (live === "OBSOLETE" || !classificationByNumber.has(a.articleNumber)) {
+        classificationByNumber.set(a.articleNumber, STOCK_CLASSIFICATION_LABELS[live]);
+      }
+    }
     const named = buildNamedSnapshotSheet(workbook, snapshot.sessionName, namedSheetRows, classificationByNumber);
-    addTellingTotals(workbook, snapshot, exportLocations.length, sortedArticles.length, named);
+    addTellingTotals(workbook, snapshot, exportLocations.length, sortedArticles.length, named, classificationByNumber);
 
     const data = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 
@@ -236,6 +245,7 @@ function addTellingTotals(
   locationCount: number,
   articleCount: number,
   named: SnapshotTableCells,
+  classificationByNumber: ReadonlyMap<string, string>,
 ): void {
   const sheet = workbook.getWorksheet("TELLING");
   if (!sheet || articleCount === 0) return;
@@ -256,7 +266,7 @@ function addTellingTotals(
   const valueOf = (a: ArticleSnapshot) => a.amount ?? 0;
   const total = snapshot.articles.reduce((acc, a) => acc + valueOf(a), 0);
   const obsolete = snapshot.articles
-    .filter((a) => getStockClassification(a.article) === "OBSOLETE")
+    .filter((a) => classificationByNumber.get(a.article.articleNumber) === OBSOLETE_LABEL)
     .reduce((acc, a) => acc + valueOf(a), 0);
   const round2 = (v: number) => Math.round(v * 100) / 100;
 
