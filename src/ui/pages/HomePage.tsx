@@ -14,6 +14,7 @@ import {
 } from "../hooks/useLiveData";
 import { SESSION_TYPE_LABELS, SESSION_TYPE_NOUN_LOWER } from "../sessionTypeLabels";
 import { formatDate } from "../../shared/format";
+import type { CountSession } from "../../domain/types";
 
 interface HomePageProps {
   officeId: string;
@@ -35,6 +36,34 @@ interface HomePageProps {
   onOpenLegacySnapshot?: (legacySnapshotId: string) => void;
   /** Annuleert de meegegeven (ACTIVE) sessie — sessielogica-fix. */
   onCancelSession: (sessionId: string) => Promise<void>;
+  /** Heractiveert een per ongeluk geannuleerde telling (alleen mogelijk zonder lopende telling). */
+  onReopenSession?: (sessionId: string) => Promise<void>;
+}
+
+function CancelledSessionRow({
+  session,
+  onReopen,
+  busy,
+}: {
+  session: CountSession;
+  onReopen: () => void;
+  busy: boolean;
+}) {
+  const entries = useCountEntries(session.id) ?? [];
+  return (
+    <div className="session-history-item">
+      <span className="stack stack--tight" style={{ gap: 2 }}>
+        <span>{SESSION_TYPE_LABELS[session.type] ?? session.type}</span>
+        <span className="screen-subtitle" style={{ margin: 0 }}>
+          Gestart {formatDate(session.startedAt)}
+          {session.cancelledAt ? ` · geannuleerd ${formatDate(session.cancelledAt)}` : ""} · {entries.length} invoeren
+        </span>
+      </span>
+      <BigButton variant="secondary" onClick={onReopen} disabled={busy}>
+        Heractiveren
+      </BigButton>
+    </div>
+  );
 }
 
 /** Welk dialoogscherm (indien enig) momenteel getoond wordt bij "Nieuwe telling" op een bezet kantoor. */
@@ -51,6 +80,7 @@ export function HomePage({
   onOpenReview,
   onOpenLegacySnapshot,
   onCancelSession,
+  onReopenSession,
 }: HomePageProps) {
   const office = useOffice(officeId);
   const allOffices = useAllOffices() ?? [];
@@ -58,6 +88,10 @@ export function HomePage({
   const activeEntries = useCountEntries(activeSession?.id) ?? [];
   const allSessions = useSessionsForOffice(officeId);
   const completedSessions = allSessions.filter((s) => s.status === "COMPLETED");
+  // Geannuleerde tellingen (de aantallen blijven bewaard): enkel heractiveerbaar als er geen lopende telling is.
+  const cancelledSessions = allSessions.filter((s) => s.status === "CANCELLED");
+  const [reopeningId, setReopeningId] = useState<string | null>(null);
+  const [reopenError, setReopenError] = useState<string | null>(null);
   // Echte app-tellingen + legacy historische snapshots in één chronologische lijst (nieuwste eerst).
   const legacySnapshots = useLegacySnapshots(officeId) ?? [];
   const previousCounts = useMemo(
@@ -287,6 +321,33 @@ export function HomePage({
                 ),
               )}
             </div>
+          </details>
+        </div>
+      )}
+
+      {!activeSession && onReopenSession && cancelledSessions.length > 0 && (
+        <div className="stack stack--tight">
+          <details className="session-history-collapsible">
+            <summary className="screen-subtitle session-history-collapsible__summary" style={{ margin: 0 }}>
+              Geannuleerde tellingen ({cancelledSessions.length})
+            </summary>
+            <div className="session-history">
+              {cancelledSessions.map((s) => (
+                <CancelledSessionRow
+                  key={s.id}
+                  session={s}
+                  busy={reopeningId !== null}
+                  onReopen={() => {
+                    setReopenError(null);
+                    setReopeningId(s.id);
+                    onReopenSession(s.id)
+                      .catch((err) => setReopenError(err instanceof Error ? err.message : "Heractiveren mislukt."))
+                      .finally(() => setReopeningId(null));
+                  }}
+                />
+              ))}
+            </div>
+            {reopenError && <div className="error-banner">{reopenError}</div>}
           </details>
         </div>
       )}

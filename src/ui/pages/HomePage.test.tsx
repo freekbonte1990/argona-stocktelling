@@ -84,6 +84,33 @@ async function waitUntilOfficeLoaded() {
   });
 }
 
+describe("HomePage — geannuleerde telling heractiveren", () => {
+  it("toont geannuleerde tellingen en roept onReopenSession aan met het juiste sessieId", async () => {
+    const user = userEvent.setup();
+    const onReopenSession = vi.fn().mockResolvedValue(undefined);
+    const session = await countSessionService.startSession("office-1", "MONTHLY");
+    await countSessionService.cancelSession(session.id);
+    renderHomePage({ onReopenSession });
+    await waitUntilOfficeLoaded();
+
+    await user.click(await screen.findByText(/Geannuleerde tellingen \(1\)/));
+    await user.click(await screen.findByText("Heractiveren"));
+
+    await waitFor(() => expect(onReopenSession).toHaveBeenCalledWith(session.id));
+  });
+
+  it("toont het blok niet wanneer er een lopende telling is", async () => {
+    const first = await countSessionService.startSession("office-1", "MONTHLY");
+    await countSessionService.cancelSession(first.id);
+    await countSessionService.startSession("office-1", "MONTHLY");
+    renderHomePage({ onReopenSession: async () => {} });
+    await waitUntilOfficeLoaded();
+
+    expect(await screen.findByText("Lopende telling")).toBeInTheDocument();
+    expect(screen.queryByText(/Geannuleerde tellingen/)).not.toBeInTheDocument();
+  });
+});
+
 describe("HomePage — sessielogica-fix", () => {
   it("toont geen 'Lopende telling'-blok wanneer er geen actieve sessie is, en 'Nieuwe telling' navigeert meteen", async () => {
     const user = userEvent.setup();

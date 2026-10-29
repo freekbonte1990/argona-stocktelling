@@ -92,6 +92,14 @@ export class InMemoryCountingRepository implements CountingRepository {
       session.cancelReason = reason;
     }
   }
+  async reopenSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.status = "ACTIVE";
+      session.cancelledAt = null;
+      session.cancelReason = null;
+    }
+  }
 
   private finalizedSessionResults = new Map<string, FinalizedSessionResult>();
   /**

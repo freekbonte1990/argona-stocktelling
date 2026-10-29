@@ -190,6 +190,35 @@ describe("CountSessionService", () => {
     expect(firstEntries[0].sessionId).toBe(first.id);
   });
 
+  it("reopenSession zet een geannuleerde sessie terug op ACTIVE en behoudt de ingevoerde aantallen", async () => {
+    const session = await sessionService.startSession("office-1", "MONTHLY");
+    await countingService.recordCount({
+      session,
+      articleId: "office-1:M1",
+      locationId: office.locations[0].id,
+      quantity: 7,
+    });
+    await sessionService.cancelSession(session.id);
+    await sessionService.reopenSession(session.id);
+
+    const reopened = await repository.getSession(session.id);
+    expect(reopened?.status).toBe("ACTIVE");
+    expect(reopened?.cancelledAt ?? null).toBeNull();
+    expect((await repository.getActiveSession("office-1"))?.id).toBe(session.id);
+    const entries = await repository.getCountEntries(session.id);
+    expect(entries.some((e) => e.counted && e.quantity === 7)).toBe(true);
+  });
+
+  it("reopenSession weigert wanneer er al een andere actieve telling loopt, of de sessie niet geannuleerd is", async () => {
+    const first = await sessionService.startSession("office-1", "MONTHLY");
+    await sessionService.cancelSession(first.id);
+    const second = await sessionService.startSession("office-1", "MONTHLY");
+
+    await expect(sessionService.reopenSession(first.id)).rejects.toThrow(ActiveSessionExistsError);
+    expect((await repository.getSession(first.id))?.status).toBe("CANCELLED");
+    await expect(sessionService.reopenSession(second.id)).rejects.toThrow(/geannuleerde/);
+  });
+
   it("cancelSession op een niet-actieve sessie gooit SessionNotActiveError", async () => {
     const session = await sessionService.startSession("office-1", "MONTHLY");
     await sessionService.cancelSession(session.id);

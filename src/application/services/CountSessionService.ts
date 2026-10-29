@@ -402,6 +402,26 @@ export class CountSessionService {
     await this.repository.cancelSession(sessionId, reason ?? null);
   }
 
+  /**
+   * Heractiveert een per ongeluk geannuleerde sessie: enkel CANCELLED -> ACTIVE, en enkel wanneer het
+   * kantoor geen andere actieve sessie heeft ("één actieve sessie per kantoor"). De ingevoerde
+   * CountEntries zijn bij annuleren nooit verwijderd, dus de telling is meteen volledig terug.
+   */
+  async reopenSession(sessionId: string): Promise<void> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Sessie ${sessionId} niet gevonden.`);
+    }
+    if (session.status !== "CANCELLED") {
+      throw new Error(`Sessie ${sessionId} heeft status ${session.status}; enkel een geannuleerde telling kan heractiveerd worden.`);
+    }
+    const active = await this.repository.getActiveSession(session.officeId);
+    if (active) {
+      throw new ActiveSessionExistsError(active);
+    }
+    await this.repository.reopenSession(sessionId);
+  }
+
   /** Alle sessies van een kantoor, nieuwste eerst — voor het raadplegen van afgeronde tellingen. */
   async getSessionsForOffice(officeId: string): Promise<CountSession[]> {
     return this.repository.getSessionsForOffice(officeId);

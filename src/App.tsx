@@ -462,6 +462,7 @@ function RouteBody({
             onNavigate({ screen: "legacySnapshot", officeId: route.officeId, snapshotId })
           }
           onCancelSession={(sessionId) => countSessionService.cancelSession(sessionId)}
+          onReopenSession={(sessionId) => countSessionService.reopenSession(sessionId)}
         />
       );
     case "newSession":

@@ -237,6 +237,10 @@ export class IndexedDbCountingRepository implements CountingRepository {
     });
   }
 
+  async reopenSession(sessionId: string): Promise<void> {
+    await this.db.sessions.update(sessionId, { status: "ACTIVE", cancelledAt: null, cancelReason: null });
+  }
+
   async saveCountEntry(entry: CountEntry): Promise<void> {
     await this.db.countEntries.put(entry);
   }

@@ -210,6 +210,11 @@ export interface CountingRepository {
    * sessie meer.
    */
   cancelSession(sessionId: string, reason?: string | null): Promise<void>;
+  /**
+   * Zet een CANCELLED sessie terug op ACTIVE (per ongeluk geannuleerd). Wist `cancelledAt`/`cancelReason`;
+   * de CountEntries zijn nooit verwijderd. Geen validatie hier — dat doet CountSessionService.
+   */
+  reopenSession(sessionId: string): Promise<void>;
 
   saveCountEntry(entry: CountEntry): Promise<void>;
   saveCountEntries(entries: CountEntry[]): Promise<void>;
