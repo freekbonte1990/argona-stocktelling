@@ -49,7 +49,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+
+/**
+ * Supabase als bron (zodra SUPABASE_URL + SUPABASE_ANON_KEY als omgevingsvariabelen staan). Geeft `null` bij
+ * "niet geconfigureerd", "niet gevonden" of elke fout — de aanroeper valt dan terug op de bestanden.
+ */
+async function readFromSupabase(kind: "master", officeId: string): Promise<string | null> {
+  const base = process.env.SUPABASE_URL?.replace(/\/+$/, "");
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!base || !key) return null;
+  try {
+    const params = new URLSearchParams({ kind: `eq.${kind}`, office_id: `eq.${officeId}`, select: "payload" });
+    const response = await fetch(`${base}/rest/v1/central_files?${params.toString()}`, {
+      headers: { apikey: key },
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as Array<{ payload: unknown }>;
+    return rows.length > 0 ? JSON.stringify(rows[0].payload) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Kantorenlijst uit Supabase (kolom `meta`, zonder de volledige bestanden op te halen); `null` → bestanden. */
+async function officeIndexFromSupabase(): Promise<Response | null> {
+  const base = process.env.SUPABASE_URL?.replace(/\/+$/, "");
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!base || !key) return null;
+  try {
+    const params = new URLSearchParams({ kind: "eq.master", select: "office_id,meta" });
+    const response = await fetch(`${base}/rest/v1/central_files?${params.toString()}`, {
+      headers: { apikey: key },
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as Array<{ office_id: string; meta: Record<string, unknown> }>;
+    const offices: Array<{ id: string; name: string; revision: string; generatedAt: string; articleCount: number }> = [];
+    for (const row of rows) {
+      const { name, revision, generatedAt, articleCount } = row.meta ?? {};
+      if (!OFFICE_ID_PATTERN.test(row.office_id)) continue;
+      if (typeof name !== "string" || typeof revision !== "string" || typeof generatedAt !== "string") continue;
+      offices.push({ id: row.office_id, name, revision, generatedAt, articleCount: typeof articleCount === "number" ? articleCount : 0 });
+    }
+    if (offices.length === 0) return null;
+    offices.sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    return json(200, { schemaVersion: SCHEMA_VERSION, offices });
+  } catch {
+    return null;
+  }
+}
+
 async function officeIndex(): Promise<Response> {
+  const fromSupabase = await officeIndexFromSupabase();
+  if (fromSupabase) return fromSupabase;
   const dir = dataDirectory();
   let names: string[] = [];
   try {
@@ -91,10 +142,15 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   let raw: string;
-  try {
-    raw = await readFile(join(dataDirectory(), `${officeId}.json`), "utf8");
-  } catch {
-    return json(404, { error: "Geen centrale masterdata voor dit kantoor." });
+  const fromSupabase = await readFromSupabase("master", officeId);
+  if (fromSupabase !== null) {
+    raw = fromSupabase;
+  } else {
+    try {
+      raw = await readFile(join(dataDirectory(), `${officeId}.json`), "utf8");
+    } catch {
+      return json(404, { error: "Geen centrale masterdata voor dit kantoor." });
+    }
   }
 
   let revision = "";

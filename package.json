@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "publish-central-history": "tsx scripts/publish-central-history.ts",
     "publish-central-master": "tsx scripts/publish-central-master.ts",
-    "apply-central-corrections": "tsx scripts/apply-central-corrections.ts"
+    "apply-central-corrections": "tsx scripts/apply-central-corrections.ts",
+    "migrate-central-to-supabase": "tsx scripts/migrate-central-to-supabase.ts"
   },
   "dependencies": {
     "dexie": "^4.4.6",

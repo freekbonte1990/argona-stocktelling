@@ -31,6 +31,28 @@ function json(status: number, body: unknown, extraHeaders: Record<string, string
   });
 }
 
+
+/**
+ * Supabase als bron (zodra SUPABASE_URL + SUPABASE_ANON_KEY als omgevingsvariabelen staan). Geeft `null` bij
+ * "niet geconfigureerd", "niet gevonden" of elke fout — de aanroeper valt dan terug op de bestanden.
+ */
+async function readFromSupabase(kind: "history", officeId: string): Promise<string | null> {
+  const base = process.env.SUPABASE_URL?.replace(/\/+$/, "");
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!base || !key) return null;
+  try {
+    const params = new URLSearchParams({ kind: `eq.${kind}`, office_id: `eq.${officeId}`, select: "payload" });
+    const response = await fetch(`${base}/rest/v1/central_files?${params.toString()}`, {
+      headers: { apikey: key },
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as Array<{ payload: unknown }>;
+    return rows.length > 0 ? JSON.stringify(rows[0].payload) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: Request): Promise<Response> {
   const officeId = new URL(request.url).searchParams.get("officeId") ?? "";
   // Strikte whitelist-vorm: voorkomt path traversal (`../`) naar andere bestanden.
@@ -40,10 +62,15 @@ export async function GET(request: Request): Promise<Response> {
 
   const dataDir = process.env.CENTRAL_HISTORY_DATA_DIR ?? join(process.cwd(), "central-history-data");
   let raw: string;
-  try {
-    raw = await readFile(join(dataDir, `${officeId}.json`), "utf8");
-  } catch {
-    return json(404, { error: "Geen centrale historiek voor dit kantoor." });
+  const fromSupabase = await readFromSupabase("history", officeId);
+  if (fromSupabase !== null) {
+    raw = fromSupabase;
+  } else {
+    try {
+      raw = await readFile(join(dataDir, `${officeId}.json`), "utf8");
+    } catch {
+      return json(404, { error: "Geen centrale historiek voor dit kantoor." });
+    }
   }
   return new Response(raw, {
     status: 200,
