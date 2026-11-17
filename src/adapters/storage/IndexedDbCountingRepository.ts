@@ -15,6 +15,8 @@ import type {
   FinalizeSessionInput,
   HistoricalSheetRecord,
   ImportMeta,
+  SyncedDocChange,
+  SyncStateRow,
 } from "../../application/ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
@@ -235,6 +237,79 @@ export class IndexedDbCountingRepository implements CountingRepository {
       cancelledAt: new Date().toISOString(),
       cancelReason: reason,
     });
+  }
+
+  async getSyncStates(officeId: string): Promise<SyncStateRow[]> {
+    return this.db.syncState.where("officeId").equals(officeId).toArray();
+  }
+
+  async saveSyncStates(rows: SyncStateRow[]): Promise<void> {
+    if (rows.length > 0) await this.db.syncState.bulkPut(rows);
+  }
+
+  async deleteSyncStates(ids: string[]): Promise<void> {
+    if (ids.length > 0) await this.db.syncState.bulkDelete(ids);
+  }
+
+  async applySyncedDocs(officeId: string, changes: SyncedDocChange[]): Promise<void> {
+    if (changes.length === 0) return;
+    await this.db.transaction(
+      "rw",
+      [
+        this.db.sessions,
+        this.db.countEntries,
+        this.db.locationSessionStatuses,
+        this.db.finalizedSessionResults,
+        this.db.stockHistoryEntries,
+        this.db.assignments,
+        this.db.articles,
+      ],
+      async () => {
+        for (const change of changes) {
+          const data = change.data as never;
+          switch (change.collection) {
+            case "session":
+              if (change.deleted) await this.db.sessions.delete(change.id);
+              else await this.db.sessions.put(data);
+              break;
+            case "entry":
+              if (change.deleted) await this.db.countEntries.delete(change.id);
+              else await this.db.countEntries.put(data);
+              break;
+            case "locStatus":
+              if (change.deleted) await this.db.locationSessionStatuses.delete(change.id);
+              else await this.db.locationSessionStatuses.put(data);
+              break;
+            case "finalized":
+              if (change.deleted) await this.db.finalizedSessionResults.delete(change.id);
+              else await this.db.finalizedSessionResults.put(data);
+              break;
+            case "history":
+              if (change.deleted) await this.db.stockHistoryEntries.delete(change.id);
+              else await this.db.stockHistoryEntries.put(data);
+              break;
+            case "assignment":
+              if (change.deleted) await this.db.assignments.delete(change.id);
+              else await this.db.assignments.put(data);
+              break;
+            case "article":
+              if (change.deleted) await this.db.articles.delete(change.id);
+              else await this.db.articles.put(data);
+              break;
+            case "prev": {
+              if (change.deleted || !change.data) break;
+              const map = change.data as Record<string, number | null>;
+              const articles = await this.db.articles.where("officeId").equals(officeId).toArray();
+              const updated = articles
+                .filter((a) => Object.prototype.hasOwnProperty.call(map, a.id) && a.previousCount !== map[a.id])
+                .map((a) => ({ ...a, previousCount: map[a.id] }));
+              if (updated.length > 0) await this.db.articles.bulkPut(updated);
+              break;
+            }
+          }
+        }
+      },
+    );
   }
 
   async reopenSession(sessionId: string): Promise<void> {

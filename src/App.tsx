@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppHeader } from "./ui/components/AppHeader";
+import { SyncStatusBar } from "./ui/components/SyncStatusBar";
 import { ImportPage } from "./ui/pages/ImportPage";
 import { BootstrapPage } from "./ui/pages/BootstrapPage";
 import { HomePage } from "./ui/pages/HomePage";
@@ -212,6 +213,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <RouteHeader route={route} onNavigate={setRoute} />
+      <SyncStatusBar />
       <main className="app-main">
         <RouteBody route={route} onNavigate={setRoute} />
       </main>

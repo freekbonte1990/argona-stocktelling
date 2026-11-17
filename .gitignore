@@ -27,3 +27,8 @@ test-fixtures
 *.sw?
 
 .vercel
+
+# Lokale omgevingsvariabelen (geheimen)
+.env
+.env.local
+.env.*.local

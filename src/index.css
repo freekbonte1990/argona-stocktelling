@@ -1659,3 +1659,23 @@ button {
 .advanced-settings > .stack {
   margin-top: var(--space-2);
 }
+
+/* Server-synchronisatie: statusbalk onder de header. */
+.sync-status {
+  padding: 4px var(--space-3);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.sync-status--ok {
+  background: #e6f4ea;
+  color: #14532d;
+}
+.sync-status--busy {
+  background: #eef2f7;
+  color: #334155;
+}
+.sync-status--warn {
+  background: #fef3c7;
+  color: #7c2d12;
+  font-weight: 600;
+}

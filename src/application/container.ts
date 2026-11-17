@@ -18,6 +18,8 @@ import { HttpCentralHistorySource } from "../adapters/centralHistory/HttpCentral
 import { CentralMasterSyncService } from "./services/CentralMasterSyncService";
 import { CentralDataSyncService } from "./services/CentralDataSyncService";
 import { HttpCentralMasterSource } from "../adapters/centralMaster/HttpCentralMasterSource";
+import { RemoteSyncService } from "./services/RemoteSyncService";
+import { createSupabaseRemoteStoreFromEnv } from "../adapters/remote/SupabaseRemoteStore";
 
 /**
  * Eenvoudige, handmatige dependency-"container" voor v0.1/v0.2: één
@@ -76,5 +78,16 @@ export const centralDataSyncService = new CentralDataSyncService(
   repository,
   centralMasterSyncService,
   centralHistorySyncService,
+);
+/**
+ * Server-opslag van tellingen (docs/SERVER_SYNC.md): elke telling, invoer en afronding wordt automatisch naar
+ * Supabase gesynchroniseerd, zodat niets alleen op één toestel staat. Zonder VITE_SUPABASE_URL/ANON_KEY blijft
+ * de app gewoon lokaal werken (status "uit").
+ */
+export const SERVER_SYNC_FROM = "2026-11-01T00:00:00.000Z";
+export const remoteSyncService = new RemoteSyncService(
+  repository,
+  createSupabaseRemoteStoreFromEnv(import.meta.env as Record<string, string | undefined>),
+  { syncFrom: SERVER_SYNC_FROM },
 );
 export const countingRepository = repository;

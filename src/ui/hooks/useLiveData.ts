@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import type { RemoteSyncService, SyncStatus } from "../../application/services/RemoteSyncService";
 import { db } from "../../adapters/storage/db";
 import { buildArticleHistory, mergeArticleHistory } from "../../domain/articleHistory";
 import { sessionSnapshotName } from "../../domain/stockSnapshot";
@@ -232,4 +234,14 @@ export function useLegacySnapshots(officeId: string | undefined) {
     [officeId],
     [],
   );
+}
+
+/** Live status van de server-synchronisatie (zie RemoteSyncService). */
+export function useSyncStatus(service: RemoteSyncService): SyncStatus {
+  const [status, setStatus] = useState<SyncStatus>(service.getStatus());
+  useEffect(() => {
+    setStatus(service.getStatus());
+    return service.subscribe(setStatus);
+  }, [service]);
+  return status;
 }

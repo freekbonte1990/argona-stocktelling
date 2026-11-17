@@ -15,6 +15,8 @@ import type {
   FinalizeSessionInput,
   HistoricalSheetRecord,
   ImportMeta,
+  SyncedDocChange,
+  SyncStateRow,
 } from "../ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
@@ -92,6 +94,59 @@ export class InMemoryCountingRepository implements CountingRepository {
       session.cancelReason = reason;
     }
   }
+  private syncStates = new Map<string, SyncStateRow>();
+  async getSyncStates(officeId: string): Promise<SyncStateRow[]> {
+    return Array.from(this.syncStates.values()).filter((r) => r.officeId === officeId);
+  }
+  async saveSyncStates(rows: SyncStateRow[]): Promise<void> {
+    for (const row of rows) this.syncStates.set(row.id, row);
+  }
+  async deleteSyncStates(ids: string[]): Promise<void> {
+    for (const id of ids) this.syncStates.delete(id);
+  }
+  async applySyncedDocs(officeId: string, changes: SyncedDocChange[]): Promise<void> {
+    for (const change of changes) {
+      const data = change.data as never;
+      const apply = <T,>(map: Map<string, T>, key: string) => {
+        if (change.deleted) map.delete(key);
+        else map.set(key, data as T);
+      };
+      switch (change.collection) {
+        case "session":
+          apply(this.sessions, change.id);
+          break;
+        case "entry":
+          apply(this.entries, change.id);
+          break;
+        case "locStatus":
+          apply(this.locationSessionStatuses, change.id);
+          break;
+        case "finalized":
+          apply(this.finalizedSessionResults, change.id);
+          break;
+        case "history":
+          apply(this.stockHistoryEntries, change.id);
+          break;
+        case "assignment":
+          apply(this.assignments, change.id);
+          break;
+        case "article":
+          apply(this.articles, change.id);
+          break;
+        case "prev": {
+          if (change.deleted || !change.data) break;
+          const map = change.data as Record<string, number | null>;
+          for (const a of this.articles.values()) {
+            if (a.officeId === officeId && Object.prototype.hasOwnProperty.call(map, a.id)) {
+              this.articles.set(a.id, { ...a, previousCount: map[a.id] });
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
   async reopenSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {

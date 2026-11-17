@@ -1,3 +1,4 @@
+import type { SyncCollection } from "./RemoteStore";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { CentralMasterApplyPlan, CentralMasterStatus } from "../../domain/centralMasterFile";
 import type { SessionReviewSummary } from "../../domain/review";
@@ -61,6 +62,20 @@ export interface FinalizedSessionResult {
  * bijgewerkte `previousCount`-baselines, en het verwijderen van de gecachete
  * Excel-sheet van deze sessie (die wordt bij de volgende export opnieuw opgebouwd).
  */
+export interface SyncStateRow {
+  /** `${officeId}|${collection}|${docId}`, of `${officeId}|cursor`. */
+  id: string;
+  officeId: string;
+  hash: string;
+}
+
+export interface SyncedDocChange {
+  collection: SyncCollection;
+  id: string;
+  deleted: boolean;
+  data: unknown | null;
+}
+
 export interface ApplySessionCorrectionInput {
   officeId: string;
   sessionId: string;
@@ -215,6 +230,13 @@ export interface CountingRepository {
    * de CountEntries zijn nooit verwijderd. Geen validatie hier — dat doet CountSessionService.
    */
   reopenSession(sessionId: string): Promise<void>;
+
+  /** Server-synchronisatie (zie RemoteSyncService): per document de laatst gesynchroniseerde hash + de pull-cursor. */
+  getSyncStates(officeId: string): Promise<SyncStateRow[]>;
+  saveSyncStates(rows: SyncStateRow[]): Promise<void>;
+  deleteSyncStates(ids: string[]): Promise<void>;
+  /** Past van de server binnengehaalde documenten in één transactie lokaal toe (upsert of verwijderen). */
+  applySyncedDocs(officeId: string, changes: SyncedDocChange[]): Promise<void>;
 
   saveCountEntry(entry: CountEntry): Promise<void>;
   saveCountEntries(entries: CountEntry[]): Promise<void>;

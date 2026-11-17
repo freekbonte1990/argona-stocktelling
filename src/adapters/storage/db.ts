@@ -12,6 +12,7 @@ import type {
   FinalizedSessionResult,
   HistoricalSheetRecord,
   ImportMeta,
+  SyncStateRow,
 } from "../../application/ports/CountingRepository";
 import type { CentralHistoryStatus } from "../../domain/centralHistoryFile";
 import type { CentralMasterStatus } from "../../domain/centralMasterFile";
@@ -38,6 +39,31 @@ export interface StockHistoryEntryRow extends StockHistoryEntry {
  * IndexedDB-schema (via Dexie). Dit is puur opslag: geen businesslogica.
  * Alle velden komen 1-op-1 overeen met de domeintypes in src/domain/types.ts.
  */
+/**
+ * "Er is iets lokaal gewijzigd"-melding voor de server-synchronisatie, via Dexie's eigen `storagemutated`-event
+ * (dat ook wijzigingen vanuit een ander tabblad meldt). Bewust GEEN tabelhooks: die verstoren de live queries.
+ * De melding doet zelf geen databasewerk; de sync-scheduler debounced en vergelijkt dan de lokale data met de
+ * laatst gesynchroniseerde hashes.
+ */
+const changeListeners = new Set<() => void>();
+let storageMutatedRegistered = false;
+function notifyLocalDataChanged(parts?: Record<string, unknown>): void {
+  // Wijzigingen die enkel de eigen sync-administratie raken (tabel syncState) zijn geen reden om opnieuw te synchroniseren.
+  if (parts) {
+    const keys = Object.keys(parts);
+    if (keys.length > 0 && keys.every((key) => key.includes("/syncState/"))) return;
+  }
+  for (const listener of changeListeners) listener();
+}
+export function onLocalDataChanged(listener: () => void): () => void {
+  if (!storageMutatedRegistered) {
+    storageMutatedRegistered = true;
+    Dexie.on("storagemutated", notifyLocalDataChanged);
+  }
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
 export class AppDatabase extends Dexie {
   offices!: Table<Office, string>;
   articles!: Table<Article, string>;
@@ -53,6 +79,7 @@ export class AppDatabase extends Dexie {
   productCategories!: Table<ProductCategory, string>;
   centralHistoryStatus!: Table<CentralHistoryStatus, string>;
   centralMasterStatus!: Table<CentralMasterStatus, string>;
+  syncState!: Table<SyncStateRow, string>;
 
   constructor(name = "argona-stocktelling") {
     super(name);
@@ -144,6 +171,12 @@ export class AppDatabase extends Dexie {
     this.version(10).stores({
       centralHistoryConfig: null,
     });
+    // v11 (server-synchronisatie): per document de laatst gesynchroniseerde hash + de pull-cursor per
+    // kantoor. Puur additief — één volledig NIEUWE tabel.
+    this.version(11).stores({
+      syncState: "id, officeId",
+    });
+
   }
 }
 
